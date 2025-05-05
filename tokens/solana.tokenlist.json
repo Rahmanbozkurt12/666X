@@ -1,0 +1,14 @@
+{
+  "name": "666X Meme Token",
+  "symbol": "666X",
+  "address": "GRbsDibyh7iJrkk18bm49qk7NhkUsAWh9hE3DKVmpump",
+  "decimals": 9,
+  "chainId": 101,
+  "logoURI": "https://raw.githubusercontent.com/Rahmanbozkurt12/666X/main/256x256%20logo.png",
+  "tags": ["meme"],
+  "extensions": {
+    "website": "https://x.com/666xofficial?s=21",
+    "twitter": "https://x.com/666xofficial?s=21",
+    "telegram": "https://t.me/+GzsQbi_64Ic5Mjg8"
+  }
+}
