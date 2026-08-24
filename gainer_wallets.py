@@ -38,7 +38,7 @@ KNOWN_CEX = {
     "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
     "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
     "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
-    "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b",
+    "0x0d0707963952f2fba59dd06f2b425ace40b492fe",  # gate.io hot
 }
 KNOWN_DEX = {
     "0x7a250d5630b4cf539739df2c5dacb4c659f2498d",
@@ -295,6 +295,8 @@ def analyze_early_buyers(
     min_early = max(50.0, 200.0 if price_usd < 1 else 20.0)
 
     for wallet, early_buy in wallet_early_in.items():
+        if wallet in KNOWN_CEX:
+            continue
         if early_buy < min_early:
             continue
         net = wallet_in[wallet] - wallet_out[wallet]
