@@ -1,0 +1,257 @@
+{
+  "generated_at": "2026-08-24T22:10:05.579742+00:00",
+  "gainers": [
+    {
+      "symbol": "PROM",
+      "change_pct": 29.906,
+      "quote_volume": 19335374.01591,
+      "last_price": 3.74
+    },
+    {
+      "symbol": "PORTAL",
+      "change_pct": 28.368,
+      "quote_volume": 14169462.459251,
+      "last_price": 0.01715
+    },
+    {
+      "symbol": "AMP",
+      "change_pct": 22.824,
+      "quote_volume": 6944413.524316,
+      "last_price": 0.000522
+    },
+    {
+      "symbol": "STORJ",
+      "change_pct": 16.507,
+      "quote_volume": 10382563.2267,
+      "last_price": 0.0487
+    },
+    {
+      "symbol": "ONG",
+      "change_pct": 13.977,
+      "quote_volume": 6815732.59659,
+      "last_price": 0.08179
+    }
+  ],
+  "early_wallets": [
+    {
+      "symbol": "AMP",
+      "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+      "early_buy": 1600390408.45,
+      "net_position": 1600390408.45,
+      "total_sold": 0.0,
+      "early_buy_usd": 835403.79,
+      "score": 403492250965.42,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xf977814e90da44bfa03b6295a0616a897441acec"
+    },
+    {
+      "symbol": "AMP",
+      "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+      "early_buy": 644067983.14,
+      "net_position": 559630530.71,
+      "total_sold": 642713065.35,
+      "early_buy_usd": 336203.49,
+      "score": 42433108094.07,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef"
+    },
+    {
+      "symbol": "AMP",
+      "address": "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43",
+      "early_buy": 225376349.5,
+      "net_position": 144753044.98,
+      "total_sold": 211684276.12,
+      "early_buy_usd": 117646.45,
+      "score": 5009272292.89,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43"
+    },
+    {
+      "symbol": "STORJ",
+      "address": "0x0d0707963952f2fba59dd06f2b425ace40b492fe",
+      "early_buy": 9629401.72,
+      "net_position": 11721338.9,
+      "total_sold": 1182365.17,
+      "early_buy_usd": 468951.86,
+      "score": 1285524419.85,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0x0d0707963952f2fba59dd06f2b425ace40b492fe"
+    },
+    {
+      "symbol": "AMP",
+      "address": "0x0c97305bd07fc582bcc2042b9a2dedd9f451e75b",
+      "early_buy": 56377689.0,
+      "net_position": 0,
+      "total_sold": 301162156.0,
+      "early_buy_usd": 29429.15,
+      "score": 1230979426.24,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0x0c97305bd07fc582bcc2042b9a2dedd9f451e75b"
+    },
+    {
+      "symbol": "AMP",
+      "address": "0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5",
+      "early_buy": 32431610.0,
+      "net_position": 0,
+      "total_sold": 517627008.0,
+      "early_buy_usd": 16929.3,
+      "score": 1206240068.27,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5"
+    },
+    {
+      "symbol": "PORTAL",
+      "address": "0xddcd71b4636244347a203f72a93581ea0e3f43d9",
+      "early_buy": 9207186.0,
+      "net_position": 0,
+      "total_sold": 22901748.0,
+      "early_buy_usd": 157903.24,
+      "score": 523064937.83,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xddcd71b4636244347a203f72a93581ea0e3f43d9"
+    },
+    {
+      "symbol": "PORTAL",
+      "address": "0xee845948e6806d12e966137caa07d49bbe632fe3",
+      "early_buy": 4706921.14,
+      "net_position": 0,
+      "total_sold": 14417451.09,
+      "early_buy_usd": 80723.7,
+      "score": 163941189.88,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xee845948e6806d12e966137caa07d49bbe632fe3"
+    },
+    {
+      "symbol": "PROM",
+      "address": "0xf3ec278a424150a114b0857ecdd5191ffa628c0a",
+      "early_buy": 368661.46,
+      "net_position": 368661.46,
+      "total_sold": 0.0,
+      "early_buy_usd": 1378793.84,
+      "score": 153045435.92,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xf3ec278a424150a114b0857ecdd5191ffa628c0a"
+    },
+    {
+      "symbol": "PORTAL",
+      "address": "0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5",
+      "early_buy": 3493365.4,
+      "net_position": 0.0,
+      "total_sold": 9407944.48,
+      "early_buy_usd": 59911.22,
+      "score": 83743971.95,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5"
+    },
+    {
+      "symbol": "STORJ",
+      "address": "0xe4aa002d49faf0e62b923c924aac54c25702332b",
+      "early_buy": 2286237.0,
+      "net_position": 2286237.0,
+      "total_sold": 0.0,
+      "early_buy_usd": 111339.74,
+      "score": 79794066.75,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xe4aa002d49faf0e62b923c924aac54c25702332b"
+    },
+    {
+      "symbol": "STORJ",
+      "address": "0x4a4aaa0155237881fbd5c34bfae16e985a7b068d",
+      "early_buy": 2362171.97,
+      "net_position": 2864327.84,
+      "total_sold": 509292.0,
+      "early_buy_usd": 115037.78,
+      "score": 76503848.85,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0x4a4aaa0155237881fbd5c34bfae16e985a7b068d"
+    },
+    {
+      "symbol": "PORTAL",
+      "address": "0xcde5d48fca07f9c52300d2e65632dd71ed169b90",
+      "early_buy": 2943526.49,
+      "net_position": 0.0,
+      "total_sold": 5887052.98,
+      "early_buy_usd": 50481.48,
+      "score": 48993361.2,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xcde5d48fca07f9c52300d2e65632dd71ed169b90"
+    },
+    {
+      "symbol": "PORTAL",
+      "address": "0xf42aac93ab142090db9fdc0bc86aab73cb36f173",
+      "early_buy": 3995747.03,
+      "net_position": 2249257.6,
+      "total_sold": 5314639.93,
+      "early_buy_usd": 68527.06,
+      "score": 46852605.05,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xf42aac93ab142090db9fdc0bc86aab73cb36f173"
+    },
+    {
+      "symbol": "STORJ",
+      "address": "0xab782bc7d4a2b306825de5a7730034f8f63ee1bc",
+      "early_buy": 1985548.16,
+      "net_position": 763180.75,
+      "total_sold": 1475614.41,
+      "early_buy_usd": 96696.2,
+      "score": 33958916.28,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xab782bc7d4a2b306825de5a7730034f8f63ee1bc"
+    },
+    {
+      "symbol": "STORJ",
+      "address": "0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5",
+      "early_buy": 1200073.51,
+      "net_position": 0,
+      "total_sold": 3912798.41,
+      "early_buy_usd": 58443.58,
+      "score": 32437889.84,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5"
+    },
+    {
+      "symbol": "PROM",
+      "address": "0x100163e73b7f2e7cb8d01d4cf4e9065a1eaa7e15",
+      "early_buy": 95734.32,
+      "net_position": 115556.6,
+      "total_sold": 0.0,
+      "early_buy_usd": 358046.37,
+      "score": 10426799.75,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0x100163e73b7f2e7cb8d01d4cf4e9065a1eaa7e15"
+    },
+    {
+      "symbol": "PROM",
+      "address": "0x0084dfd7202e5f5c0c8be83503a492837ca3e95e",
+      "early_buy": 59465.6,
+      "net_position": 0.0,
+      "total_sold": 59465.6,
+      "early_buy_usd": 222401.35,
+      "score": 1352255.86,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0x0084dfd7202e5f5c0c8be83503a492837ca3e95e"
+    },
+    {
+      "symbol": "PROM",
+      "address": "0x0d0707963952f2fba59dd06f2b425ace40b492fe",
+      "early_buy": 37363.85,
+      "net_position": 27022.42,
+      "total_sold": 34967.33,
+      "early_buy_usd": 139740.78,
+      "score": 1012301.97,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0x0d0707963952f2fba59dd06f2b425ace40b492fe"
+    },
+    {
+      "symbol": "PROM",
+      "address": "0xd5f5475502120ad0e3dbaa25ecedffd19d6569fa",
+      "early_buy": 24951.94,
+      "net_position": 0.0,
+      "total_sold": 71069.86,
+      "early_buy_usd": 93320.26,
+      "score": 944088.79,
+      "chain": "ethereum",
+      "explorer": "https://eth.blockscout.com/address/0xd5f5475502120ad0e3dbaa25ecedffd19d6569fa"
+    }
+  ]
+}
