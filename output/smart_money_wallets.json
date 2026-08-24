@@ -1,0 +1,448 @@
+{
+  "generated_at": "2026-08-24T22:43:14.125806+00:00",
+  "meta": {
+    "binance_symbols": 477,
+    "selected_symbols": [
+      "PROM",
+      "PORTAL",
+      "AMP",
+      "STORJ",
+      "LINK",
+      "UNI",
+      "AAVE",
+      "PEPE",
+      "SHIB",
+      "FET",
+      "CRV",
+      "LDO",
+      "ARB",
+      "AERO",
+      "VIRTUAL",
+      "COTI",
+      "UTK",
+      "MANA",
+      "SAND",
+      "GRT",
+      "IMX"
+    ],
+    "mapped_contracts": 21,
+    "hours": 48,
+    "min_transfer_usd": 1000.0,
+    "wallets_scored": 1000,
+    "noise_filter": {
+      "cex_hardcoded": 47,
+      "cex_from_csv": 372,
+      "dex_routers": 16,
+      "mev_bots": 8,
+      "protocols": 7
+    }
+  },
+  "top_wallets": [
+    {
+      "address": "0x1157a2076b9bb22a85cc2c162f20fab3898f4101",
+      "coin_count": 10,
+      "total_volume_usd": 6042246.31,
+      "score": 1.120557,
+      "coins": {
+        "LDO": 4288068.04,
+        "SAND": 615090.0,
+        "LINK": 403272.79,
+        "IMX": 287473.5,
+        "UNI": 285943.0,
+        "ARB": 99717.73,
+        "GRT": 26992.02,
+        "PEPE": 24362.28,
+        "AAVE": 6081.89,
+        "SHIB": 5245.06
+      },
+      "chains": [
+        "arbitrum-one",
+        "ethereum"
+      ],
+      "tx_count": 14
+    },
+    {
+      "address": "0x51c72848c68a965f66fa7a88855f9f7784502a7f",
+      "coin_count": 13,
+      "total_volume_usd": 1340707.26,
+      "score": 0.978437,
+      "coins": {
+        "AAVE": 552703.0,
+        "UNI": 249044.24,
+        "LDO": 234947.32,
+        "LINK": 179709.2,
+        "PEPE": 40652.84,
+        "FET": 22592.12,
+        "AERO": 19902.12,
+        "GRT": 15570.44,
+        "CRV": 8656.7,
+        "ARB": 8564.4,
+        "MANA": 3867.0,
+        "SHIB": 2263.52,
+        "IMX": 2234.36
+      },
+      "chains": [
+        "arbitrum-one",
+        "base",
+        "ethereum"
+      ],
+      "tx_count": 219
+    },
+    {
+      "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+      "coin_count": 12,
+      "total_volume_usd": 1614204.07,
+      "score": 0.930826,
+      "coins": {
+        "STORJ": 656221.64,
+        "AMP": 606479.14,
+        "LINK": 141286.46,
+        "FET": 78995.63,
+        "LDO": 50113.16,
+        "AAVE": 38814.78,
+        "PEPE": 17968.2,
+        "GRT": 5904.44,
+        "SHIB": 5549.89,
+        "CRV": 5298.53,
+        "MANA": 3998.1,
+        "IMX": 3574.11
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 192
+    },
+    {
+      "address": "0x4a4aaa0155237881fbd5c34bfae16e985a7b068d",
+      "coin_count": 9,
+      "total_volume_usd": 2744329.23,
+      "score": 0.810725,
+      "coins": {
+        "SHIB": 1245256.21,
+        "LDO": 534228.08,
+        "FET": 388775.17,
+        "PEPE": 302970.24,
+        "STORJ": 201586.05,
+        "IMX": 35315.77,
+        "UNI": 16925.84,
+        "MANA": 14880.31,
+        "GRT": 4391.57
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 41
+    },
+    {
+      "address": "0x86a067030a9668c13ff2a8c4d5415afc776d4c63",
+      "coin_count": 11,
+      "total_volume_usd": 599136.04,
+      "score": 0.788605,
+      "coins": {
+        "FET": 182664.25,
+        "LINK": 90044.18,
+        "AMP": 58178.88,
+        "IMX": 57491.86,
+        "LDO": 55786.92,
+        "CRV": 50444.71,
+        "STORJ": 28971.36,
+        "AAVE": 25748.35,
+        "UNI": 22587.46,
+        "PEPE": 21795.08,
+        "MANA": 5422.98
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 76
+    },
+    {
+      "address": "0x91d40e4818f4d4c57b4578d9eca6afc92ac8debe",
+      "coin_count": 9,
+      "total_volume_usd": 1459471.09,
+      "score": 0.716388,
+      "coins": {
+        "STORJ": 852556.45,
+        "IMX": 240602.83,
+        "MANA": 155037.43,
+        "FET": 138413.43,
+        "GRT": 48776.77,
+        "SHIB": 12721.73,
+        "UNI": 5278.16,
+        "LDO": 4581.03,
+        "PEPE": 1503.24
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 67
+    },
+    {
+      "address": "0x7f604d597c15b2e2f60dc645844f68b1d781b752",
+      "coin_count": 10,
+      "total_volume_usd": 417756.9,
+      "score": 0.707596,
+      "coins": {
+        "PEPE": 168907.6,
+        "LDO": 130835.65,
+        "SAND": 35816.58,
+        "GRT": 26366.72,
+        "AAVE": 19913.01,
+        "SHIB": 11660.47,
+        "LINK": 10776.45,
+        "FET": 6611.01,
+        "UNI": 4715.27,
+        "CRV": 2154.14
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 28
+    },
+    {
+      "address": "0x9b0c45d46d386cedd98873168c36efd0dcba8d46",
+      "coin_count": 9,
+      "total_volume_usd": 895566.56,
+      "score": 0.674985,
+      "coins": {
+        "PEPE": 408830.39,
+        "FET": 236499.05,
+        "AMP": 77985.65,
+        "LDO": 63307.14,
+        "STORJ": 51037.48,
+        "GRT": 28368.44,
+        "SAND": 13402.98,
+        "SHIB": 11660.47,
+        "MANA": 4474.97
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 19
+    },
+    {
+      "address": "0xe67821b76985007b4cf744b0f045c8933b3e91d9",
+      "coin_count": 2,
+      "total_volume_usd": 9806316.07,
+      "score": 0.614808,
+      "coins": {
+        "LDO": 8576136.07,
+        "SAND": 1230180.0
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 4
+    },
+    {
+      "address": "0xab782bc7d4a2b306825de5a7730034f8f63ee1bc",
+      "coin_count": 8,
+      "total_volume_usd": 680912.13,
+      "score": 0.591532,
+      "coins": {
+        "PORTAL": 226211.43,
+        "STORJ": 172606.46,
+        "AMP": 82665.01,
+        "GRT": 76438.82,
+        "FET": 50629.8,
+        "IMX": 34765.36,
+        "PROM": 25611.19,
+        "SAND": 11984.07
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 74
+    },
+    {
+      "address": "0x9642b23ed1e01df1092b92641051881a322f5d4e",
+      "coin_count": 8,
+      "total_volume_usd": 322511.78,
+      "score": 0.565218,
+      "coins": {
+        "FET": 142284.58,
+        "PORTAL": 77329.47,
+        "LINK": 30302.47,
+        "PROM": 18658.99,
+        "AMP": 15916.05,
+        "IMX": 14508.27,
+        "SHIB": 13393.36,
+        "STORJ": 10118.58
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 46
+    },
+    {
+      "address": "0xbf90664017218ac7d9db5ae0c84873628e9ae1ae",
+      "coin_count": 8,
+      "total_volume_usd": 265253.42,
+      "score": 0.561014,
+      "coins": {
+        "FET": 108501.93,
+        "PEPE": 50396.83,
+        "UNI": 42814.9,
+        "LDO": 41715.54,
+        "AAVE": 15618.92,
+        "GRT": 2365.85,
+        "LINK": 2228.46,
+        "MANA": 1610.99
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 12
+    },
+    {
+      "address": "0xbdb3ba9ffe392549e1f8658dd2630c141fdf47b6",
+      "coin_count": 8,
+      "total_volume_usd": 243482.13,
+      "score": 0.559415,
+      "coins": {
+        "LDO": 128534.14,
+        "UNI": 56039.51,
+        "AAVE": 34976.19,
+        "CRV": 9071.04,
+        "PEPE": 7718.54,
+        "SAND": 3119.25,
+        "LINK": 2778.4,
+        "FET": 1245.06
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 88
+    },
+    {
+      "address": "0xfed2399b20011af1fc985d5354f12cbc57ed48f9",
+      "coin_count": 8,
+      "total_volume_usd": 172302.14,
+      "score": 0.554189,
+      "coins": {
+        "LINK": 65292.74,
+        "PEPE": 39320.88,
+        "MANA": 29440.43,
+        "IMX": 11633.17,
+        "AAVE": 11203.32,
+        "UNI": 7943.06,
+        "FET": 5591.8,
+        "CRV": 1876.74
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 18
+    },
+    {
+      "address": "0xbee3211ab312a8d065c4fef0247448e17a8da000",
+      "coin_count": 8,
+      "total_volume_usd": 79132.42,
+      "score": 0.547349,
+      "coins": {
+        "FET": 40378.58,
+        "CRV": 17912.55,
+        "AAVE": 5531.77,
+        "GRT": 5259.52,
+        "IMX": 2652.33,
+        "MANA": 2562.43,
+        "UNI": 2481.2,
+        "LDO": 2354.03
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 31
+    },
+    {
+      "address": "0xf8191d98ae98d2f7abdfb63a9b0b812b93c873aa",
+      "coin_count": 6,
+      "total_volume_usd": 1005274.93,
+      "score": 0.479963,
+      "coins": {
+        "IMX": 363839.4,
+        "LINK": 249846.75,
+        "SHIB": 203549.5,
+        "PEPE": 105150.11,
+        "LDO": 80376.3,
+        "FET": 2512.87
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 21
+    },
+    {
+      "address": "0x0639556f03714a74a5feeaf5736a4a64ff70d206",
+      "coin_count": 6,
+      "total_volume_usd": 376313.19,
+      "score": 0.433784,
+      "coins": {
+        "LINK": 199473.5,
+        "UNI": 68196.45,
+        "MANA": 51591.93,
+        "LDO": 43971.25,
+        "AAVE": 11203.32,
+        "CRV": 1876.74
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 22
+    },
+    {
+      "address": "0x92ea7496eba5f001d620005f88f3e8e686e3d4ea",
+      "coin_count": 6,
+      "total_volume_usd": 230773.95,
+      "score": 0.423098,
+      "coins": {
+        "FET": 96429.14,
+        "PEPE": 47064.91,
+        "UNI": 42814.9,
+        "LDO": 41715.54,
+        "MANA": 1610.99,
+        "GRT": 1138.47
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 6
+    },
+    {
+      "address": "0xfe9529b753b412941127fea1981e5ce0a85c101e",
+      "coin_count": 6,
+      "total_volume_usd": 178786.47,
+      "score": 0.419281,
+      "coins": {
+        "PROM": 57436.23,
+        "UNI": 51656.73,
+        "SHIB": 29685.4,
+        "PEPE": 20022.1,
+        "IMX": 14579.42,
+        "AMP": 5406.61
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 18
+    },
+    {
+      "address": "0x0889e9327b98d7d1be3c301a4585ff3330502c9a",
+      "coin_count": 6,
+      "total_volume_usd": 97873.61,
+      "score": 0.41334,
+      "coins": {
+        "AAVE": 26079.88,
+        "LDO": 24277.41,
+        "UNI": 16965.58,
+        "FET": 16229.21,
+        "LINK": 12958.72,
+        "CRV": 1362.82
+      },
+      "chains": [
+        "ethereum"
+      ],
+      "tx_count": 24
+    }
+  ]
+}
