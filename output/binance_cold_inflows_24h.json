@@ -1,0 +1,124 @@
+{
+  "target": "0xf977814e90da44bfa03b6295a0616a897441acec",
+  "label": "Binance 8 / cold-ish treasury (user query)",
+  "window": "24h",
+  "as_of": "2026-08-25T21:04:31.850397+00:00",
+  "inbound_token_tx_count": 25,
+  "unique_senders": 3,
+  "senders": [
+    {
+      "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+      "label": "Binance 14",
+      "exchange": "binance",
+      "wallet_type": "hot/deposit",
+      "tx_count": 16,
+      "token_diversity": 16,
+      "tokens": {
+        "IQ": 429931034.692,
+        "BIGTIME": 94572550.0,
+        "PEOPLE": 52113060.167,
+        "FF": 17062522.063,
+        "ENJ": 10718433.701,
+        "SAND": 10160151.488,
+        "DODO": 5947606.572,
+        "EDEN": 3880939.776,
+        "MAV": 3334329.064,
+        "PROVE": 2217563.0,
+        "C98": 2082099.307,
+        "YB": 1524991.0
+      },
+      "native_eth": 0.0,
+      "examples": [
+        {
+          "hash": "0x97fbfd0b8a31ce5b42813675cfe37c6d500e0218942a1af309c0371190a3fa70",
+          "symbol": "PENDLE",
+          "amount": 990663.119,
+          "ts": "1787689427"
+        },
+        {
+          "hash": "0x4c794c62565818f1d0ac6fdc90ab1849e9af694da5efb964217d47fd3488fa22",
+          "symbol": "ENJ",
+          "amount": 10718433.701,
+          "ts": "1787684663"
+        },
+        {
+          "hash": "0x85c88b86015641b22a3eb3d8f3ba8d9f49f9b602cdbd302b5da208037f632a05",
+          "symbol": "PEOPLE",
+          "amount": 52113060.167,
+          "ts": "1787676263"
+        }
+      ]
+    },
+    {
+      "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+      "label": "Binance 15",
+      "exchange": "binance",
+      "wallet_type": "hot/deposit",
+      "tx_count": 5,
+      "token_diversity": 5,
+      "tokens": {
+        "IQ": 71942575.248,
+        "FF": 5311202.848,
+        "TRU": 1579815.636,
+        "PENDLE": 121074.458,
+        "WXRP": 66817.235
+      },
+      "native_eth": 0.0,
+      "examples": [
+        {
+          "hash": "0x744c0b89e10a711c4e850c6cf02ecf266321d6377fe6d1f8c6130dd7165df24e",
+          "symbol": "PENDLE",
+          "amount": 121074.458,
+          "ts": "1787689427"
+        },
+        {
+          "hash": "0xb37809e12b13400c1590ab280ba24ac8e1be8b18629926badbb1ccabd2afa406",
+          "symbol": "TRU",
+          "amount": 1579815.636,
+          "ts": "1787669063"
+        },
+        {
+          "hash": "0x560416bb538b395db2a6e046563e993b5e187722352759d238c87f148a7e7fca",
+          "symbol": "FF",
+          "amount": 5311202.848,
+          "ts": "1787667875"
+        }
+      ]
+    },
+    {
+      "address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+      "label": "Binance 16",
+      "exchange": "binance",
+      "wallet_type": "hot/deposit",
+      "tx_count": 4,
+      "token_diversity": 4,
+      "tokens": {
+        "IQ": 69449530.166,
+        "FF": 3640582.981,
+        "TRU": 1576194.599,
+        "WXRP": 64705.955
+      },
+      "native_eth": 0.0,
+      "examples": [
+        {
+          "hash": "0x67a0e57b31983e790aeafca40d3a3ffae01b4b741bdd64d76a1a9029f9187a00",
+          "symbol": "TRU",
+          "amount": 1576194.599,
+          "ts": "1787669063"
+        },
+        {
+          "hash": "0xbbd9242b200b34db4f5847746b2a7a6ead92425d705a478c4d8fd33ef408cbc5",
+          "symbol": "FF",
+          "amount": 3640582.981,
+          "ts": "1787667875"
+        },
+        {
+          "hash": "0xe986018c79746eb1e08d4864c5a9ba3e4b69ce5e26eebb58deb8d3b316bfd9c3",
+          "symbol": "WXRP",
+          "amount": 64705.955,
+          "ts": "1787653451"
+        }
+      ]
+    }
+  ]
+}
