@@ -1,0 +1,98 @@
+{
+  "token": "0xfe189e97832da1573e4e4ff034f4ffc3a15c7777",
+  "symbol": "MarsCoin",
+  "chain": "BSC",
+  "total_supply": 1000000000,
+  "binance_related_holdings": [
+    {
+      "address": "0x73d8bd54f7cf5fab43fe4ef40a62d390644946db",
+      "label": "Binance Alpha 2.0 Router Proxy (holding)",
+      "balance": 192694022.84121066,
+      "pct_supply": 19.269402284121067
+    },
+    {
+      "address": "0x6aba0315493b7e6989041c91181337b662fb1b90",
+      "label": "Binance Alpha 2.0 Router (executor)",
+      "balance": 0.0,
+      "pct_supply": 0.0
+    },
+    {
+      "address": "0x8894e0a0c962cb723c1976a4421c95949be2d4e3",
+      "label": "Binance Hot Wallet",
+      "balance": 0.0,
+      "pct_supply": 0.0
+    },
+    {
+      "address": "0xe2fc31f816a9b945aac431948a2f2d5fdc29aa54",
+      "label": "Binance Hot Wallet 2",
+      "balance": 0.0,
+      "pct_supply": 0.0
+    },
+    {
+      "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+      "label": "Binance Cold",
+      "balance": 0.0,
+      "pct_supply": 0.0
+    },
+    {
+      "address": "0x94f3ed36706c746ad59fadcaf271b7431ab1d8f1",
+      "label": "PancakeSwap V2 MarsCoin/SPCXB Pair",
+      "balance": 11550487.252494145,
+      "pct_supply": 1.1550487252494146
+    },
+    {
+      "address": "0x14ca9d552ed2cf0d5dfd1f89bc6793a464e2ed16",
+      "label": "Pancake V3 pool",
+      "balance": 1645088.0357071033,
+      "pct_supply": 0.16450880357071035
+    },
+    {
+      "address": "0xcc0c581613dfd4ace7c8686668427236f8bd5cc5",
+      "label": "Top#2 contract (23B code - likely proxy/min)",
+      "balance": 22567338.932780877,
+      "pct_supply": 2.2567338932780876
+    },
+    {
+      "address": "0xd874259110c6e086f1d2fee474b73e69b8f5dab0",
+      "label": "Top#5 contract",
+      "balance": 13942006.189679917,
+      "pct_supply": 1.3942006189679916
+    },
+    {
+      "address": "0x0c175c6a0065ee05f871a68783d2de432a1e6cbe",
+      "label": "Top#7 contract",
+      "balance": 11810270.045488987,
+      "pct_supply": 1.1810270045488986
+    },
+    {
+      "address": "0x14aa2a71dbb5ef87b81f92205e2699aa4aa65794",
+      "label": "Top#8 contract",
+      "balance": 11806060.643364223,
+      "pct_supply": 1.1806060643364222
+    },
+    {
+      "address": "0xde52c75041371b5e08d8a50b82c63734850628c1",
+      "label": "Top#3 EOA",
+      "balance": 22059928.252148602,
+      "pct_supply": 2.20599282521486
+    },
+    {
+      "address": "0x6d8ac75d911bf7339fcf414ea79ae1edde18dabc",
+      "label": "Top#4 EOA",
+      "balance": 14246615.481424289,
+      "pct_supply": 1.4246615481424287
+    },
+    {
+      "address": "0x4384b10fcdbc8996612f07ec5c219b72f924712f",
+      "label": "Top#6 EOA",
+      "balance": 13202843.136611996,
+      "pct_supply": 1.3202843136611997
+    },
+    {
+      "address": "0x776b1e178bd80fea40999bf4291e30af1a56ec10",
+      "label": "Top#10 EOA (exactly 10.9M)",
+      "balance": 10900000.00166892,
+      "pct_supply": 1.090000000166892
+    }
+  ]
+}

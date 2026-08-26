@@ -1,0 +1,1050 @@
+{
+  "as_of": "2026-08-25T21:05:01.659500+00:00",
+  "cold": "0xf977814e90da44bfa03b6295a0616a897441acec",
+  "direct_hot_to_cold": [
+    {
+      "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+      "label": "Binance 14",
+      "exchange": "binance",
+      "wallet_type": "hot/deposit",
+      "tx_count": 16,
+      "token_diversity": 16,
+      "tokens": {
+        "IQ": 429931034.692,
+        "BIGTIME": 94572550.0,
+        "PEOPLE": 52113060.167,
+        "FF": 17062522.063,
+        "ENJ": 10718433.701,
+        "SAND": 10160151.488,
+        "DODO": 5947606.572,
+        "EDEN": 3880939.776,
+        "MAV": 3334329.064,
+        "PROVE": 2217563.0,
+        "C98": 2082099.307,
+        "YB": 1524991.0
+      },
+      "native_eth": 0.0,
+      "examples": [
+        {
+          "hash": "0x97fbfd0b8a31ce5b42813675cfe37c6d500e0218942a1af309c0371190a3fa70",
+          "symbol": "PENDLE",
+          "amount": 990663.119,
+          "ts": "1787689427"
+        },
+        {
+          "hash": "0x4c794c62565818f1d0ac6fdc90ab1849e9af694da5efb964217d47fd3488fa22",
+          "symbol": "ENJ",
+          "amount": 10718433.701,
+          "ts": "1787684663"
+        },
+        {
+          "hash": "0x85c88b86015641b22a3eb3d8f3ba8d9f49f9b602cdbd302b5da208037f632a05",
+          "symbol": "PEOPLE",
+          "amount": 52113060.167,
+          "ts": "1787676263"
+        }
+      ]
+    },
+    {
+      "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+      "label": "Binance 15",
+      "exchange": "binance",
+      "wallet_type": "hot/deposit",
+      "tx_count": 5,
+      "token_diversity": 5,
+      "tokens": {
+        "IQ": 71942575.248,
+        "FF": 5311202.848,
+        "TRU": 1579815.636,
+        "PENDLE": 121074.458,
+        "WXRP": 66817.235
+      },
+      "native_eth": 0.0,
+      "examples": [
+        {
+          "hash": "0x744c0b89e10a711c4e850c6cf02ecf266321d6377fe6d1f8c6130dd7165df24e",
+          "symbol": "PENDLE",
+          "amount": 121074.458,
+          "ts": "1787689427"
+        },
+        {
+          "hash": "0xb37809e12b13400c1590ab280ba24ac8e1be8b18629926badbb1ccabd2afa406",
+          "symbol": "TRU",
+          "amount": 1579815.636,
+          "ts": "1787669063"
+        },
+        {
+          "hash": "0x560416bb538b395db2a6e046563e993b5e187722352759d238c87f148a7e7fca",
+          "symbol": "FF",
+          "amount": 5311202.848,
+          "ts": "1787667875"
+        }
+      ]
+    },
+    {
+      "address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+      "label": "Binance 16",
+      "exchange": "binance",
+      "wallet_type": "hot/deposit",
+      "tx_count": 4,
+      "token_diversity": 4,
+      "tokens": {
+        "IQ": 69449530.166,
+        "FF": 3640582.981,
+        "TRU": 1576194.599,
+        "WXRP": 64705.955
+      },
+      "native_eth": 0.0,
+      "examples": [
+        {
+          "hash": "0x67a0e57b31983e790aeafca40d3a3ffae01b4b741bdd64d76a1a9029f9187a00",
+          "symbol": "TRU",
+          "amount": 1576194.599,
+          "ts": "1787669063"
+        },
+        {
+          "hash": "0xbbd9242b200b34db4f5847746b2a7a6ead92425d705a478c4d8fd33ef408cbc5",
+          "symbol": "FF",
+          "amount": 3640582.981,
+          "ts": "1787667875"
+        },
+        {
+          "hash": "0xe986018c79746eb1e08d4864c5a9ba3e4b69ce5e26eebb58deb8d3b316bfd9c3",
+          "symbol": "WXRP",
+          "amount": 64705.955,
+          "ts": "1787653451"
+        }
+      ]
+    }
+  ],
+  "top_bot_or_hot_feeders": [
+    {
+      "address": "0x06fd4ba7973a0d39a91734bbc35bc2bcaa99e3b0",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 45,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "SHIB": 3027163167.0,
+        "SPELL": 32876365.746956,
+        "JASMY": 809107.8102,
+        "G": 559841.0,
+        "SXT": 478039.740536,
+        "GALA": 324159.066397,
+        "BIO": 272178.4601,
+        "ONDO": 219891.548996,
+        "MAV": 151077.0,
+        "USDT": 125530.895117,
+        "ZKC": 70447.91971,
+        "HEI": 60542.0,
+        "DUSK": 56472.0,
+        "BLUR": 54383.634,
+        "FLUX": 36226.367
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "G",
+          "amount": 559841.0,
+          "hash": "0xa3c6e4512665837df7bb164d8bda6dfd2bfdfd3ae136d268206aae1a68207d0b",
+          "ts": "1787691875"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "GALA",
+          "amount": 324159.06639662,
+          "hash": "0xe457a82afdab2533d05c5bef652a1e65fc547d5f75e0c782cb0d513ab73fd027",
+          "ts": "1787691767"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.014474,
+      "wallet_age_days": 1046.4,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 20
+        },
+        {
+          "address": "0xab782bc7d4a2b306825de5a7730034f8f63ee1bc",
+          "n": 5
+        },
+        {
+          "address": "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43",
+          "n": 5
+        },
+        {
+          "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+          "n": 4
+        },
+        {
+          "address": "0x2cc8e4721a001f1921298bc9d894aca13630b0c6",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [
+        "MAV"
+      ],
+      "etherscan": "https://etherscan.io/address/0x06fd4ba7973a0d39a91734bbc35bc2bcaa99e3b0"
+    },
+    {
+      "address": "0x86a067030a9668c13ff2a8c4d5415afc776d4c63",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 24,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "AMP": 7442797.9404,
+        "USDT": 1211423.368213,
+        "RESOLV": 194384.619208,
+        "EIGEN": 77915.804463,
+        "ONDO": 21636.382854,
+        "LDO": 17765.151644,
+        "UNI": 17695.202387,
+        "CRV": 14204.61129,
+        "ETHFI": 5801.832438,
+        "ZRO": 5023.203687,
+        "LINK": 2201.909723,
+        "AAVE": 217.324,
+        "WBTC": 0.33558
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "UNI",
+          "amount": 423.19870664,
+          "hash": "0xd003a677386d4e190131a4ca8ebbfbfd063f48112c474417ea278eafbc534266",
+          "ts": "1787691875"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "EIGEN",
+          "amount": 38852.618335,
+          "hash": "0x3f4a0a077a25f5aab394923398508b8835653f82ad964430a0f4fb9cd838c5bf",
+          "ts": "1787691779"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.019176,
+      "wallet_age_days": 1092.2,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 21
+        },
+        {
+          "address": "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43",
+          "n": 15
+        },
+        {
+          "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+          "n": 3
+        },
+        {
+          "address": "0xe8736af1926e9d8f5a6602fbbb0893b26436d710",
+          "n": 3
+        },
+        {
+          "address": "0xa4b9569bf942c3aad23c0c2d322fe4aff8e1bf30",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0x86a067030a9668c13ff2a8c4d5415afc776d4c63"
+    },
+    {
+      "address": "0xfe9529b753b412941127fea1981e5ce0a85c101e",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 15,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "AMP": 5177421.089797,
+        "SXT": 799194.668837,
+        "BIGTIME": 450991.0,
+        "ZKC": 148566.0,
+        "PUNDIX": 33191.52,
+        "WLFI": 22867.46133,
+        "SYRUP": 19830.0,
+        "ZRO": 14999.0,
+        "CFG": 12804.404091,
+        "API3": 8037.02,
+        "CRV": 4903.7,
+        "MASK": 4729.58,
+        "PROM": 2815.54092,
+        "AAVE": 12.108
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "SXT",
+          "amount": 411176.6321722,
+          "hash": "0x6f322af539a0a4e2f1d86f1b5be3eeb9da892d59c6fc2f83320da0009a421a1c",
+          "ts": "1787691875"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "CRV",
+          "amount": 4903.700000000001,
+          "hash": "0x6048f6ab4850eeda28d7dc6e55e1e5019bf80c55059c519c7e862d4e6bb2daef",
+          "ts": "1787691779"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.018619,
+      "wallet_age_days": 1218.5,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 25
+        },
+        {
+          "address": "0xe94b1ed026a3970f704ace6acae1704439cb4879",
+          "n": 2
+        },
+        {
+          "address": "0x69f927ade8ec3020a92c0c0cfe5f316609b8d331",
+          "n": 2
+        },
+        {
+          "address": "0xb51136a2a6ff3e8daff5bc394d24bad0162218da",
+          "n": 1
+        },
+        {
+          "address": "0xf2913efe683a7b2d3ba4ecc24b796cfc7f4b3d83",
+          "n": 1
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [
+        "BIGTIME"
+      ],
+      "etherscan": "https://etherscan.io/address/0xfe9529b753b412941127fea1981e5ce0a85c101e"
+    },
+    {
+      "address": "0xc17a40852e4bfe04bc81af355fdf132c539ba753",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 15,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "MEME": 1058110.0,
+        "ENJ": 434474.8,
+        "OGN": 79255.244908,
+        "POL": 42338.5,
+        "ENA": 22711.74,
+        "DUSK": 20680.0,
+        "PENDLE": 20409.2,
+        "ACH": 9310.0,
+        "APE": 7005.31,
+        "ONDO": 6760.2,
+        "STG": 3193.8,
+        "ENS": 1936.82,
+        "FF": 999.5,
+        "QNT": 5.0
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "ENA",
+          "amount": 22711.74,
+          "hash": "0x9b06588569fd57527da59c4a2a9d954a5c5c0cb4999698a623fafb2c20759d56",
+          "ts": "1787691407"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "PENDLE",
+          "amount": 20409.2,
+          "hash": "0xdc95d1ac8b2cb4eae4ab32af668ff9b2741bd7fc943f65ad811985965479b3c2",
+          "ts": "1787691299"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.014332,
+      "wallet_age_days": 490.5,
+      "recent_counterparties": [
+        {
+          "address": "0xbee3211ab312a8d065c4fef0247448e17a8da000",
+          "n": 24
+        },
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 22
+        },
+        {
+          "address": "0x8f10b468b06c6fd214b65f87778827f7d113f996",
+          "n": 3
+        },
+        {
+          "address": "0x83abecf7204d5afc1bea5df734f085f2535a9976",
+          "n": 1
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [
+        "ENJ",
+        "FF",
+        "PENDLE"
+      ],
+      "etherscan": "https://etherscan.io/address/0xc17a40852e4bfe04bc81af355fdf132c539ba753"
+    },
+    {
+      "address": "0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 11,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "SHIB": 363664697.0,
+        "SPELL": 22507924.0,
+        "TLM": 3081609.9638,
+        "COTI": 563589.42948,
+        "BLUR": 169346.64839,
+        "PLUME": 92492.627,
+        "NIL": 35088.7,
+        "ENA": 32016.0,
+        "ETHFI": 20798.829338,
+        "SNX": 8482.05
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "NIL",
+          "amount": 35088.7,
+          "hash": "0xa84af6701ac3a5d53f65058b412488c98fecefa4a4e08647ea9f8b1d5c69164e",
+          "ts": "1787691875"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "PLUME",
+          "amount": 92492.627,
+          "hash": "0xd7bd29499aba434f4da63eac251c0686de7d097ba279f5e35083437d3a9a9e29",
+          "ts": "1787691767"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.001805,
+      "wallet_age_days": 1032.5,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 21
+        },
+        {
+          "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+          "n": 5
+        },
+        {
+          "address": "0xae7cf65ac1558358c041356722890a23810f6a25",
+          "n": 4
+        },
+        {
+          "address": "0x0d0707963952f2fba59dd06f2b425ace40b492fe",
+          "n": 3
+        },
+        {
+          "address": "0x58edf78281334335effa23101bbe3371b6a36a51",
+          "n": 3
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0xb46a0f71fded6ceb00b1c9278e0ac7e22c242df5"
+    },
+    {
+      "address": "0xeae7380dd4cef6fbd1144f49e4d1e6964258a4f4",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 10,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "SHIB": 35790772619.0,
+        "PEPE": 10619186908.0,
+        "USDT": 4673365.859893,
+        "UNI": 64853.64484
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "UNI",
+          "amount": 10835.84,
+          "hash": "0x13fa53ffac07c2c355edf1e817d86c13de869d1707914bd9b1860dccd77fde98",
+          "ts": "1787691875"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "USDT",
+          "amount": 3614208.0,
+          "hash": "0x2cbbcb3bd2e26d7fde8e74fd0a81f52efbec58ebc0e55865c94617b2e56e7421",
+          "ts": "1787691779"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 1517.001945,
+      "wallet_age_days": 1202.2,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 26
+        },
+        {
+          "address": "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43",
+          "n": 4
+        },
+        {
+          "address": "0x51c72848c68a965f66fa7a88855f9f7784502a7f",
+          "n": 3
+        },
+        {
+          "address": "0x4fca851027b52ddcc7bbfad327a31287a00026e7",
+          "n": 3
+        },
+        {
+          "address": "0xf8191d98ae98d2f7abdfb63a9b0b812b93c873aa",
+          "n": 3
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0xeae7380dd4cef6fbd1144f49e4d1e6964258a4f4"
+    },
+    {
+      "address": "0xa8a7d1479661a2400b876561e20c632c50d825fe",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 9,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "HOT": 33369.071278,
+        "RAD": 12780.11431,
+        "BICO": 11135.657704,
+        "DODO": 7453.844298,
+        "BIGTIME": 3683.336169,
+        "POL": 544.712927,
+        "PROM": 33.352607
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "HOT",
+          "amount": 33369.07127837172,
+          "hash": "0x1bf25ddab5d14cdcf54a22968b844440b2c662076665fdf1539d0c3cbc226b5f",
+          "ts": "1787691611"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "BIGTIME",
+          "amount": 3683.336169412909,
+          "hash": "0x7cb693e5e20591d4d80e47d3ff94b62015ec6ca81c7ba0cea377672d953851e8",
+          "ts": "1787691179"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.005375,
+      "wallet_age_days": 465.9,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 21
+        },
+        {
+          "address": "0x55d8ec728ea72477c6db12ca497a803c8db361e9",
+          "n": 5
+        },
+        {
+          "address": "0xb722fd570d68d0c2de769a5d7c2fd11e7f1b0ef2",
+          "n": 3
+        },
+        {
+          "address": "0x4c54ff7f1c424ff5487a32aad0b48b19cbaf087f",
+          "n": 2
+        },
+        {
+          "address": "0x3902428a74a08a91e2cb2fd834de75e69974fe67",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [
+        "BIGTIME",
+        "DODO"
+      ],
+      "etherscan": "https://etherscan.io/address/0xa8a7d1479661a2400b876561e20c632c50d825fe"
+    },
+    {
+      "address": "0x41fbba5cb38d22b2d80606406944cedd7c97f6f9",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 7,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "BICO": 1423564.059902,
+        "PEOPLE": 948881.778824,
+        "PUNDIX": 82722.088697,
+        "YGG": 48325.123,
+        "EUL": 27440.527607,
+        "WBTC": 0.666392
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "PEOPLE",
+          "amount": 948881.77882418,
+          "hash": "0x3b61ab31326ee37ae65060c2a8c42150a437634f306f1fef79109d64900f2033",
+          "ts": "1787691611"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "EUL",
+          "amount": 27440.52760713,
+          "hash": "0x719b7140312dd4ad78e21c72fdc28ad5a209369773035224689e6b0d0da4962d",
+          "ts": "1787691299"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.00171,
+      "wallet_age_days": 1195.3,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 21
+        },
+        {
+          "address": "0x91d40e4818f4d4c57b4578d9eca6afc92ac8debe",
+          "n": 7
+        },
+        {
+          "address": "0xce07eb2831c5bd838343f739d6315623c35680c4",
+          "n": 3
+        },
+        {
+          "address": "0x1dca35ea1aedfbbf6a7be6c5ef6b017433aa3b5a",
+          "n": 3
+        },
+        {
+          "address": "0xf89d7b9c864f589bbf53a82105107622b35eaa40",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [
+        "PEOPLE"
+      ],
+      "etherscan": "https://etherscan.io/address/0x41fbba5cb38d22b2d80606406944cedd7c97f6f9"
+    },
+    {
+      "address": "0x7833341fff5bbbac5a0bd0ca28d6d9fa7d094601",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 6,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "USDT": 40950.843924,
+        "DODO": 5000.869406,
+        "POL": 1557.603404
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "USDT",
+          "amount": 8498.024051,
+          "hash": "0xe2539d3b4d23e065e9df341965b9d0a231e6e749528938c02694543fe42fe6ad",
+          "ts": "1787691611"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "USDT",
+          "amount": 9234.977543,
+          "hash": "0xd0f1aadea5721309789d1f5b31e018fd50b69eb25201066d7af34244efedf294",
+          "ts": "1787691179"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.001962,
+      "wallet_age_days": 768.5,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 21
+        },
+        {
+          "address": "0x8cc5c24a1666d3214340050315b82b2b6b0d9027",
+          "n": 10
+        },
+        {
+          "address": "0x000000000004444c5dc75cb358380d2e3de08a90",
+          "n": 7
+        },
+        {
+          "address": "0xe56c60b5f9f7b5fc70de0eb79c6ee7d00efa2625",
+          "n": 4
+        },
+        {
+          "address": "0x88ada7b1dd1c728ea87404cea7a0780139eb35d1",
+          "n": 1
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [
+        "DODO"
+      ],
+      "etherscan": "https://etherscan.io/address/0x7833341fff5bbbac5a0bd0ca28d6d9fa7d094601"
+    },
+    {
+      "address": "0x43dfc508a7040eaffdc7668aacff562003b04711",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 5,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "OGN": 59755.7733,
+        "HEMI": 38681.99334,
+        "PHA": 29943.462189,
+        "WCT": 11450.531062,
+        "STG": 1241.351399
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "OGN",
+          "amount": 59755.773300383975,
+          "hash": "0x354814ff932b2245ad4d9bfdc3b40c5536ef3dd09672b6309923725a21205ed0",
+          "ts": "1787690567"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "WCT",
+          "amount": 11450.531061959757,
+          "hash": "0x04e49db2c6b1c332c6c36c1e6ea3f30b6183421e915c6bb4df6d864c095c8bec",
+          "ts": "1787689811"
+        }
+      ],
+      "likely": "high_freq_bot_or_aggregator",
+      "is_contract": false,
+      "eth_balance": 0.012043,
+      "wallet_age_days": 1738.0,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 20
+        },
+        {
+          "address": "0x447a03c131c0a97a8b8d548e3cd81aec4ce05d73",
+          "n": 7
+        },
+        {
+          "address": "0xe56c60b5f9f7b5fc70de0eb79c6ee7d00efa2625",
+          "n": 7
+        },
+        {
+          "address": "0x000000000004444c5dc75cb358380d2e3de08a90",
+          "n": 6
+        },
+        {
+          "address": "0x8867f20c1c63baccec7617626254a060eeb0e61e",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0x43dfc508a7040eaffdc7668aacff562003b04711"
+    },
+    {
+      "address": "0xf966921c6a34f895d54809b5ad17b546bde1a88a",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 4,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "ENA": 1176.279625,
+        "QNT": 290.676014,
+        "ONDO": 120.0,
+        "AXS": 65.932864
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "QNT",
+          "amount": 290.6760137,
+          "hash": "0x63f1fe79237ecc7c2ed37d483b7d7831a29d9f832313ec4104e81c550581ef8c",
+          "ts": "1787691611"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "ENA",
+          "amount": 1176.279625259147,
+          "hash": "0x7b455d8b14f4df5335cc373b6148f6c4f3d5dd4ce964081242429c4481b88581",
+          "ts": "1787691179"
+        }
+      ],
+      "likely": "external_wallet",
+      "is_contract": false,
+      "eth_balance": 0.001905,
+      "wallet_age_days": 406.4,
+      "recent_counterparties": [
+        {
+          "address": "0x016606acc6b0cfe537acc221e3bf1bb44b4049ee",
+          "n": 28
+        },
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 20
+        },
+        {
+          "address": "0xee7ae85f2fe2239e27d9c1e23fffe168d63b4055",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0xf966921c6a34f895d54809b5ad17b546bde1a88a"
+    },
+    {
+      "address": "0x0c97305bd07fc582bcc2042b9a2dedd9f451e75b",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 4,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "AMP": 11818288.0,
+        "RED": 67595.0,
+        "ALLO": 22132.0,
+        "ZRO": 14378.0
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "RED",
+          "amount": 67595.0,
+          "hash": "0x95effa366a21025f88a979a79ae3e68299ce3ee7f56ec4a4ddac14aa5d04de94",
+          "ts": "1787691299"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "AMP",
+          "amount": 11818288.0,
+          "hash": "0xaf666b9b336972524a353ad3e4bbf63f64f27bf4cf4d1f0a800e20455d27bab5",
+          "ts": "1787691167"
+        }
+      ],
+      "likely": "external_wallet",
+      "is_contract": false,
+      "eth_balance": 0.011702,
+      "wallet_age_days": 1200.9,
+      "recent_counterparties": [
+        {
+          "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+          "n": 25
+        },
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 25
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0x0c97305bd07fc582bcc2042b9a2dedd9f451e75b"
+    },
+    {
+      "address": "0xd9b1d34494f7fc317c31e825a4039d14ff4d0f49",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 4,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "ENA": 98880.26,
+        "WLFI": 70349.96,
+        "ENSO": 4524.2
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "WLFI",
+          "amount": 70349.96,
+          "hash": "0x441741ecd9cca653ae74f8c9f1ab0c36f4f20ca5d192570c531fc0462ae40c3a",
+          "ts": "1787691683"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "ENA",
+          "amount": 53014.09,
+          "hash": "0x106ba97f0e227b70f1e7be1b67dbf907bdb253d361ddf27be87fba8c3238879c",
+          "ts": "1787691299"
+        }
+      ],
+      "likely": "external_wallet",
+      "is_contract": false,
+      "eth_balance": 0.001971,
+      "wallet_age_days": 339.3,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 24
+        },
+        {
+          "address": "0x79f3d1faf40072732a71319476fa59b087361ef4",
+          "n": 5
+        },
+        {
+          "address": "0x75e656a9f191d98eb4d89188b0454fd258bc14b5",
+          "n": 4
+        },
+        {
+          "address": "0xa71b216d962a6c3feb76f848ca9dd8a5cfdf6cee",
+          "n": 3
+        },
+        {
+          "address": "0x1c5f8effed776da76f3c55371db89eb8a317eff1",
+          "n": 2
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0xd9b1d34494f7fc317c31e825a4039d14ff4d0f49"
+    },
+    {
+      "address": "0xe2f548bca8dfd93e78c22f1e94ef6c08b6a89a22",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 4,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "SHIB": 11895288.18,
+        "ENA": 1204.47,
+        "WLD": 45.44
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "SHIB",
+          "amount": 11895288.18,
+          "hash": "0x9596ded3a718ee943e2cf27845eeafa33e90d46669684d5310b7a505e94e4c27",
+          "ts": "1787691683"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "ENA",
+          "amount": 485.26,
+          "hash": "0x5fb1f2c68a04cf00a5fd22a299248e5935b993bc974439136d66453cffedd85e",
+          "ts": "1787691611"
+        }
+      ],
+      "likely": "external_wallet",
+      "is_contract": false,
+      "eth_balance": 0.019482,
+      "wallet_age_days": 174.5,
+      "recent_counterparties": [
+        {
+          "address": "0xe629e3e57ba679bfb78e089ba0236f3d2d20d274",
+          "n": 35
+        },
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 15
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0xe2f548bca8dfd93e78c22f1e94ef6c08b6a89a22"
+    },
+    {
+      "address": "0x6dc89d5d55d190ad62abb2882d8f9209798da2d5",
+      "label": null,
+      "exchange": null,
+      "wallet_type": null,
+      "tx_count_to_binance_hot_24h": 4,
+      "hots_touched": [
+        "0x28c6c06298d514db089934071355e5743bf21d60"
+      ],
+      "tokens": {
+        "COTI": 183374.599,
+        "LSK": 7857.928,
+        "SUPER": 6344.969
+      },
+      "examples": [
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "SUPER",
+          "amount": 6344.969,
+          "hash": "0xa8b78763fe00528840621557ec5c3ba61ba44effca05fd27b4f0bc543943b5c1",
+          "ts": "1787688899"
+        },
+        {
+          "to_hot": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "symbol": "COTI",
+          "amount": 122537.198,
+          "hash": "0x8f1fecd8a90696103f81d5b7a5ccff87bc06b3c92b81afbfec66c90593f36ece",
+          "ts": "1787688779"
+        }
+      ],
+      "likely": "external_wallet",
+      "is_contract": false,
+      "eth_balance": 0.010159,
+      "wallet_age_days": 139.1,
+      "recent_counterparties": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "n": 25
+        },
+        {
+          "address": "0x34a15dd058856e398295869dfc17a76ad50dea01",
+          "n": 8
+        },
+        {
+          "address": "0x369a01ea5476a557cfedebe6c4186bb901bc737e",
+          "n": 5
+        },
+        {
+          "address": "0xe8f52e054a5bb006e96844da389e5edf6d33ae55",
+          "n": 5
+        },
+        {
+          "address": "0x38c720b7cb712ffc41e3a95e2de155aaea246862",
+          "n": 1
+        }
+      ],
+      "overlap_with_cold_sweep_tokens": [],
+      "etherscan": "https://etherscan.io/address/0x6dc89d5d55d190ad62abb2882d8f9209798da2d5"
+    }
+  ],
+  "note": "Cold wallet does not take user deposits directly; Binance 14/15/16 sweep into it. High-frequency unlabeled EOAs feeding those hots are the practical 'bot/hot' sources for 24h accumulation."
+}

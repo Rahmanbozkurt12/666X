@@ -1,0 +1,267 @@
+{
+  "settings": {
+    "poll_seconds": 45,
+    "min_token_amount": 0,
+    "skip_spam": true,
+    "spam_max_decimals_zero_alert": true,
+    "lookback_on_start": 25,
+    "chains": {
+      "ethereum": {
+        "explorer_api": "https://eth.blockscout.com/api",
+        "explorer_tx": "https://etherscan.io/tx/",
+        "native_symbol": "ETH"
+      },
+      "bsc": {
+        "explorer_api": "https://api.etherscan.io/v2/api?chainid=56",
+        "explorer_tx": "https://bscscan.com/tx/",
+        "native_symbol": "BNB",
+        "note": "BSC V2 Etherscan needs ETHERSCAN_API_KEY; without it ETH+manual BSC wallets still work via optional bsc_rpc fallback"
+      },
+      "solana": {
+        "rpc": "https://api.mainnet-beta.solana.com",
+        "explorer_tx": "https://solscan.io/tx/"
+      }
+    }
+  },
+  "wallets": [
+    {
+      "address": "0x3f5ce5fbfe3e9af3971dd833d26ba9b5c936f0be",
+      "label": "Binance",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot"
+    },
+    {
+      "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+      "label": "Binance 14",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+      "label": "Binance 15",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+      "label": "Binance 16",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xd551234ae421e3bcba99a0da6d736074f22192ff",
+      "label": "Binance 2",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x56eddb7aa87536c09ccc2793473599fd21a8b17f",
+      "label": "Binance 17",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x0681d8db095565fe8a346fa0277bffde9c0edbbf",
+      "label": "Binance 4",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x564286362092d8e7936f0549571a803b203aaced",
+      "label": "Binance 3",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x9696f59e4d72e237be84ffd425dcad154bf96976",
+      "label": "Binance 18",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+      "label": "Binance 8 (cold-ish / treasury)",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "cold/treasury"
+    },
+    {
+      "address": "0xbe0eb53f46cd790cd13851f5ca2db2214baac063",
+      "label": "Binance Cold Wallet 1",
+      "venue": "Binance",
+      "chain": "ethereum",
+      "role": "cold"
+    },
+    {
+      "address": "0x73d8bd54f7cf5fab43fe4ef40a62d390644946db",
+      "label": "Binance Alpha 2.0 Router Proxy",
+      "venue": "Binance Alpha",
+      "chain": "bsc",
+      "role": "alpha-proxy"
+    },
+    {
+      "address": "0x6aba0315493b7e6989041c91181337b662fb1b90",
+      "label": "Binance Alpha 2.0 Router",
+      "venue": "Binance Alpha",
+      "chain": "bsc",
+      "role": "alpha-router"
+    },
+    {
+      "address": "0x3cd751e6b0078be393132286c442345e5dc49699",
+      "label": "Coinbase 4",
+      "venue": "Coinbase",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xb5d85cbf7cb3ee0d56b3bb207d5fc4b82f43f511",
+      "label": "Coinbase 5",
+      "venue": "Coinbase",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740",
+      "label": "Coinbase 3",
+      "venue": "Coinbase",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x503828976d22510aad0201ac7ec88293211d23da",
+      "label": "Coinbase 2",
+      "venue": "Coinbase",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
+      "label": "Coinbase 1",
+      "venue": "Coinbase",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b",
+      "label": "OKX / OKEx",
+      "venue": "OKX",
+      "chain": "ethereum",
+      "role": "hot"
+    },
+    {
+      "address": "0xa7efae728d2936e78bda97dc267687568dd593f3",
+      "label": "OKEx 3",
+      "venue": "OKX",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x5041ed759dd4afc3a72b8192c143f72f4724081a",
+      "label": "OKEx 7",
+      "venue": "OKX",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x236f9f97e0e62388479bf9e5ba4889e46b0273c3",
+      "label": "OKEx 2",
+      "venue": "OKX",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xb5a46bc8b76fd2825aeb43db9c9e89e89158ecde",
+      "label": "BtcTurk Hot Wallet",
+      "venue": "BtcTurk",
+      "chain": "ethereum",
+      "role": "hot"
+    },
+    {
+      "address": "0x832f166799a407275500430b61b622f0058f15d6",
+      "label": "BtcTurk Main Wallet",
+      "venue": "BtcTurk",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x46f80018211d5cbbc988e853a8683501fca4ee9b",
+      "label": "BtcTurk Cold 1",
+      "venue": "BtcTurk",
+      "chain": "ethereum",
+      "role": "cold"
+    },
+    {
+      "address": "0x2ee555c9006a9dc4674f01e0d4dfc58e013708f0",
+      "label": "BtcTurk 2",
+      "venue": "BtcTurk",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0xbd8ef191caa1571e8ad4619ae894e07a75de0c35",
+      "label": "Paribu 1",
+      "venue": "Paribu",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x2bb97b6cf6ffe53576032c11711d59bd056830ee",
+      "label": "Paribu 2",
+      "venue": "Paribu",
+      "chain": "ethereum",
+      "role": "hot/deposit"
+    },
+    {
+      "address": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "label": "PancakeSwap V2 Router",
+      "venue": "PancakeSwap",
+      "chain": "bsc",
+      "role": "dex-router"
+    },
+    {
+      "address": "0x13f4ea5833ce935f766d4b517017ed36bd45d974",
+      "label": "PancakeSwap Smart Router",
+      "venue": "PancakeSwap",
+      "chain": "bsc",
+      "role": "dex-router"
+    },
+    {
+      "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "label": "pump.fun Bonding Curve Program",
+      "venue": "pump.fun",
+      "chain": "solana",
+      "role": "program",
+      "enabled": false,
+      "note": "Program ID — enable only with HELIUS_API_KEY or dedicated Solana indexer; not a deposit wallet"
+    },
+    {
+      "address": "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+      "label": "pump.fun Fee Recipient (common)",
+      "venue": "pump.fun",
+      "chain": "solana",
+      "role": "fee",
+      "enabled": false,
+      "note": "Very noisy — enable only if you want every fee hit"
+    }
+  ],
+  "dex_routers_ethereum": [
+    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+    "0xe592427a0aece92de3edee1f18e0157c05861564",
+    "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+    "0x1111111254eeb25477b68fb85ed929f73a960582"
+  ],
+  "dex_routers_bsc": [
+    "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+    "0x13f4ea5833ce935f766d4b517017ed36bd45d974",
+    "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506"
+  ]
+}

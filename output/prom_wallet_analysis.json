@@ -1,0 +1,336 @@
+{
+  "gradual_peak_sellers": [
+    {
+      "wallet": "0x3902428a74a08a91e2cb2fd834de75e69974fe67",
+      "buy_pieces": 1209,
+      "unique_days": 8,
+      "acc_total": 42532.045177536565,
+      "span_h": 175.94666666666666,
+      "avg_piece": 35.17952454717665,
+      "peak_sold": 4231.04854097475,
+      "aug24_sold": 14473.220107861367,
+      "total_sold": 52037.853585345474,
+      "net": -4592.344029318455,
+      "score": 383548019.6991646,
+      "top_dest": "0x278d858f05b94576c1e6f73285886876ff6ef8d2",
+      "top_dest_amt": 23400.888244852456,
+      "main_src": "0x278d858f05b94576c1e6f73285886876ff6ef8d2"
+    },
+    {
+      "wallet": "0x69f927ade8ec3020a92c0c0cfe5f316609b8d331",
+      "buy_pieces": 123,
+      "unique_days": 1,
+      "acc_total": 367937.9394089226,
+      "span_h": 6.0633333333333335,
+      "avg_piece": 2991.3653610481515,
+      "peak_sold": 384954.0944129238,
+      "aug24_sold": 393708.63254468376,
+      "total_sold": 393708.63254468376,
+      "net": 28942.021959208996,
+      "score": 118623283.39826378,
+      "top_dest": "0xf3ec278a424150a114b0857ecdd5191ffa628c0a",
+      "top_dest_amt": 367727.3432392438,
+      "main_src": "0xa40f3d0594a120fd99ccbd30bc15f9824c5ee90c"
+    },
+    {
+      "wallet": "0x278d858f05b94576c1e6f73285886876ff6ef8d2",
+      "buy_pieces": 875,
+      "unique_days": 8,
+      "acc_total": 21150.850456985012,
+      "span_h": 175.95333333333335,
+      "avg_piece": 24.172400522268585,
+      "peak_sold": 1781.7510247107791,
+      "aug24_sold": 4952.3522233650665,
+      "total_sold": 23383.86786551803,
+      "net": 17.020379334492148,
+      "score": 116900127.93407899,
+      "top_dest": "0x3902428a74a08a91e2cb2fd834de75e69974fe67",
+      "top_dest_amt": 23383.86786551803,
+      "main_src": "0x3902428a74a08a91e2cb2fd834de75e69974fe67"
+    },
+    {
+      "wallet": "0x0df83fb6db068d9db2a512c7a307071eac126351",
+      "buy_pieces": 26,
+      "unique_days": 8,
+      "acc_total": 179281.28,
+      "span_h": 175.41666666666666,
+      "avg_piece": 6895.433846153846,
+      "peak_sold": 46722.66,
+      "aug24_sold": 156801.06,
+      "total_sold": 636505.5899999999,
+      "net": -3.637978807091713e-12,
+      "score": 90843451.87125002,
+      "top_dest": "0xd5f5475502120ad0e3dbaa25ecedffd19d6569fa",
+      "top_dest_amt": 418202.4900000001,
+      "main_src": "0x28c6c06298d514db089934071355e5743bf21d60"
+    },
+    {
+      "wallet": "0xdf3172f8efcccb0f84fe1ce3fd22c3fe37e0c657",
+      "buy_pieces": 25,
+      "unique_days": 8,
+      "acc_total": 183921.28,
+      "span_h": 175.4,
+      "avg_piece": 7356.8512,
+      "peak_sold": 38114.22,
+      "aug24_sold": 129420.11,
+      "total_sold": 751387.0500000003,
+      "net": 0.0,
+      "score": 71249770.0125,
+      "top_dest": "0xd5f5475502120ad0e3dbaa25ecedffd19d6569fa",
+      "top_dest_amt": 533753.7600000001,
+      "main_src": "0x21a31ee1afc51d94c2efccaa2092ad1028285549"
+    },
+    {
+      "wallet": "0x8fcfba62e8d81a80ef12456ef3e348b717ad2b0e",
+      "buy_pieces": 26,
+      "unique_days": 8,
+      "acc_total": 179281.29,
+      "span_h": 175.42,
+      "avg_piece": 6895.434230769231,
+      "peak_sold": 32761.79,
+      "aug24_sold": 128455.88,
+      "total_sold": 218303.1,
+      "net": 0.0,
+      "score": 63700222.57755,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 218303.1,
+      "main_src": "0x0df83fb6db068d9db2a512c7a307071eac126351"
+    },
+    {
+      "wallet": "0x336e62dacc03e9c003bc50ab2c79044fe98a6391",
+      "buy_pieces": 27,
+      "unique_days": 8,
+      "acc_total": 190510.13999999998,
+      "span_h": 175.40333333333334,
+      "avg_piece": 7055.93111111111,
+      "peak_sold": 27123.15,
+      "aug24_sold": 98056.76,
+      "total_sold": 217633.29000000004,
+      "net": 0.0,
+      "score": 54760521.02006249,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 217633.29000000004,
+      "main_src": "0xdf3172f8efcccb0f84fe1ce3fd22c3fe37e0c657"
+    },
+    {
+      "wallet": "0x96586d96e8bafaa2af5ef37dc95958b9b454f208",
+      "buy_pieces": 36,
+      "unique_days": 6,
+      "acc_total": 68241.949,
+      "span_h": 173.06,
+      "avg_piece": 1895.6096944444444,
+      "peak_sold": 15512.685,
+      "aug24_sold": 33355.417,
+      "total_sold": 83754.634,
+      "net": 3.979039320256561e-12,
+      "score": 32097761.91405,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 83754.634,
+      "main_src": "0x0d0707963952f2fba59dd06f2b425ace40b492fe"
+    },
+    {
+      "wallet": "0xdd95d5acc5225520f82023446669a214a422f698",
+      "buy_pieces": 54,
+      "unique_days": 4,
+      "acc_total": 138315.827,
+      "span_h": 175.88666666666666,
+      "avg_piece": 2561.4042037037034,
+      "peak_sold": 14231.64,
+      "aug24_sold": 98106.483,
+      "total_sold": 151283.407,
+      "net": -1.8189894035458565e-12,
+      "score": 32003044.659,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 151283.407,
+      "main_src": "0x0d0707963952f2fba59dd06f2b425ace40b492fe"
+    },
+    {
+      "wallet": "0x15f46551f5d736c9b8861c1d1358e29183f7a6c7",
+      "buy_pieces": 17,
+      "unique_days": 5,
+      "acc_total": 111769.98864773,
+      "span_h": 175.59333333333333,
+      "avg_piece": 6574.705214572353,
+      "peak_sold": 34886.3081341,
+      "aug24_sold": 76372.35804685,
+      "total_sold": 139668.06126448,
+      "net": 0.0,
+      "score": 29593066.744759895,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 139668.06126448,
+      "main_src": "0x21a31ee1afc51d94c2efccaa2092ad1028285549"
+    },
+    {
+      "wallet": "0x58edf78281334335effa23101bbe3371b6a36a51",
+      "buy_pieces": 32,
+      "unique_days": 6,
+      "acc_total": 19407.48305396247,
+      "span_h": 151.11,
+      "avg_piece": 606.4838454363272,
+      "peak_sold": 0,
+      "aug24_sold": 15840.196,
+      "total_sold": 50748.55122509001,
+      "net": -31341.068171127532,
+      "score": 25888582.73456,
+      "top_dest": "0x8f90008577d6b6be3972558143ec4163199b7aa3",
+      "top_dest_amt": 22491.684,
+      "main_src": "0x263a48a94e52db1570ba656cb4d9e834a207b8a6"
+    },
+    {
+      "wallet": "0xeff6cb8b614999d130e537751ee99724d01aa167",
+      "buy_pieces": 227,
+      "unique_days": 8,
+      "acc_total": 10490.097221771637,
+      "span_h": 175.98,
+      "avg_piece": 46.21188203423629,
+      "peak_sold": 1515.5104440927441,
+      "aug24_sold": 2714.457112275654,
+      "total_sold": 10881.344509099807,
+      "net": -108.90530788635934,
+      "score": 25798985.1541479,
+      "top_dest": "0x3902428a74a08a91e2cb2fd834de75e69974fe67",
+      "top_dest_amt": 10881.344509099807,
+      "main_src": "0x3902428a74a08a91e2cb2fd834de75e69974fe67"
+    },
+    {
+      "wallet": "0xd3a9d7f2337d1ff5b6a34469052757ac2f271362",
+      "buy_pieces": 26,
+      "unique_days": 7,
+      "acc_total": 70345.9195,
+      "span_h": 175.77666666666667,
+      "avg_piece": 2705.612288461539,
+      "peak_sold": 13400.0493,
+      "aug24_sold": 45998.587700000004,
+      "total_sold": 80730.465,
+      "net": -9.094947017729282e-13,
+      "score": 23200815.58013267,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 80730.465,
+      "main_src": "0x28c6c06298d514db089934071355e5743bf21d60"
+    },
+    {
+      "wallet": "0xe9a911b75ff5bb6e7b41a045b4d3ceedb6101381",
+      "buy_pieces": 5,
+      "unique_days": 3,
+      "acc_total": 172014.55832351,
+      "span_h": 158.37666666666667,
+      "avg_piece": 34402.911664702,
+      "peak_sold": 0,
+      "aug24_sold": 110650.01735004,
+      "total_sold": 172014.55832351,
+      "net": 0.0,
+      "score": 16816651.10909094,
+      "top_dest": "0xba0aa737d1e246fc1575bdef39eb6bf534234965",
+      "top_dest_amt": 172014.55832351,
+      "main_src": "0x28c6c06298d514db089934071355e5743bf21d60"
+    },
+    {
+      "wallet": "0xf30ca446b32d4c7f40d1d44ce3d66d626425005b",
+      "buy_pieces": 26,
+      "unique_days": 7,
+      "acc_total": 118882.908,
+      "span_h": 174.8,
+      "avg_piece": 4572.419538461539,
+      "peak_sold": 8450.646,
+      "aug24_sold": 39119.853,
+      "total_sold": 129440.43200000002,
+      "net": 1.3642420526593924e-12,
+      "score": 14559899.681600004,
+      "top_dest": "0x28c6c06298d514db089934071355e5743bf21d60",
+      "top_dest_amt": 129440.43200000002,
+      "main_src": "0x0d0707963952f2fba59dd06f2b425ace40b492fe"
+    }
+  ],
+  "top_net_holders": [
+    {
+      "wallet": "0xf3ec278a424150a114b0857ecdd5191ffa628c0a",
+      "net": 368662.4547151838,
+      "gross_in": 368662.4557151838,
+      "gross_out": 0.001
+    },
+    {
+      "wallet": "0xf8de96ebcdce19611af3ad642ca243c87479073e",
+      "net": 132166.79850188686,
+      "gross_in": 132166.79850188686,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x69f927ade8ec3020a92c0c0cfe5f316609b8d331",
+      "net": 28942.021959208996,
+      "gross_in": 422650.6545038924,
+      "gross_out": 393708.63254468376
+    },
+    {
+      "wallet": "0x9642b23ed1e01df1092b92641051881a322f5d4e",
+      "net": 7398.535600019999,
+      "gross_in": 15992.595599999999,
+      "gross_out": 8594.059999980002
+    },
+    {
+      "wallet": "0xa1b2fc929895240e7636d71efaf0090dc891da41",
+      "net": 2068.3955,
+      "gross_in": 2068.3955,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0xb8001c3ec9aa1985f6c747e25c28324e4a361ec1",
+      "net": 415.33881335,
+      "gross_in": 599.7,
+      "gross_out": 184.36118665
+    },
+    {
+      "wallet": "0x7c340ffdf04525dd18cfeebd9a9b5cdb1980f2e3",
+      "net": 390.84141864755924,
+      "gross_in": 390.84141864755924,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x8bb88a3eafd6ba0b6cce254c0c447c4cf5860afe",
+      "net": 299.0,
+      "gross_in": 2221.7999999999997,
+      "gross_out": 1922.8
+    },
+    {
+      "wallet": "0x120051a72966950b8ce12eb5496b5d1eeec1541b",
+      "net": 186.98373544999959,
+      "gross_in": 6398.73163545,
+      "gross_out": 6211.747899999999
+    },
+    {
+      "wallet": "0x19cc29954a602761aa3180cd0a33752dcbf4c290",
+      "net": 152.69,
+      "gross_in": 152.69,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x0c6b3716fa160eb4612064b2e783211cc675c027",
+      "net": 130.2751,
+      "gross_in": 130.2751,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x9b2356ac9e024ea4327b783fd957516e81e763d9",
+      "net": 96.13847000000001,
+      "gross_in": 96.13847000000001,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x5f1d65024f09036fa604ba0049450b8d017f2509",
+      "net": 72.76326956918251,
+      "gross_in": 72.76326956918251,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x64407b50ef9761081fd4784c60c4715e2f6e464d",
+      "net": 70.14997569477711,
+      "gross_in": 70.14997569477711,
+      "gross_out": 0
+    },
+    {
+      "wallet": "0x6f858f383842c887a82d30b392cfc686938413ec",
+      "net": 66.14699029172229,
+      "gross_in": 224.31843600000002,
+      "gross_out": 158.17144570827776
+    }
+  ]
+}
