@@ -255,8 +255,84 @@ body {
   padding-top: 0.85rem;
 }
 
+.verdict {
+  margin: 1rem 0;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--line);
+  background: rgba(28, 24, 20, 0.85);
+}
+.verdict.bias-bull { border-color: rgba(143, 209, 158, 0.45); }
+.verdict.bias-bear { border-color: rgba(224, 138, 92, 0.45); }
+.verdict-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+.eyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: var(--gold);
+}
+.verdict h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  margin: 0.25rem 0;
+  font-size: clamp(1.3rem, 3vw, 1.8rem);
+}
+.stamp {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.stamp.bull { color: #8fd19e; border-color: rgba(143, 209, 158, 0.5); }
+.stamp.bear { color: #e08a5c; border-color: rgba(224, 138, 92, 0.5); }
+.stamp.neutral { color: var(--muted); }
+.verdict-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 1rem;
+}
+.verdict h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.verdict ul { list-style: none; margin: 0; padding: 0; }
+.verdict li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.28rem 0;
+  border-bottom: 1px solid rgba(239, 230, 214, 0.06);
+  font-size: 0.86rem;
+}
+.verdict li em { color: var(--muted); font-style: normal; font-size: 0.75rem; }
+.verdict li.bull strong { color: #8fd19e; }
+.verdict li.bear strong { color: #e08a5c; }
+.bullets li { display: block; color: var(--muted); }
+.hourly table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.hourly th, .hourly td {
+  text-align: left;
+  padding: 0.22rem 0.3rem;
+  border-bottom: 1px solid rgba(239, 230, 214, 0.06);
+}
+
 @media (max-width: 800px) {
   .panels { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .refresh { margin-left: 0; width: 100%; }
+  .verdict-grid { grid-template-columns: 1fr; }
+  .verdict-top { flex-direction: column; }
 }

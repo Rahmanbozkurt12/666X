@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { DEFAULT_SYMBOLS, INTERVALS, fetchKlines } from "./lib/binance"
 import { analyze } from "./lib/ta/analyze"
+import { buildVerdict } from "./lib/ta/verdict"
 import type { Candle } from "./lib/ta/types"
 import { ChartView } from "./components/ChartView"
 import { AnalysisPanels } from "./components/AnalysisPanels"
+import { VerdictBoard } from "./components/VerdictBoard"
 import "./App.css"
 
 export default function App() {
@@ -17,29 +19,25 @@ export default function App() {
 
   const activeSymbol = (custom.trim().toUpperCase() || symbol).replace("/", "")
 
-  useEffect(() => {
-    let alive = true
+  const load = () => {
     setLoading(true)
     setError(null)
     fetchKlines(activeSymbol, interval, 500)
-      .then((c) => {
-        if (alive) setCandles(c)
-      })
-      .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : "Veri alınamadı")
-      })
-      .finally(() => {
-        if (alive) setLoading(false)
-      })
-    return () => {
-      alive = false
-    }
+      .then(setCandles)
+      .catch((e) => setError(e instanceof Error ? e.message : "Veri alınamadı"))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSymbol, interval])
 
   const analysis = useMemo(
     () => (candles.length ? analyze(activeSymbol, interval, candles) : null),
     [candles, activeSymbol, interval],
   )
+  const verdict = useMemo(() => (analysis ? buildVerdict(analysis) : null), [analysis])
 
   return (
     <div className="app">
@@ -47,10 +45,10 @@ export default function App() {
         <div className="hero-bg" />
         <div className="hero-copy">
           <p className="brand">RATIO</p>
-          <h1>Tek ekranda trader araç seti</h1>
+          <h1>Tüm analizleri tek motor çalıştırır</h1>
           <p className="lede">
             Price action, Fib/Gann/Pivot, formasyon, Elliot/Wyckoff, mumlar, indikatörler ve
-            volume profile — Binance mumlarıyla.
+            volume profile otomatik koşar → tek skor + 10 saatlik bant.
           </p>
         </div>
       </header>
@@ -58,25 +56,31 @@ export default function App() {
       <div className="toolbar">
         <label>
           Sembol
-          <select value={symbol} onChange={(e) => { setSymbol(e.target.value); setCustom("") }}>
+          <select
+            value={symbol}
+            onChange={(e) => {
+              setSymbol(e.target.value)
+              setCustom("")
+            }}
+          >
             {DEFAULT_SYMBOLS.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
           </select>
         </label>
         <label>
           Özel
-          <input
-            placeholder="ENAUSDT"
-            value={custom}
-            onChange={(e) => setCustom(e.target.value)}
-          />
+          <input placeholder="ENAUSDT" value={custom} onChange={(e) => setCustom(e.target.value)} />
         </label>
         <label>
           Zaman
           <select value={interval} onChange={(e) => setInterval(e.target.value as typeof interval)}>
             {INTERVALS.map((i) => (
-              <option key={i} value={i}>{i}</option>
+              <option key={i} value={i}>
+                {i}
+              </option>
             ))}
           </select>
         </label>
@@ -92,56 +96,27 @@ export default function App() {
             </label>
           ))}
         </div>
-        <button
-          type="button"
-          className="refresh"
-          onClick={() => {
-            setLoading(true)
-            fetchKlines(activeSymbol, interval, 500)
-              .then(setCandles)
-              .catch((e) => setError(e instanceof Error ? e.message : "Hata"))
-              .finally(() => setLoading(false))
-          }}
-        >
-          Yenile
+        <button type="button" className="refresh" onClick={load}>
+          Analiz çalıştır
         </button>
       </div>
 
       {error && <div className="banner err">{error}</div>}
-      {loading && <div className="banner">Yükleniyor…</div>}
+      {loading && <div className="banner">Tüm yöntemler çalışıyor…</div>}
 
-      {analysis && (
-        <div className="stats">
-          <div>
-            <em>{activeSymbol}</em>
-            <strong>{analysis.last >= 1 ? analysis.last.toFixed(4) : analysis.last.toFixed(6)}</strong>
-          </div>
-          <div>
-            <em>Trend</em>
-            <strong>{analysis.trend.direction}</strong>
-          </div>
-          <div>
-            <em>Wyckoff</em>
-            <strong>{analysis.wyckoff.phase}</strong>
-          </div>
-          <div>
-            <em>ATR%</em>
-            <strong>{analysis.atrPct.toFixed(2)}</strong>
-          </div>
-        </div>
+      {verdict && analysis && (
+        <VerdictBoard verdict={verdict} last={analysis.last} symbol={activeSymbol} />
       )}
 
       <main className="stage">
-        {candles.length > 0 && (
-          <ChartView candles={candles} analysis={analysis} show={show} />
-        )}
+        {candles.length > 0 && <ChartView candles={candles} analysis={analysis} show={show} />}
       </main>
 
       {analysis && <AnalysisPanels analysis={analysis} />}
 
       <footer className="foot">
-        Eğitim / araştırma aracıdır. Yatırım tavsiyesi değildir. Elliot & Wyckoff sezgiseldir;
-        tam manuel sayım değildir.
+        Otomatik motor eğitim amaçlıdır. Yatırım tavsiyesi değildir. CLI:{" "}
+        <code>python ta-lab/engine.py --symbol BTCUSDT</code>
       </footer>
     </div>
   )

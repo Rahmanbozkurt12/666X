@@ -1,25 +1,23 @@
 # RATIO — TA Lab
 
-Binance mum verisiyle trader araçlarını tek ekranda gösteren React uygulaması.
+Tüm trader analizlerini **otomatik çalıştıran** motor + ekran.
 
-## Çalıştır
+## Ne yapar?
+1. Binance mum çeker  
+2. Price action, Fib/Gann/Pivot, formasyon, Elliot/Wyckoff, mumlar, indikatörler, VPVR çalıştırır  
+3. Oyları birleştirir → **tek skor / bias / 10 saatlik bant**
 
+## Web
 ```bash
 cd ta-lab
 npm install
 npm run dev
 ```
 
-## Kapsam
-
-1. Price action — destek/direnç, trend, order block
-2. Fibonacci / Gann / Pivot
-3. Grafik formasyonları (W/M, bayrak, üçgen, OBO adayları)
-4. Elliot & Wyckoff (sezgisel)
-5. Mum yüzleri (Doji, Hammer, Engulfing…)
-6. EMA/SMA, RSI, MACD, Bollinger, VWAP, ATR
-7. Volume Profile (VPVR)
-
-Veri: Binance public klines (`www.binance.com` / `data-api.binance.vision`).
+## CLI (headless)
+```bash
+python ta-lab/engine.py --symbol BTCUSDT --interval 1h
+python ta-lab/engine.py --symbol SUSDT --json
+```
 
 Eğitim amaçlıdır; yatırım tavsiyesi değildir.
