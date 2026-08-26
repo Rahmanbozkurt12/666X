@@ -1,0 +1,545 @@
+{
+  "as_of_utc": "2026-08-26T20:32:39.037402+00:00",
+  "public_futures_top15_alts": [
+    {
+      "symbol": "SNDKUSDT",
+      "chg_24h%": 1.23,
+      "vol_$M": 2314.0,
+      "LS_ratio": 1.735,
+      "long_%": 63.4,
+      "OI_$M": 314.3,
+      "OI_1h_%": -1.13,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "XAUUSDT",
+      "chg_24h%": -1.53,
+      "vol_$M": 1883.6,
+      "LS_ratio": 1.175,
+      "long_%": 54.0,
+      "OI_$M": 362.0,
+      "OI_1h_%": -0.07,
+      "bias": "NEUTRAL"
+    },
+    {
+      "symbol": "ZECUSDT",
+      "chg_24h%": -0.21,
+      "vol_$M": 1280.7,
+      "LS_ratio": 0.554,
+      "long_%": 35.6,
+      "OI_$M": 407.3,
+      "OI_1h_%": -0.44,
+      "bias": "SHORT"
+    },
+    {
+      "symbol": "HYPEUSDT",
+      "chg_24h%": -0.53,
+      "vol_$M": 1189.3,
+      "LS_ratio": 1.061,
+      "long_%": 51.5,
+      "OI_$M": 398.5,
+      "OI_1h_%": -0.09,
+      "bias": "NEUTRAL"
+    },
+    {
+      "symbol": "SKHYNIXUSDT",
+      "chg_24h%": -0.04,
+      "vol_$M": 1086.2,
+      "LS_ratio": 2.399,
+      "long_%": 70.6,
+      "OI_$M": 356.6,
+      "OI_1h_%": -0.5,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "BTRUSDT",
+      "chg_24h%": 356.71,
+      "vol_$M": 1040.1,
+      "LS_ratio": 0.366,
+      "long_%": 26.8,
+      "OI_$M": 46.8,
+      "OI_1h_%": 0.73,
+      "bias": "SHORT"
+    },
+    {
+      "symbol": "SPCXUSDT",
+      "chg_24h%": 0.63,
+      "vol_$M": 981.8,
+      "LS_ratio": 2.007,
+      "long_%": 66.8,
+      "OI_$M": 221.9,
+      "OI_1h_%": 0.83,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "SOXLUSDT",
+      "chg_24h%": -0.68,
+      "vol_$M": 863.5,
+      "LS_ratio": 3.773,
+      "long_%": 79.0,
+      "OI_$M": 101.6,
+      "OI_1h_%": -2.19,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "XAGUSDT",
+      "chg_24h%": -1.2,
+      "vol_$M": 795.3,
+      "LS_ratio": 2.421,
+      "long_%": 70.8,
+      "OI_$M": 200.2,
+      "OI_1h_%": 0.18,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "ONGUSDT",
+      "chg_24h%": 70.39,
+      "vol_$M": 741.3,
+      "LS_ratio": 0.811,
+      "long_%": 44.8,
+      "OI_$M": 17.7,
+      "OI_1h_%": -6.48,
+      "bias": "SHORT"
+    },
+    {
+      "symbol": "KORUUSDT",
+      "chg_24h%": -1.29,
+      "vol_$M": 584.3,
+      "LS_ratio": 1.508,
+      "long_%": 60.1,
+      "OI_$M": 40.7,
+      "OI_1h_%": -0.94,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "MUUSDT",
+      "chg_24h%": 0.75,
+      "vol_$M": 505.6,
+      "LS_ratio": 1.531,
+      "long_%": 60.5,
+      "OI_$M": 114.6,
+      "OI_1h_%": -1.27,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "CLUSDT",
+      "chg_24h%": 1.43,
+      "vol_$M": 466.8,
+      "LS_ratio": 0.912,
+      "long_%": 47.7,
+      "OI_$M": 168.6,
+      "OI_1h_%": -0.39,
+      "bias": "NEUTRAL"
+    },
+    {
+      "symbol": "SNXXUSDT",
+      "chg_24h%": 2.56,
+      "vol_$M": 452.4,
+      "LS_ratio": 1.785,
+      "long_%": 64.1,
+      "OI_$M": 25.9,
+      "OI_1h_%": -1.61,
+      "bias": "LONG"
+    },
+    {
+      "symbol": "SKHYUSDT",
+      "chg_24h%": -0.53,
+      "vol_$M": 413.0,
+      "LS_ratio": 1.255,
+      "long_%": 55.7,
+      "OI_$M": 114.0,
+      "OI_1h_%": 0.31,
+      "bias": "LONG"
+    }
+  ],
+  "binance_hot_onchain_24h": [
+    {
+      "wallet": "Binance14",
+      "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+      "inbound_top": [
+        {
+          "address": "0xe67821b76985007b4cf744b0f045c8933b3e91d9",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 5000000.0,
+          "etherscan": "https://etherscan.io/address/0xe67821b76985007b4cf744b0f045c8933b3e91d9"
+        },
+        {
+          "address": "0xfe9529b753b412941127fea1981e5ce0a85c101e",
+          "label": null,
+          "token": "PROM",
+          "txs": 1,
+          "amount": 1649.9571,
+          "etherscan": "https://etherscan.io/address/0xfe9529b753b412941127fea1981e5ce0a85c101e"
+        },
+        {
+          "address": "0xee845948e6806d12e966137caa07d49bbe632fe3",
+          "label": null,
+          "token": "BIO",
+          "txs": 1,
+          "amount": 44112.39,
+          "etherscan": "https://etherscan.io/address/0xee845948e6806d12e966137caa07d49bbe632fe3"
+        },
+        {
+          "address": "0x27bffb0f09c18539f9a47a39958bb149fe42a155",
+          "label": null,
+          "token": "WLD",
+          "txs": 1,
+          "amount": 38251.15,
+          "etherscan": "https://etherscan.io/address/0x27bffb0f09c18539f9a47a39958bb149fe42a155"
+        },
+        {
+          "address": "0x06fd4ba7973a0d39a91734bbc35bc2bcaa99e3b0",
+          "label": null,
+          "token": "EIGEN",
+          "txs": 1,
+          "amount": 8451.9642,
+          "etherscan": "https://etherscan.io/address/0x06fd4ba7973a0d39a91734bbc35bc2bcaa99e3b0"
+        },
+        {
+          "address": "0x86a067030a9668c13ff2a8c4d5415afc776d4c63",
+          "label": null,
+          "token": "FET",
+          "txs": 1,
+          "amount": 41388.2265,
+          "etherscan": "https://etherscan.io/address/0x86a067030a9668c13ff2a8c4d5415afc776d4c63"
+        },
+        {
+          "address": "0xd5f5475502120ad0e3dbaa25ecedffd19d6569fa",
+          "label": null,
+          "token": "COW",
+          "txs": 1,
+          "amount": 99803.0,
+          "etherscan": "https://etherscan.io/address/0xd5f5475502120ad0e3dbaa25ecedffd19d6569fa"
+        },
+        {
+          "address": "0xbb9083e645e62b487d672df7a65c270269926cf7",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 380.0,
+          "etherscan": "https://etherscan.io/address/0xbb9083e645e62b487d672df7a65c270269926cf7"
+        }
+      ],
+      "outbound_top": [
+        {
+          "address": "0x55a0ea8f8d78c788acfb40a34ac4d8bd35bccf37",
+          "label": null,
+          "token": "YGG",
+          "txs": 1,
+          "amount": 14279.5741,
+          "etherscan": "https://etherscan.io/address/0x55a0ea8f8d78c788acfb40a34ac4d8bd35bccf37"
+        },
+        {
+          "address": "0x318006aee302113832d8515a1f6ec3797ecfa4b5",
+          "label": null,
+          "token": "PEPE",
+          "txs": 1,
+          "amount": 22850003.48,
+          "etherscan": "https://etherscan.io/address/0x318006aee302113832d8515a1f6ec3797ecfa4b5"
+        },
+        {
+          "address": "0xe9f0c70d1d2f009b1624dcb0de6a3544b41051b9",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 32.1335,
+          "etherscan": "https://etherscan.io/address/0xe9f0c70d1d2f009b1624dcb0de6a3544b41051b9"
+        },
+        {
+          "address": "0x1544a8899e6e32313ec85940dd8f996cabb5eb0e",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 19.7,
+          "etherscan": "https://etherscan.io/address/0x1544a8899e6e32313ec85940dd8f996cabb5eb0e"
+        },
+        {
+          "address": "0x7c081008e7cde5453d7f7f0d647652f64de6edb1",
+          "label": null,
+          "token": "SAND",
+          "txs": 1,
+          "amount": 225.757,
+          "etherscan": "https://etherscan.io/address/0x7c081008e7cde5453d7f7f0d647652f64de6edb1"
+        },
+        {
+          "address": "0xb8406f710171da772db7f84c65c764d24b7d2c7b",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 233.1214,
+          "etherscan": "https://etherscan.io/address/0xb8406f710171da772db7f84c65c764d24b7d2c7b"
+        },
+        {
+          "address": "0xdcdddf7bfd551c4b402f9ceecfd10214f3269a5d",
+          "label": null,
+          "token": "BICO",
+          "txs": 1,
+          "amount": 426948.0,
+          "etherscan": "https://etherscan.io/address/0xdcdddf7bfd551c4b402f9ceecfd10214f3269a5d"
+        },
+        {
+          "address": "0x8017fd347cb1ee6eb08d372618a374e113302819",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 17.0,
+          "etherscan": "https://etherscan.io/address/0x8017fd347cb1ee6eb08d372618a374e113302819"
+        }
+      ],
+      "inbound_events": 74,
+      "outbound_events": 26
+    },
+    {
+      "wallet": "Binance15",
+      "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+      "inbound_top": [],
+      "outbound_top": [
+        {
+          "address": "0xe5fa3bb4b86d6e5c056a23cbf4c4ae49cc1945c7",
+          "label": null,
+          "token": "USDT",
+          "txs": 2,
+          "amount": 105.205,
+          "etherscan": "https://etherscan.io/address/0xe5fa3bb4b86d6e5c056a23cbf4c4ae49cc1945c7"
+        },
+        {
+          "address": "0xbd26864b44ed988dbdbbc750f112163733b413e7",
+          "label": null,
+          "token": "USDT",
+          "txs": 2,
+          "amount": 2079.4,
+          "etherscan": "https://etherscan.io/address/0xbd26864b44ed988dbdbbc750f112163733b413e7"
+        },
+        {
+          "address": "0xf3374795a3d1448a0054263c29fec663f87bf684",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 21.0408,
+          "etherscan": "https://etherscan.io/address/0xf3374795a3d1448a0054263c29fec663f87bf684"
+        },
+        {
+          "address": "0x813473b3946a88add42bddd7aee83aaf8834ad52",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 99.7,
+          "etherscan": "https://etherscan.io/address/0x813473b3946a88add42bddd7aee83aaf8834ad52"
+        },
+        {
+          "address": "0x050b1aad34ed3100aa991062860e4974d867cd72",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 149.302,
+          "etherscan": "https://etherscan.io/address/0x050b1aad34ed3100aa991062860e4974d867cd72"
+        },
+        {
+          "address": "0x0a9ad7c21aa7e688134de4fbb69a4e3c73b01281",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 42.7,
+          "etherscan": "https://etherscan.io/address/0x0a9ad7c21aa7e688134de4fbb69a4e3c73b01281"
+        },
+        {
+          "address": "0xa5cd68cb373a7df0597952505f209e3d0a54780a",
+          "label": null,
+          "token": "ENA",
+          "txs": 1,
+          "amount": 22536.7975,
+          "etherscan": "https://etherscan.io/address/0xa5cd68cb373a7df0597952505f209e3d0a54780a"
+        },
+        {
+          "address": "0xe1923c84dd4c602da1a09aef86fd91e6b77cd37f",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 44.786,
+          "etherscan": "https://etherscan.io/address/0xe1923c84dd4c602da1a09aef86fd91e6b77cd37f"
+        }
+      ],
+      "inbound_events": 0,
+      "outbound_events": 100
+    },
+    {
+      "wallet": "Binance16",
+      "address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+      "inbound_top": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "label": "Binance 14",
+          "token": "CTSI",
+          "txs": 1,
+          "amount": 1146938.0201,
+          "etherscan": "https://etherscan.io/address/0x28c6c06298d514db089934071355e5743bf21d60"
+        }
+      ],
+      "outbound_top": [
+        {
+          "address": "0x8cc5c24a1666d3214340050315b82b2b6b0d9027",
+          "label": null,
+          "token": "WXRP",
+          "txs": 2,
+          "amount": 2542.85,
+          "etherscan": "https://etherscan.io/address/0x8cc5c24a1666d3214340050315b82b2b6b0d9027"
+        },
+        {
+          "address": "0x9a911c3bd4c7572d101f8abc57f5cb6e34a44fb6",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 1158.19,
+          "etherscan": "https://etherscan.io/address/0x9a911c3bd4c7572d101f8abc57f5cb6e34a44fb6"
+        },
+        {
+          "address": "0x1d3f0017d7bb68c04dad8078979ec810c3a2327a",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 145.3,
+          "etherscan": "https://etherscan.io/address/0x1d3f0017d7bb68c04dad8078979ec810c3a2327a"
+        },
+        {
+          "address": "0xcbf3f31a0dacfa4fb595f342a0cd87c39eeede55",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 42.949,
+          "etherscan": "https://etherscan.io/address/0xcbf3f31a0dacfa4fb595f342a0cd87c39eeede55"
+        },
+        {
+          "address": "0x2e24ab41d531521196fc3f854de3759d173efecd",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 2004.7,
+          "etherscan": "https://etherscan.io/address/0x2e24ab41d531521196fc3f854de3759d173efecd"
+        },
+        {
+          "address": "0x100aa480a684cb1505a6b73a21dde0ab78df5524",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 12.7,
+          "etherscan": "https://etherscan.io/address/0x100aa480a684cb1505a6b73a21dde0ab78df5524"
+        },
+        {
+          "address": "0x680dd69ef0154978f785c15e9139437eac255dfa",
+          "label": null,
+          "token": "RAD",
+          "txs": 1,
+          "amount": 49996.85,
+          "etherscan": "https://etherscan.io/address/0x680dd69ef0154978f785c15e9139437eac255dfa"
+        },
+        {
+          "address": "0x48c761468db1979aae4b3ea0e7971b031c3a6781",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 200.7,
+          "etherscan": "https://etherscan.io/address/0x48c761468db1979aae4b3ea0e7971b031c3a6781"
+        }
+      ],
+      "inbound_events": 1,
+      "outbound_events": 99
+    },
+    {
+      "wallet": "Binance8",
+      "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+      "inbound_top": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "label": "Binance 14",
+          "token": "NOM",
+          "txs": 2,
+          "amount": 309495747.561,
+          "etherscan": "https://etherscan.io/address/0x28c6c06298d514db089934071355e5743bf21d60"
+        },
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "label": "Binance 14",
+          "token": "DODO",
+          "txs": 1,
+          "amount": 31720181.38,
+          "etherscan": "https://etherscan.io/address/0x28c6c06298d514db089934071355e5743bf21d60"
+        },
+        {
+          "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+          "label": "Binance 15",
+          "token": "SUPER",
+          "txs": 1,
+          "amount": 5032094.38,
+          "etherscan": "https://etherscan.io/address/0x21a31ee1afc51d94c2efccaa2092ad1028285549"
+        },
+        {
+          "address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+          "label": "Binance 16",
+          "token": "SUPER",
+          "txs": 1,
+          "amount": 4600829.778,
+          "etherscan": "https://etherscan.io/address/0xdfd5293d8e347dfe59e90efd55b2956a1343963d"
+        },
+        {
+          "address": "0x80c229baa90051a9bb727cfa5102671f3a0a57dc",
+          "label": null,
+          "token": "USDT",
+          "txs": 1,
+          "amount": 1.0,
+          "etherscan": "https://etherscan.io/address/0x80c229baa90051a9bb727cfa5102671f3a0a57dc"
+        },
+        {
+          "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+          "label": "Binance 15",
+          "token": "DUSK",
+          "txs": 1,
+          "amount": 81824.468,
+          "etherscan": "https://etherscan.io/address/0x21a31ee1afc51d94c2efccaa2092ad1028285549"
+        },
+        {
+          "address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+          "label": "Binance 16",
+          "token": "BAND",
+          "txs": 1,
+          "amount": 193569.303,
+          "etherscan": "https://etherscan.io/address/0xdfd5293d8e347dfe59e90efd55b2956a1343963d"
+        },
+        {
+          "address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549",
+          "label": "Binance 15",
+          "token": "BAND",
+          "txs": 1,
+          "amount": 200426.814,
+          "etherscan": "https://etherscan.io/address/0x21a31ee1afc51d94c2efccaa2092ad1028285549"
+        }
+      ],
+      "outbound_top": [
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "label": "Binance 14",
+          "token": "COW",
+          "txs": 1,
+          "amount": 5495797.866,
+          "etherscan": "https://etherscan.io/address/0x28c6c06298d514db089934071355e5743bf21d60"
+        },
+        {
+          "address": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "label": "Binance 14",
+          "token": "USDE",
+          "txs": 1,
+          "amount": 18899985.331,
+          "etherscan": "https://etherscan.io/address/0x28c6c06298d514db089934071355e5743bf21d60"
+        }
+      ],
+      "inbound_events": 22,
+      "outbound_events": 2
+    }
+  ],
+  "meaning": {
+    "futures": "L/S>1 crowd long bias \u2014 NOT individual wallets",
+    "onchain_IN": "deposit into Binance hot (sell/withdraw prep or deposit)",
+    "onchain_OUT": "withdraw from Binance hot to external wallet"
+  }
+}
