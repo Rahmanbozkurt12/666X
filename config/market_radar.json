@@ -1,17 +1,28 @@
 {
   "settings": {
-    "poll_seconds": 120,
+    "poll_seconds": 180,
     "dry_run_default": true,
-    "max_alerts_per_cycle": 12,
-    "min_quote_volume_usdt": 2000000,
-    "fomo_chg_pct": 8.0,
-    "fomo_vol_z": 2.5,
-    "korea_lead_ratio": 1.15,
-    "squeeze_funding_lt": -0.0003,
-    "squeeze_oi_drop_pct": 1.5,
-    "squeeze_price_up_pct": 1.0,
-    "dump_risk_chg_pct": 12.0,
-    "majors_exclude": ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "USDCUSDT", "FDUSDUSDT"]
+    "max_alerts_per_cycle": 8,
+    "min_severity_to_alert": 4,
+    "min_quote_volume_usdt": 5000000,
+    "fomo_chg_pct": 12.0,
+    "korea_lead_ratio": 1.5,
+    "korea_min_vol_usdt": 8000000,
+    "squeeze_funding_lt": -0.0005,
+    "squeeze_oi_drop_pct": 2.5,
+    "squeeze_price_up_pct": 5.0,
+    "squeeze_require_taker_buy": true,
+    "dump_risk_chg_pct": 25.0,
+    "dump_risk_funding_gt": 0.0008,
+    "alert_cooldown_hours": 6,
+    "http_retries": 4,
+    "http_timeout_sec": 25,
+    "futures_sleep_sec": 0.08,
+    "mute_kinds": ["CEX_ORDERBOOK"],
+    "majors_exclude": [
+      "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+      "USDCUSDT", "FDUSDUSDT", "EURUSDT", "USD1USDT"
+    ]
   },
   "watchlist": [
     "ZKCUSDT",
@@ -22,5 +33,5 @@
     "WLDUSDT",
     "PENDLEUSDT"
   ],
-  "always_scan_top_n": 40
+  "always_scan_top_n": 30
 }

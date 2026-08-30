@@ -6,3 +6,5 @@ __pycache__/
 ta-lab/node_modules/
 ta-lab/dist/
 output/market_radar_state.json
+output/market_radar.log
+output/market_radar_health.json

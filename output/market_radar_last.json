@@ -1,355 +1,93 @@
 {
-  "as_of_utc": "2026-08-30T20:20:45.677052+00:00",
+  "as_of_utc": "2026-08-30T20:27:14.158078+00:00",
   "disclaimer": "Research alerts only. Not financial advice. No auto-trading.",
+  "degraded": false,
+  "dry_run": true,
   "fx": {
     "USDT_TRY": 48.21,
-    "USDT_KRW": 1385.0
+    "USDT_KRW": 1386.0
   },
-  "signal_count": 16,
-  "fresh_alerts": [
+  "signal_count_raw": 10,
+  "signal_count_filtered": 5,
+  "fresh_alerts": [],
+  "all_signals_filtered": [
     {
       "kind": "CEX_FOMO",
       "symbol": "ZKCUSDT",
       "severity": 5,
       "title": "CEX FOMO ZKC",
-      "detail": "Binance spot +60.0% · 24h vol $23.0M",
+      "detail": "Binance spot +64.2% · 24h vol $23.1M",
       "metrics": {
-        "chg_pct": 60.05,
-        "binance_vol_usdt": 22995391.42079
-      }
+        "chg_pct": 64.232,
+        "binance_vol_usdt": 23080277.34017
+      },
+      "confirmations": 3
     },
     {
       "kind": "KOREA_FOMO",
       "symbol": "ZKCUSDT",
       "severity": 5,
       "title": "Korea lead FOMO ZKC",
-      "detail": "Korea vol $92.1M vs Binance $23.0M (x4.01) · chg +60.0%",
+      "detail": "Korea $92.2M vs Binance $23.1M (x4.00) · chg +64.2%",
       "metrics": {
-        "korea_vol_usdt": 92142705.885923,
-        "binance_vol_usdt": 22995391.42079,
-        "korea_lead_x": 4.007007499886143,
-        "chg_pct": 60.05
-      }
+        "korea_vol_usdt": 92228375.67272377,
+        "binance_vol_usdt": 23080277.34017,
+        "korea_lead_x": 3.9959821241924667,
+        "chg_pct": 64.232
+      },
+      "confirmations": 3
     },
     {
       "kind": "KOREA_FOMO",
       "symbol": "AUCTIONUSDT",
       "severity": 5,
       "title": "Korea lead FOMO AUCTION",
-      "detail": "Korea vol $30.0M vs Binance $11.1M (x2.71) · chg +28.6%",
+      "detail": "Korea $30.0M vs Binance $11.1M (x2.70) · chg +27.4%",
       "metrics": {
-        "korea_vol_usdt": 29989655.683017332,
-        "binance_vol_usdt": 11077210.81052,
-        "korea_lead_x": 2.7073291459377327,
-        "chg_pct": 28.553
-      }
-    },
-    {
-      "kind": "SHORT_SQUEEZE",
-      "symbol": "TNSRUSDT",
-      "severity": 5,
-      "title": "Short squeeze risk TNSR",
-      "detail": "funding -0.00056 · OI 1h -7.35% · spot +18.9% · L/S 1.7307",
-      "metrics": {
-        "funding": -0.00056211,
-        "oi_1h_chg_pct": -7.350951369967512,
-        "ls_ratio": 1.7307,
-        "taker_bs": 0.8187,
-        "chg_pct": 18.879
-      }
+        "korea_vol_usdt": 30044760.740786187,
+        "binance_vol_usdt": 11139563.06801,
+        "korea_lead_x": 2.697122010742694,
+        "chg_pct": 27.411
+      },
+      "confirmations": 3
     },
     {
       "kind": "KOREA_FOMO",
       "symbol": "ZKPUSDT",
       "severity": 5,
       "title": "Korea lead FOMO ZKP",
-      "detail": "Korea vol $60.9M vs Binance $11.2M (x5.43) · chg +11.8%",
+      "detail": "Korea $60.9M vs Binance $11.2M (x5.43) · chg +12.2%",
       "metrics": {
-        "korea_vol_usdt": 60885599.72194751,
-        "binance_vol_usdt": 11218708.86275,
-        "korea_lead_x": 5.427148566454808,
-        "chg_pct": 11.765
-      }
-    },
-    {
-      "kind": "KOREA_FOMO",
-      "symbol": "PROMUSDT",
-      "severity": 5,
-      "title": "Korea lead FOMO PROM",
-      "detail": "Korea vol $102.3M vs Binance $22.4M (x4.57) · chg +5.6%",
-      "metrics": {
-        "korea_vol_usdt": 102292691.77809763,
-        "binance_vol_usdt": 22371790.39252,
-        "korea_lead_x": 4.572396307284336,
-        "chg_pct": 5.605
-      }
+        "korea_vol_usdt": 60871347.76285855,
+        "binance_vol_usdt": 11218848.76466,
+        "korea_lead_x": 5.425810530097053,
+        "chg_pct": 12.185
+      },
+      "confirmations": 3
     },
     {
       "kind": "CEX_FOMO",
       "symbol": "AUCTIONUSDT",
       "severity": 4,
       "title": "CEX FOMO AUCTION",
-      "detail": "Binance spot +28.6% · 24h vol $11.1M",
+      "detail": "Binance spot +27.4% · 24h vol $11.1M",
       "metrics": {
-        "chg_pct": 28.553,
-        "binance_vol_usdt": 11077210.81052
-      }
-    },
-    {
-      "kind": "TURKEY_FOMO",
-      "symbol": "ZKCUSDT",
-      "severity": 3,
-      "title": "TR CEX hot ZKC",
-      "detail": "BtcTurk≈$12.7M · Binance $23.0M · +60.0%",
-      "metrics": {
-        "btcturk_vol_usdt": 12683195.070450112,
-        "chg_pct": 60.05
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "TNSRUSDT",
-      "severity": 3,
-      "title": "CEX FOMO TNSR",
-      "detail": "Binance spot +18.9% · 24h vol $8.0M",
-      "metrics": {
-        "chg_pct": 18.879,
-        "binance_vol_usdt": 8015994.46026
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "UNIUSDT",
-      "severity": 3,
-      "title": "CEX FOMO UNI",
-      "detail": "Binance spot +14.9% · 24h vol $69.2M",
-      "metrics": {
-        "chg_pct": 14.904,
-        "binance_vol_usdt": 69156410.08256
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "ZKUSDT",
-      "severity": 3,
-      "title": "CEX FOMO ZK",
-      "detail": "Binance spot +13.8% · 24h vol $10.5M",
-      "metrics": {
-        "chg_pct": 13.752,
-        "binance_vol_usdt": 10457199.06169
-      }
-    },
-    {
-      "kind": "TURKEY_FOMO",
-      "symbol": "ZKUSDT",
-      "severity": 3,
-      "title": "TR CEX hot ZK",
-      "detail": "BtcTurk≈$3.9M · Binance $10.5M · +13.8%",
-      "metrics": {
-        "btcturk_vol_usdt": 3866135.6340902303,
-        "chg_pct": 13.752
-      }
-    }
-  ],
-  "all_signals": [
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "ZKCUSDT",
-      "severity": 5,
-      "title": "CEX FOMO ZKC",
-      "detail": "Binance spot +60.0% · 24h vol $23.0M",
-      "metrics": {
-        "chg_pct": 60.05,
-        "binance_vol_usdt": 22995391.42079
-      }
-    },
-    {
-      "kind": "KOREA_FOMO",
-      "symbol": "ZKCUSDT",
-      "severity": 5,
-      "title": "Korea lead FOMO ZKC",
-      "detail": "Korea vol $92.1M vs Binance $23.0M (x4.01) · chg +60.0%",
-      "metrics": {
-        "korea_vol_usdt": 92142705.885923,
-        "binance_vol_usdt": 22995391.42079,
-        "korea_lead_x": 4.007007499886143,
-        "chg_pct": 60.05
-      }
-    },
-    {
-      "kind": "KOREA_FOMO",
-      "symbol": "AUCTIONUSDT",
-      "severity": 5,
-      "title": "Korea lead FOMO AUCTION",
-      "detail": "Korea vol $30.0M vs Binance $11.1M (x2.71) · chg +28.6%",
-      "metrics": {
-        "korea_vol_usdt": 29989655.683017332,
-        "binance_vol_usdt": 11077210.81052,
-        "korea_lead_x": 2.7073291459377327,
-        "chg_pct": 28.553
-      }
-    },
-    {
-      "kind": "SHORT_SQUEEZE",
-      "symbol": "TNSRUSDT",
-      "severity": 5,
-      "title": "Short squeeze risk TNSR",
-      "detail": "funding -0.00056 · OI 1h -7.35% · spot +18.9% · L/S 1.7307",
-      "metrics": {
-        "funding": -0.00056211,
-        "oi_1h_chg_pct": -7.350951369967512,
-        "ls_ratio": 1.7307,
-        "taker_bs": 0.8187,
-        "chg_pct": 18.879
-      }
-    },
-    {
-      "kind": "KOREA_FOMO",
-      "symbol": "ZKPUSDT",
-      "severity": 5,
-      "title": "Korea lead FOMO ZKP",
-      "detail": "Korea vol $60.9M vs Binance $11.2M (x5.43) · chg +11.8%",
-      "metrics": {
-        "korea_vol_usdt": 60885599.72194751,
-        "binance_vol_usdt": 11218708.86275,
-        "korea_lead_x": 5.427148566454808,
-        "chg_pct": 11.765
-      }
-    },
-    {
-      "kind": "KOREA_FOMO",
-      "symbol": "PROMUSDT",
-      "severity": 5,
-      "title": "Korea lead FOMO PROM",
-      "detail": "Korea vol $102.3M vs Binance $22.4M (x4.57) · chg +5.6%",
-      "metrics": {
-        "korea_vol_usdt": 102292691.77809763,
-        "binance_vol_usdt": 22371790.39252,
-        "korea_lead_x": 4.572396307284336,
-        "chg_pct": 5.605
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "AUCTIONUSDT",
-      "severity": 4,
-      "title": "CEX FOMO AUCTION",
-      "detail": "Binance spot +28.6% · 24h vol $11.1M",
-      "metrics": {
-        "chg_pct": 28.553,
-        "binance_vol_usdt": 11077210.81052
-      }
-    },
-    {
-      "kind": "TURKEY_FOMO",
-      "symbol": "ZKCUSDT",
-      "severity": 3,
-      "title": "TR CEX hot ZKC",
-      "detail": "BtcTurk≈$12.7M · Binance $23.0M · +60.0%",
-      "metrics": {
-        "btcturk_vol_usdt": 12683195.070450112,
-        "chg_pct": 60.05
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "TNSRUSDT",
-      "severity": 3,
-      "title": "CEX FOMO TNSR",
-      "detail": "Binance spot +18.9% · 24h vol $8.0M",
-      "metrics": {
-        "chg_pct": 18.879,
-        "binance_vol_usdt": 8015994.46026
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "UNIUSDT",
-      "severity": 3,
-      "title": "CEX FOMO UNI",
-      "detail": "Binance spot +14.9% · 24h vol $69.2M",
-      "metrics": {
-        "chg_pct": 14.904,
-        "binance_vol_usdt": 69156410.08256
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "ZKUSDT",
-      "severity": 3,
-      "title": "CEX FOMO ZK",
-      "detail": "Binance spot +13.8% · 24h vol $10.5M",
-      "metrics": {
-        "chg_pct": 13.752,
-        "binance_vol_usdt": 10457199.06169
-      }
-    },
-    {
-      "kind": "TURKEY_FOMO",
-      "symbol": "ZKUSDT",
-      "severity": 3,
-      "title": "TR CEX hot ZK",
-      "detail": "BtcTurk≈$3.9M · Binance $10.5M · +13.8%",
-      "metrics": {
-        "btcturk_vol_usdt": 3866135.6340902303,
-        "chg_pct": 13.752
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "ZKPUSDT",
-      "severity": 3,
-      "title": "CEX FOMO ZKP",
-      "detail": "Binance spot +11.8% · 24h vol $11.2M",
-      "metrics": {
-        "chg_pct": 11.765,
-        "binance_vol_usdt": 11218708.86275
-      }
-    },
-    {
-      "kind": "CEX_FOMO",
-      "symbol": "CAKEUSDT",
-      "severity": 3,
-      "title": "CEX FOMO CAKE",
-      "detail": "Binance spot +8.1% · 24h vol $7.7M",
-      "metrics": {
-        "chg_pct": 8.116,
-        "binance_vol_usdt": 7706968.77056
-      }
-    },
-    {
-      "kind": "CEX_ORDERBOOK",
-      "symbol": "ZKCUSDT",
-      "severity": 2,
-      "title": "CEX orderbook move ZKC",
-      "detail": "Büyük CEX hacmi — on-chain whale varsayma; önce funding/OI/Kore teyidi",
-      "metrics": {
-        "chg_pct": 60.05,
-        "binance_vol_usdt": 22995391.42079
-      }
-    },
-    {
-      "kind": "CEX_ORDERBOOK",
-      "symbol": "AUCTIONUSDT",
-      "severity": 2,
-      "title": "CEX orderbook move AUCTION",
-      "detail": "Büyük CEX hacmi — on-chain whale varsayma; önce funding/OI/Kore teyidi",
-      "metrics": {
-        "chg_pct": 28.553,
-        "binance_vol_usdt": 11077210.81052
-      }
+        "chg_pct": 27.411,
+        "binance_vol_usdt": 11139563.06801
+      },
+      "confirmations": 3
     }
   ],
   "snapshots_top": [
     {
       "symbol": "ZKCUSDT",
-      "last": 0.0637,
-      "chg_pct": 60.05,
-      "binance_vol_usdt": 22995391.42079,
-      "korea_vol_usdt": 92142705.89,
-      "btcturk_vol_usdt": 12683195.07,
+      "last": 0.0652,
+      "chg_pct": 64.232,
+      "binance_vol_usdt": 23080277.34017,
+      "korea_vol_usdt": 92228375.67,
+      "btcturk_vol_usdt": 12975973.47,
       "futures": {
-        "funding": -0.00122221,
+        "funding": -0.00121785,
         "ls_ratio": 0.9508,
         "oi_usd": 8798902.04523096,
         "oi_1h_chg_pct": -0.5352364855315088,
@@ -364,13 +102,13 @@
     },
     {
       "symbol": "AUCTIONUSDT",
-      "last": 4.052,
-      "chg_pct": 28.553,
-      "binance_vol_usdt": 11077210.81052,
-      "korea_vol_usdt": 29989655.68,
+      "last": 4.016,
+      "chg_pct": 27.411,
+      "binance_vol_usdt": 11139563.06801,
+      "korea_vol_usdt": 30044760.74,
       "btcturk_vol_usdt": 0.0,
       "futures": {
-        "funding": -0.00130642,
+        "funding": -0.00131725,
         "ls_ratio": 1.3629,
         "oi_usd": 3839427.58620201,
         "oi_1h_chg_pct": 11.000652437001936,
@@ -378,36 +116,34 @@
       },
       "signals": [
         "CEX_FOMO",
-        "KOREA_FOMO",
-        "CEX_ORDERBOOK"
+        "KOREA_FOMO"
       ]
     },
     {
-      "symbol": "TNSRUSDT",
-      "last": 0.0403,
-      "chg_pct": 18.879,
-      "binance_vol_usdt": 8015994.46026,
-      "korea_vol_usdt": 0.0,
-      "btcturk_vol_usdt": 0.0,
+      "symbol": "ZKUSDT",
+      "last": 0.00947,
+      "chg_pct": 14.372,
+      "binance_vol_usdt": 10484050.883678,
+      "korea_vol_usdt": 10288096.99,
+      "btcturk_vol_usdt": 3884986.94,
       "futures": {
-        "funding": -0.00056211,
-        "ls_ratio": 1.7307,
-        "oi_usd": 3706788.33887625,
-        "oi_1h_chg_pct": -7.350951369967512,
-        "taker_bs": 0.8187
+        "funding": 5e-05,
+        "ls_ratio": 1.1753,
+        "oi_usd": 5595706.64943492,
+        "oi_1h_chg_pct": 2.1877983117102944,
+        "taker_bs": 1.1489
       },
       "signals": [
-        "CEX_FOMO",
-        "SHORT_SQUEEZE"
+        "CEX_FOMO"
       ]
     },
     {
       "symbol": "UNIUSDT",
-      "last": 5.366,
-      "chg_pct": 14.904,
-      "binance_vol_usdt": 69156410.08256,
-      "korea_vol_usdt": 11012853.32,
-      "btcturk_vol_usdt": 1773314.04,
+      "last": 5.329,
+      "chg_pct": 14.356,
+      "binance_vol_usdt": 69351387.81842,
+      "korea_vol_usdt": 11024977.84,
+      "btcturk_vol_usdt": 1754759.74,
       "futures": {
         "funding": 0.0001,
         "ls_ratio": 1.6103,
@@ -420,33 +156,14 @@
       ]
     },
     {
-      "symbol": "ZKUSDT",
-      "last": 0.00943,
-      "chg_pct": 13.752,
-      "binance_vol_usdt": 10457199.06169,
-      "korea_vol_usdt": 10294223.37,
-      "btcturk_vol_usdt": 3866135.63,
-      "futures": {
-        "funding": 5e-05,
-        "ls_ratio": 1.1753,
-        "oi_usd": 5595706.64943492,
-        "oi_1h_chg_pct": 2.1877983117102944,
-        "taker_bs": 1.1489
-      },
-      "signals": [
-        "CEX_FOMO",
-        "TURKEY_FOMO"
-      ]
-    },
-    {
       "symbol": "ZKPUSDT",
-      "last": 0.0532,
-      "chg_pct": 11.765,
-      "binance_vol_usdt": 11218708.86275,
-      "korea_vol_usdt": 60885599.72,
+      "last": 0.0534,
+      "chg_pct": 12.185,
+      "binance_vol_usdt": 11218848.76466,
+      "korea_vol_usdt": 60871347.76,
       "btcturk_vol_usdt": 0.0,
       "futures": {
-        "funding": -0.00076188,
+        "funding": -0.00076191,
         "ls_ratio": 1.416,
         "oi_usd": 4134132.1925,
         "oi_1h_chg_pct": 1.6603052344794391,
@@ -458,46 +175,28 @@
       ]
     },
     {
-      "symbol": "CAKEUSDT",
-      "last": 1.865,
-      "chg_pct": 8.116,
-      "binance_vol_usdt": 7706968.77056,
-      "korea_vol_usdt": 36865.16,
-      "btcturk_vol_usdt": 0.0,
+      "symbol": "TRUMPUSDT",
+      "last": 2.539,
+      "chg_pct": -5.402,
+      "binance_vol_usdt": 36110897.33124,
+      "korea_vol_usdt": 56781523.61,
+      "btcturk_vol_usdt": 2765339.94,
       "futures": {
-        "funding": 5e-05,
-        "ls_ratio": 1.7211,
-        "oi_usd": 12696413.5584,
-        "oi_1h_chg_pct": -0.40994106508216077,
-        "taker_bs": 0.8209
-      },
-      "signals": [
-        "CEX_FOMO"
-      ]
-    },
-    {
-      "symbol": "HEMIUSDT",
-      "last": 0.01269,
-      "chg_pct": 6.908,
-      "binance_vol_usdt": 8194107.807751,
-      "korea_vol_usdt": 5789858.98,
-      "btcturk_vol_usdt": 0.0,
-      "futures": {
-        "funding": 5e-05,
-        "ls_ratio": 0.8252,
-        "oi_usd": 17853621.524382,
-        "oi_1h_chg_pct": 4.867220009832924,
-        "taker_bs": 1.0283
+        "funding": -5.856e-05,
+        "ls_ratio": 2.2394,
+        "oi_usd": 77455715.77584,
+        "oi_1h_chg_pct": -1.6693705915123018,
+        "taker_bs": 0.825
       },
       "signals": []
     },
     {
       "symbol": "DASHUSDT",
-      "last": 44.04,
-      "chg_pct": 5.942,
-      "binance_vol_usdt": 11867090.69906,
+      "last": 43.67,
+      "chg_pct": 5.178,
+      "binance_vol_usdt": 11911200.78092,
       "korea_vol_usdt": 0.0,
-      "btcturk_vol_usdt": 2059160.95,
+      "btcturk_vol_usdt": 2037859.68,
       "futures": {
         "funding": 0.0001,
         "ls_ratio": 1.4056,
@@ -508,29 +207,11 @@
       "signals": []
     },
     {
-      "symbol": "PROMUSDT",
-      "last": 6.67,
-      "chg_pct": 5.605,
-      "binance_vol_usdt": 22371790.39252,
-      "korea_vol_usdt": 102292691.78,
-      "btcturk_vol_usdt": 0.0,
-      "futures": {
-        "funding": 5e-05,
-        "ls_ratio": 0.6082,
-        "oi_usd": 26058370.0333856,
-        "oi_1h_chg_pct": -3.0027753608307344,
-        "taker_bs": 0.9648
-      },
-      "signals": [
-        "KOREA_FOMO"
-      ]
-    },
-    {
       "symbol": "PENDLEUSDT",
-      "last": 1.796,
-      "chg_pct": 5.152,
-      "binance_vol_usdt": 2448547.2163,
-      "korea_vol_usdt": 315231.27,
+      "last": 1.792,
+      "chg_pct": 5.041,
+      "binance_vol_usdt": 2448325.1124,
+      "korea_vol_usdt": 315013.92,
       "btcturk_vol_usdt": 0.0,
       "futures": {
         "funding": 0.0001,
@@ -542,12 +223,28 @@
       "signals": []
     },
     {
+      "symbol": "BMTUSDT",
+      "last": 0.02118,
+      "chg_pct": -4.638,
+      "binance_vol_usdt": 14742387.904767,
+      "korea_vol_usdt": 680768.46,
+      "btcturk_vol_usdt": 0.0,
+      "futures": {
+        "funding": -7.356e-05,
+        "ls_ratio": 0.7825,
+        "oi_usd": 3589223.44649084,
+        "oi_1h_chg_pct": -3.572073016044582,
+        "taker_bs": 0.4968
+      },
+      "signals": []
+    },
+    {
       "symbol": "FETUSDT",
-      "last": 0.156,
-      "chg_pct": 3.654,
-      "binance_vol_usdt": 10661862.89672,
-      "korea_vol_usdt": 68135.06,
-      "btcturk_vol_usdt": 992057.65,
+      "last": 0.1561,
+      "chg_pct": 4.067,
+      "binance_vol_usdt": 10627159.15157,
+      "korea_vol_usdt": 68085.9,
+      "btcturk_vol_usdt": 984255.05,
       "futures": {
         "funding": 0.0001,
         "ls_ratio": 1.4857,
@@ -559,13 +256,13 @@
     },
     {
       "symbol": "ZECUSDT",
-      "last": 866.3,
-      "chg_pct": 3.425,
-      "binance_vol_usdt": 110373096.1118,
+      "last": 865.43,
+      "chg_pct": 3.643,
+      "binance_vol_usdt": 110303274.96856,
       "korea_vol_usdt": 0.0,
       "btcturk_vol_usdt": 0.0,
       "futures": {
-        "funding": 4.14e-06,
+        "funding": 3.39e-06,
         "ls_ratio": 0.4529,
         "oi_usd": 520832543.7381116,
         "oi_1h_chg_pct": -0.6697556260037861,
@@ -574,14 +271,30 @@
       "signals": []
     },
     {
-      "symbol": "ENAUSDT",
-      "last": 0.1602,
-      "chg_pct": 2.561,
-      "binance_vol_usdt": 28717751.698994,
-      "korea_vol_usdt": 19368576.26,
-      "btcturk_vol_usdt": 1146795.93,
+      "symbol": "PUMPUSDT",
+      "last": 0.004701,
+      "chg_pct": -3.391,
+      "binance_vol_usdt": 30795556.798374,
+      "korea_vol_usdt": 3042431.36,
+      "btcturk_vol_usdt": 3958265.19,
       "futures": {
-        "funding": -3.049e-05,
+        "funding": -1.23e-05,
+        "ls_ratio": 1.3397,
+        "oi_usd": 112111627.76383103,
+        "oi_1h_chg_pct": -2.5166060259896175,
+        "taker_bs": 0.7996
+      },
+      "signals": []
+    },
+    {
+      "symbol": "ENAUSDT",
+      "last": 0.1601,
+      "chg_pct": 2.694,
+      "binance_vol_usdt": 28751747.687446,
+      "korea_vol_usdt": 19370495.93,
+      "btcturk_vol_usdt": 1140144.28,
+      "futures": {
+        "funding": -2.726e-05,
         "ls_ratio": 1.7382,
         "oi_usd": 99220664.1783,
         "oi_1h_chg_pct": -2.0800948529589283,
@@ -591,13 +304,13 @@
     },
     {
       "symbol": "AAVEUSDT",
-      "last": 127.26,
-      "chg_pct": 2.135,
-      "binance_vol_usdt": 15737635.7074,
-      "korea_vol_usdt": 1463869.04,
-      "btcturk_vol_usdt": 284724.32,
+      "last": 127.2,
+      "chg_pct": 2.119,
+      "binance_vol_usdt": 15755229.92488,
+      "korea_vol_usdt": 1468445.05,
+      "btcturk_vol_usdt": 283759.64,
       "futures": {
-        "funding": 4.212e-05,
+        "funding": 4.052e-05,
         "ls_ratio": 1.3929,
         "oi_usd": 57907253.36,
         "oi_1h_chg_pct": -0.9880584460546099,
@@ -606,30 +319,14 @@
       "signals": []
     },
     {
-      "symbol": "TUTUSDT",
-      "last": 0.03572,
-      "chg_pct": 2.028,
-      "binance_vol_usdt": 11397087.18782,
-      "korea_vol_usdt": 0.0,
-      "btcturk_vol_usdt": 0.0,
-      "futures": {
-        "funding": -0.00943079,
-        "ls_ratio": 1.2707,
-        "oi_usd": 13720996.7454,
-        "oi_1h_chg_pct": -0.12272834161528894,
-        "taker_bs": 1.0075
-      },
-      "signals": []
-    },
-    {
       "symbol": "WLDUSDT",
-      "last": 0.3841,
-      "chg_pct": 1.883,
-      "binance_vol_usdt": 13937093.12912,
-      "korea_vol_usdt": 16127784.04,
-      "btcturk_vol_usdt": 486440.75,
+      "last": 0.3835,
+      "chg_pct": 2.049,
+      "binance_vol_usdt": 13899636.90402,
+      "korea_vol_usdt": 16189080.62,
+      "btcturk_vol_usdt": 485862.76,
       "futures": {
-        "funding": -0.0002283,
+        "funding": -0.00023231,
         "ls_ratio": 1.3348,
         "oi_usd": 67324738.0212,
         "oi_1h_chg_pct": -1.0432468038880598,
@@ -638,56 +335,62 @@
       "signals": []
     },
     {
-      "symbol": "LTCUSDT",
-      "last": 49.72,
-      "chg_pct": 1.345,
-      "binance_vol_usdt": 8581965.17793,
-      "korea_vol_usdt": 0.0,
-      "btcturk_vol_usdt": 37984.43,
+      "symbol": "PROMUSDT",
+      "last": 6.649,
+      "chg_pct": 1.838,
+      "binance_vol_usdt": 22254974.60489,
+      "korea_vol_usdt": 101941648.26,
+      "btcturk_vol_usdt": 0.0,
       "futures": {
-        "funding": 6.436e-05,
-        "ls_ratio": 2.1766,
-        "oi_usd": 59464214.05805,
-        "oi_1h_chg_pct": -0.24163004621727355,
-        "taker_bs": 1.0594
+        "funding": 5e-05,
+        "ls_ratio": 0.6082,
+        "oi_usd": 26058370.0333856,
+        "oi_1h_chg_pct": -3.0027753608307344,
+        "taker_bs": 0.9648
       },
       "signals": []
     },
     {
-      "symbol": "PEPEUSDT",
-      "last": 3.71e-06,
-      "chg_pct": 1.09,
-      "binance_vol_usdt": 16386878.47595586,
-      "korea_vol_usdt": 1350925.36,
-      "btcturk_vol_usdt": 1277285.77,
-      "futures": null,
+      "symbol": "POLUSDT",
+      "last": 0.10018,
+      "chg_pct": -1.832,
+      "binance_vol_usdt": 9170094.399726,
+      "korea_vol_usdt": 2223079.9,
+      "btcturk_vol_usdt": 80940.73,
+      "futures": {
+        "funding": -1.577e-05,
+        "ls_ratio": 0.8488,
+        "oi_usd": 21272875.73211,
+        "oi_1h_chg_pct": -0.8105202480333066,
+        "taker_bs": 0.953
+      },
       "signals": []
     },
     {
-      "symbol": "LINKUSDT",
-      "last": 11.596,
-      "chg_pct": 1.063,
-      "binance_vol_usdt": 15085785.35882,
-      "korea_vol_usdt": 3200170.73,
-      "btcturk_vol_usdt": 51755.97,
+      "symbol": "SUSDT",
+      "last": 0.02937,
+      "chg_pct": -1.641,
+      "binance_vol_usdt": 664315.304748,
+      "korea_vol_usdt": 20032.7,
+      "btcturk_vol_usdt": 22155.52,
       "futures": {
-        "funding": 7.29e-05,
-        "ls_ratio": 1.5786,
-        "oi_usd": 116965454.85631047,
-        "oi_1h_chg_pct": -0.7614950794326677,
-        "taker_bs": 0.8583
+        "funding": -9.102e-05,
+        "ls_ratio": 1.2528,
+        "oi_usd": 3755958.97024422,
+        "oi_1h_chg_pct": -1.5739227381079361,
+        "taker_bs": 0.2976
       },
       "signals": []
     },
     {
       "symbol": "SUIUSDT",
       "last": 0.7546,
-      "chg_pct": 1.058,
-      "binance_vol_usdt": 28611815.98673,
-      "korea_vol_usdt": 6625621.16,
-      "btcturk_vol_usdt": 108909.57,
+      "chg_pct": 1.397,
+      "binance_vol_usdt": 28680262.6477,
+      "korea_vol_usdt": 6621726.12,
+      "btcturk_vol_usdt": 106069.44,
       "futures": {
-        "funding": -5.329e-05,
+        "funding": -5.378e-05,
         "ls_ratio": 2.2819,
         "oi_usd": 97801487.75166,
         "oi_1h_chg_pct": -0.43156527001498884,
@@ -696,30 +399,56 @@
       "signals": []
     },
     {
-      "symbol": "TONUSDT",
-      "last": 1.6,
-      "chg_pct": 0.946,
-      "binance_vol_usdt": 7717352.41982,
+      "symbol": "PEPEUSDT",
+      "last": 3.71e-06,
+      "chg_pct": 1.366,
+      "binance_vol_usdt": 16526453.57906667,
+      "korea_vol_usdt": 1349593.95,
+      "btcturk_vol_usdt": 1277407.82,
+      "futures": null,
+      "signals": []
+    },
+    {
+      "symbol": "TUTUSDT",
+      "last": 0.0358,
+      "chg_pct": 1.273,
+      "binance_vol_usdt": 11374355.42976,
       "korea_vol_usdt": 0.0,
       "btcturk_vol_usdt": 0.0,
       "futures": {
-        "funding": 0.0,
-        "ls_ratio": null,
-        "oi_usd": null,
-        "oi_1h_chg_pct": null,
-        "taker_bs": null
+        "funding": -0.00948866,
+        "ls_ratio": 1.2707,
+        "oi_usd": 13720996.7454,
+        "oi_1h_chg_pct": -0.12272834161528894,
+        "taker_bs": 1.0075
+      },
+      "signals": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "last": 11.597,
+      "chg_pct": 1.231,
+      "binance_vol_usdt": 15104256.89313,
+      "korea_vol_usdt": 3201016.7,
+      "btcturk_vol_usdt": 51976.15,
+      "futures": {
+        "funding": 7.458e-05,
+        "ls_ratio": 1.5786,
+        "oi_usd": 116965454.85631047,
+        "oi_1h_chg_pct": -0.7614950794326677,
+        "taker_bs": 0.8583
       },
       "signals": []
     },
     {
       "symbol": "NEARUSDT",
-      "last": 1.895,
-      "chg_pct": 0.798,
-      "binance_vol_usdt": 18466614.8465,
-      "korea_vol_usdt": 3234563.41,
-      "btcturk_vol_usdt": 137756.8,
+      "last": 1.894,
+      "chg_pct": 1.175,
+      "binance_vol_usdt": 18465114.19,
+      "korea_vol_usdt": 3221232.0,
+      "btcturk_vol_usdt": 113660.83,
       "futures": {
-        "funding": -5.426e-05,
+        "funding": -5.979e-05,
         "ls_ratio": 1.5195,
         "oi_usd": 77026445.97239892,
         "oi_1h_chg_pct": -1.4337085405158383,
@@ -728,46 +457,14 @@
       "signals": []
     },
     {
-      "symbol": "GIGGLEUSDT",
-      "last": 40.47,
-      "chg_pct": 0.797,
-      "binance_vol_usdt": 8471624.23679,
-      "korea_vol_usdt": 0.0,
-      "btcturk_vol_usdt": 0.0,
-      "futures": {
-        "funding": 5e-05,
-        "ls_ratio": 1.317,
-        "oi_usd": 13402328.4864,
-        "oi_1h_chg_pct": -1.2897397405119377,
-        "taker_bs": 1.1983
-      },
-      "signals": []
-    },
-    {
-      "symbol": "BICOUSDT",
-      "last": 0.02223,
-      "chg_pct": 0.725,
-      "binance_vol_usdt": 7457520.2270956,
-      "korea_vol_usdt": 2224715.44,
-      "btcturk_vol_usdt": 0.0,
-      "futures": {
-        "funding": -0.0018801,
-        "ls_ratio": 0.7191,
-        "oi_usd": 6293745.98685,
-        "oi_1h_chg_pct": -1.4787828079659557,
-        "taker_bs": 0.4951
-      },
-      "signals": []
-    },
-    {
       "symbol": "ADAUSDT",
       "last": 0.2033,
-      "chg_pct": 0.644,
-      "binance_vol_usdt": 13138086.76943,
-      "korea_vol_usdt": 5086804.65,
-      "btcturk_vol_usdt": 200266.92,
+      "chg_pct": 0.843,
+      "binance_vol_usdt": 13191852.92633,
+      "korea_vol_usdt": 5088131.25,
+      "btcturk_vol_usdt": 199018.56,
       "futures": {
-        "funding": 7.031e-05,
+        "funding": 7.139e-05,
         "ls_ratio": 1.936,
         "oi_usd": 81682940.5869,
         "oi_1h_chg_pct": -1.2869234151955466,
@@ -776,27 +473,11 @@
       "signals": []
     },
     {
-      "symbol": "XLMUSDT",
-      "last": 0.1807,
-      "chg_pct": 0.501,
-      "binance_vol_usdt": 7578469.9301,
-      "korea_vol_usdt": 5912001.22,
-      "btcturk_vol_usdt": 58383.63,
-      "futures": {
-        "funding": -6.804e-05,
-        "ls_ratio": 1.0517,
-        "oi_usd": 31437305.2228,
-        "oi_1h_chg_pct": -0.7861498514833312,
-        "taker_bs": 1.0816
-      },
-      "signals": []
-    },
-    {
       "symbol": "TAOUSDT",
-      "last": 238.0,
-      "chg_pct": 0.464,
-      "binance_vol_usdt": 11562032.63931,
-      "korea_vol_usdt": 864769.81,
+      "last": 237.8,
+      "chg_pct": 0.677,
+      "binance_vol_usdt": 11516714.04349,
+      "korea_vol_usdt": 865466.5,
       "btcturk_vol_usdt": 0.0,
       "futures": {
         "funding": 5e-05,
@@ -808,11 +489,27 @@
       "signals": []
     },
     {
+      "symbol": "ENSOUSDT",
+      "last": 0.867,
+      "chg_pct": -0.573,
+      "binance_vol_usdt": 90169148.71508,
+      "korea_vol_usdt": 1215667.01,
+      "btcturk_vol_usdt": 0.0,
+      "futures": {
+        "funding": 5e-05,
+        "ls_ratio": 0.8437,
+        "oi_usd": 3844865.89944,
+        "oi_1h_chg_pct": -0.893514190752139,
+        "taker_bs": 1.0554
+      },
+      "signals": []
+    },
+    {
       "symbol": "ASTERUSDT",
       "last": 0.702,
-      "chg_pct": 0.286,
-      "binance_vol_usdt": 9419950.86171,
-      "korea_vol_usdt": 26356.41,
+      "chg_pct": 0.573,
+      "binance_vol_usdt": 9415612.68223,
+      "korea_vol_usdt": 26337.4,
       "btcturk_vol_usdt": 0.0,
       "futures": {
         "funding": 5e-05,
@@ -825,18 +522,44 @@
     },
     {
       "symbol": "TRXUSDT",
-      "last": 0.3403,
-      "chg_pct": 0.265,
-      "binance_vol_usdt": 17577488.13098,
-      "korea_vol_usdt": 2040864.35,
-      "btcturk_vol_usdt": 411998.38,
+      "last": 0.3404,
+      "chg_pct": 0.295,
+      "binance_vol_usdt": 17507134.36397,
+      "korea_vol_usdt": 2039458.62,
+      "btcturk_vol_usdt": 415701.56,
       "futures": {
-        "funding": -3.065e-05,
+        "funding": -3.378e-05,
         "ls_ratio": 1.4361,
         "oi_usd": 86863843.12744,
         "oi_1h_chg_pct": -0.29495840154435304,
         "taker_bs": 0.6465
       },
+      "signals": []
+    },
+    {
+      "symbol": "XAUTUSDT",
+      "last": 4453.83,
+      "chg_pct": -0.068,
+      "binance_vol_usdt": 19894924.614319,
+      "korea_vol_usdt": 259204.54,
+      "btcturk_vol_usdt": 74233.14,
+      "futures": {
+        "funding": 3.284e-05,
+        "ls_ratio": 0.504,
+        "oi_usd": 33533468.05535337,
+        "oi_1h_chg_pct": -0.4191906794903627,
+        "taker_bs": 0.2337
+      },
+      "signals": []
+    },
+    {
+      "symbol": "EURIUSDT",
+      "last": 1.1579,
+      "chg_pct": 0.035,
+      "binance_vol_usdt": 8999251.92638,
+      "korea_vol_usdt": 0.0,
+      "btcturk_vol_usdt": 0.0,
+      "futures": null,
       "signals": []
     }
   ]

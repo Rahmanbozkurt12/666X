@@ -1,31 +1,34 @@
-# Market Radar
+# Market Radar (hardened)
 
-CEX FOMO / short-squeeze / dump-risk **uyarı** tarayıcısı.
+CEX FOMO / short-squeeze / dump-risk **uyarı** sistemi.
 
-## Kritik uyarı
-- **Otomatik al-sat yok**
-- Yanlış sinyal olabilir
-- Bu kod para kaybını engellemez
-- Yatırım tavsiyesi değildir
+## Güvenlik katmanları
+- Otomatik al-sat **yok**
+- Varsayılan **dry-run**
+- Daha sıkı eşikler (vol/chg/funding/OI)
+- `min_severity_to_alert` (varsayılan 4)
+- Squeeze için **taker buy** zorunlu
+- Noise kind’lar mute (`CEX_ORDERBOOK`)
+- Config validate + HTTP retry/backoff + fail-soft
+- Cooldown 6 saat + cycle başına max 8 alert
 
-## Çalıştır
+## Kur
 ```bash
-# güvenli: sadece konsol
-python market_radar.py --once --dry-run
+bash scripts/setup_market_radar.sh
+```
 
-# Telegram (önce .env)
+## Kullan
+```bash
+python3 market_radar.py --health
+python3 market_radar.py --once --dry-run
+python3 tests/test_market_radar.py
+```
+
+Telegram:
+```bash
 export TELEGRAM_BOT_TOKEN=...
 export TELEGRAM_CHAT_ID=...
-python market_radar.py --once --live-telegram
-
-# sürekli
-python market_radar.py --live-telegram
+python3 market_radar.py --once --live-telegram
 ```
 
-Config: `config/market_radar.json`  
-Çıktı: `output/market_radar_last.json`
-
-## Self-check
-```bash
-python tests/test_market_radar.py
-```
+**Bu yazılım para kaybını engellemez.** Sadece araştırma uyarısıdır.
