@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "poll_seconds": 120,
+    "dry_run_default": true,
+    "max_alerts_per_cycle": 12,
+    "min_quote_volume_usdt": 2000000,
+    "fomo_chg_pct": 8.0,
+    "fomo_vol_z": 2.5,
+    "korea_lead_ratio": 1.15,
+    "squeeze_funding_lt": -0.0003,
+    "squeeze_oi_drop_pct": 1.5,
+    "squeeze_price_up_pct": 1.0,
+    "dump_risk_chg_pct": 12.0,
+    "majors_exclude": ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "USDCUSDT", "FDUSDUSDT"]
+  },
+  "watchlist": [
+    "ZKCUSDT",
+    "SUSDT",
+    "ENAUSDT",
+    "SUIUSDT",
+    "1000PEPEUSDT",
+    "WLDUSDT",
+    "PENDLEUSDT"
+  ],
+  "always_scan_top_n": 40
+}

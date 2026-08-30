@@ -5,3 +5,4 @@ output/marscoin_binance_flows.json
 __pycache__/
 ta-lab/node_modules/
 ta-lab/dist/
+output/market_radar_state.json
