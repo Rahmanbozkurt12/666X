@@ -1,0 +1,23 @@
+{
+  "as_of": "2026-08-30T19:52:10.096430+00:00",
+  "token": {
+    "symbol": "ZKC",
+    "name": "Boundless",
+    "site": "https://beboundless.xyz/",
+    "eth": "0x000006c2a22ff4a44ff1f5d0f2ed65f781f55555",
+    "bsc": "0x15247e6E23D3923a853cCf15940A20CCdf16e94a"
+  },
+  "move": {
+    "binance_spot_chg24h_pct": 59.9,
+    "atl": 0.036,
+    "ath": 1.78,
+    "peak_today": 0.0744
+  },
+  "catalyst": "CEX/Korea-led bounce from ATL + short-squeeze signals; DEX volume negligible",
+  "volume_leaders": [
+    "Upbit KRW ~$80M+",
+    "Binance USDT",
+    "Bithumb",
+    "BtcTurk/Paribu"
+  ]
+}
