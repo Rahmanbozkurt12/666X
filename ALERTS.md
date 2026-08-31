@@ -33,3 +33,15 @@ Spam airdrops (decimals=0 + huge amount) are filtered by default.
 - Solana: public RPC or `HELIUS_API_KEY`
 - Phantom is a user wallet app — add specific addresses you care about under `venue: Phantom`
 - CEX hot-wallet traffic is noisy; start with a short watchlist
+
+## Raydium yeni LP yakalama
+
+Phantom değil, **Raydium programı + pool adresi** izlenir. Yeni açılan SOL çiftli havuzlar için:
+
+```bash
+python raydium_lp_alert.py --once --dry-run   # test
+python raydium_lp_alert.py                    # canlı loop + Telegram
+```
+
+Filtreler: `config/raydium_lp_watch.json` (`min_reserve_usd`, `dex_allowlist`, `require_pump_mint_suffix`, vb.)
+İlk poll sadece state seed eder; sonraki poll'larda yeni havuzlar alert olur.
