@@ -1,0 +1,13 @@
+{
+  "settings": {
+    "poll_seconds": 60,
+    "gecko_new_pools_url": "https://api.geckoterminal.com/api/v2/networks/solana/new_pools",
+    "pages_to_scan": 2,
+    "max_pool_age_minutes": 180,
+    "min_reserve_usd": 50,
+    "sol_pairs_only": true,
+    "dex_allowlist": ["raydium", "raydium-clmm"],
+    "require_pump_mint_suffix": false,
+    "exclude_symbols": ["WSOL", "USDC", "USDT"]
+  }
+}
