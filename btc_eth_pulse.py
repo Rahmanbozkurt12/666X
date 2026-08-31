@@ -208,9 +208,16 @@ def trade_pressure(trades: list[dict[str, Any]]) -> tuple[float, float, float]:
         else:
             sell += notional
     total = buy + sell
-    if total <= 0:
-        return 1.0, 0.0, 0.0
-    return buy / sell if sell else 2.0, buy, sell
+    if total < 25_000:
+        # Çok ince örnek → yanıltmasın
+        return 1.0, buy, sell
+    if sell <= 0:
+        return 2.0, buy, sell
+    if buy <= 0:
+        return 0.5, buy, sell
+    ratio = buy / sell
+    # Aşırı uçları yumuşat (mikro işlem gürültüsü)
+    return max(0.25, min(4.0, ratio)), buy, sell
 
 
 def candle_return(candles: list[list[Any]], bars: int = 2) -> float:
@@ -464,7 +471,7 @@ def score_snapshot(coin: str, snap: dict[str, Any], spot: dict[str, Any] | None)
     )
 
 
-def build_report() -> dict[str, Any]:
+def build_report(interval_min: int = 10) -> dict[str, Any]:
     coins: list[dict[str, Any]] = []
     errors: list[str] = []
     for coin, spec in SYMBOLS.items():
@@ -491,7 +498,7 @@ def build_report() -> dict[str, Any]:
             )
     return {
         "as_of_utc": iso(),
-        "interval_min": 10,
+        "interval_min": interval_min,
         "disclaimer": (
             "Bu bir olasılık skoru, kehanet değil. 10dk yön hatasız bilinemez. "
             "3 onay yoksa BEKLE. Yatırım tavsiyesi değildir."
@@ -531,6 +538,25 @@ def format_console(report: dict[str, Any]) -> str:
         for e in report["errors"]:
             lines.append(f"  ! {e}")
     lines.append("")
+    return "\n".join(lines)
+
+
+def format_telegram(report: dict[str, Any]) -> str:
+    """Kısa saatlik özet — telefonda okunur."""
+    lines = [
+        f"BTC/ETH PULSE ({report.get('interval_min', 60)}dk)",
+        f"UTC: {report['as_of_utc'][:19]}",
+        "",
+    ]
+    for c in report["coins"]:
+        price = f"${c['price']:,.2f}" if c.get("price") else "—"
+        lines.append(f"{c['symbol']} {price}")
+        lines.append(f"  ↑%{c['up_pct']:.0f}  ↓%{c['down_pct']:.0f}  → {c['action']}")
+        lines.append(f"  güven {c['confidence']} | onay {c['confirms']}/7")
+        for r in (c.get("reasons") or [])[:2]:
+            lines.append(f"  • {r}")
+        lines.append("")
+    lines.append("Not: olasılık skoru, kehanet değil.")
     return "\n".join(lines)
 
 
@@ -646,46 +672,88 @@ class PulseHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def run_cycle(send_tg: bool) -> dict[str, Any]:
-    report = build_report()
+def load_dotenv(path: Path | None = None) -> None:
+    """Basit .env yükleyici — python-dotenv şart değil."""
+    env_path = path or (ROOT / ".env")
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+
+def run_cycle(
+    send_tg: bool,
+    *,
+    compact_tg: bool = False,
+    interval_min: int = 10,
+) -> dict[str, Any]:
+    report = build_report(interval_min=interval_min)
     write_outputs(report)
     text = format_console(report)
     print(text, flush=True)
     if send_tg:
-        maybe_telegram(text)
+        maybe_telegram(format_telegram(report) if compact_tg else text)
     return report
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="BTC/ETH 10dk yön skoru")
+    load_dotenv()
+    parser = argparse.ArgumentParser(description="BTC/ETH yön skoru")
     parser.add_argument("--once", action="store_true", help="Tek ölçüm al, çık")
-    parser.add_argument("--loop", action="store_true", help="Her 10 dakikada tekrarla")
+    parser.add_argument("--loop", action="store_true", help="Belirli aralıkla tekrarla")
+    parser.add_argument("--hourly", action="store_true", help="Her 1 saatte Telegram özeti")
     parser.add_argument("--serve", action="store_true", help="Loop + yerel web paneli")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--interval", type=int, default=600, help="Saniye (varsayılan 600)")
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=None,
+        help="Saniye (varsayılan: 600; --hourly ile 3600)",
+    )
     parser.add_argument("--telegram", action="store_true", help="Varsa Telegram'a da at")
     args = parser.parse_args()
 
+    if args.hourly:
+        args.loop = True
+        args.telegram = True
+        if args.interval is None:
+            args.interval = 3600
+    if args.interval is None:
+        args.interval = 600
+
+    compact = bool(args.hourly or args.telegram)
+    interval_min = max(1, int(round(args.interval / 60)))
+
     if args.serve:
-        run_cycle(args.telegram)
+        run_cycle(args.telegram, compact_tg=compact, interval_min=interval_min)
         server = ThreadingHTTPServer(("0.0.0.0", args.port), PulseHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        print(f"Panel: http://127.0.0.1:{args.port}/  (her {args.interval}s güncellenir)", flush=True)
+        print(
+            f"Panel: http://127.0.0.1:{args.port}/  (her {args.interval}s)",
+            flush=True,
+        )
         try:
             while True:
                 time.sleep(args.interval)
-                run_cycle(args.telegram)
+                run_cycle(args.telegram, compact_tg=compact, interval_min=interval_min)
         except KeyboardInterrupt:
             server.shutdown()
             return 0
 
-    if args.loop:
+    if args.loop or args.hourly:
         while True:
-            run_cycle(args.telegram)
+            run_cycle(args.telegram, compact_tg=compact, interval_min=interval_min)
             time.sleep(args.interval)
 
-    run_cycle(args.telegram)
+    run_cycle(args.telegram, compact_tg=compact, interval_min=interval_min)
     return 0
 
 
