@@ -1,5 +1,8 @@
 .env
 output/alert_state.json
 output/marscoin_binance_flows.json
+output/pulse_latest.json
+output/pulse_history.jsonl
+output/pulse.html
 *.pyc
 __pycache__/
