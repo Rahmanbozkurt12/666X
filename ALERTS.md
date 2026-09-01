@@ -34,14 +34,19 @@ Spam airdrops (decimals=0 + huge amount) are filtered by default.
 - Phantom is a user wallet app — add specific addresses you care about under `venue: Phantom`
 - CEX hot-wallet traffic is noisy; start with a short watchlist
 
-## Yeni / aktif cüzdan keşfi + birikim sinyali (FET vb.)
+## Yeni / aktif cüzdan keşfi + birikim sinyali
 
-Eski Binance Dep cüzdanları (2+ yıl) yerine **son günlerde FET alan yeni veya aktif** cüzdanlar:
+**FET alan cüzdanlar istenmiyor** — `exclude_symbols: ["FET"]` varsayılan.
 
 ```bash
-python active_wallet_discovery.py --max-age-days 90 --activity-hours 72
+# Balina cüzdanlarda son 3 saatte hangi altcoin girişi var? (FET hariç)
+python whale_altcoin_scan.py --hours 3
+
+# Yeni/aktif cüzdan keşfi (LINK, PEPE, LDO… — FET hariç)
+python active_wallet_discovery.py --activity-hours 72
+
+# Birikim sinyali
 python accumulation_alert.py --once --dry-run
-python accumulation_alert.py
 ```
 
 Ayarlar: `config/active_wallet_discovery.json`, `config/accumulation_watch.json`

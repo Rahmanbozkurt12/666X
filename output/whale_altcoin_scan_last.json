@@ -1,0 +1,933 @@
+{
+  "generated_at": "2026-09-01T15:56:49.311044+00:00",
+  "activity_hours": 3,
+  "exclude_symbols": [
+    "DAI",
+    "ETH",
+    "FET",
+    "STETH",
+    "USDC",
+    "USDT",
+    "WBTC",
+    "WETH"
+  ],
+  "wallets_scanned": 10,
+  "token_inflow_counts": {
+    "UNI": 27,
+    "PEPE": 25,
+    "CRV": 25,
+    "XAUT": 24,
+    "ENA": 20,
+    "AAVE": 18,
+    "LINK": 16,
+    "GRVT": 14,
+    "LIT": 14,
+    "SKY": 14,
+    "STORJ": 11,
+    "ETHFI": 9,
+    "SHIB": 9,
+    "BICO": 8,
+    "ONDO": 6,
+    "LDO": 6,
+    "AXS": 6,
+    "WLD": 5,
+    "CHZ": 5,
+    "SAND": 5,
+    "USDG": 5,
+    "PAXG": 4,
+    "MORPHO": 4,
+    "MOVE": 4,
+    "OKB": 4,
+    "DOS": 4,
+    "ZAMA": 3,
+    "ERA": 3,
+    "AMP": 3,
+    "BIO": 3,
+    "ATH": 3,
+    "AUCTION": 3,
+    "ARB": 3,
+    "PEOPLE": 3,
+    "API3": 3,
+    "MLN": 3,
+    "EURC": 2,
+    "FLOKI": 2,
+    "SEI": 2,
+    "WSTETH": 2,
+    "ZKC": 2,
+    "STRK": 2,
+    "SPELL": 2,
+    "ENS": 2,
+    "ACH": 2,
+    "GLM": 2,
+    "APE": 2,
+    "SPK": 2,
+    "MASK": 2,
+    "AUDIO": 2,
+    "USAT": 2,
+    "COMP": 2,
+    "EIGEN": 2,
+    "POL": 2,
+    "CRVUSD": 1,
+    "FLUID": 1,
+    "ARKM": 1,
+    "XCN": 1,
+    "GALA": 1,
+    "ZRO": 1,
+    "ANIME": 1,
+    "WLFI": 1,
+    "QNT": 1,
+    "ARPA": 1,
+    "RESOLV": 1,
+    "ZRX": 1,
+    "BAND": 1,
+    "SNX": 1,
+    "RLUSD": 1,
+    "KITE": 1,
+    "SLP": 1,
+    "NES": 1,
+    "OL": 1,
+    "NEIRO": 1,
+    "PYUSD": 1,
+    "SUSHI": 1,
+    "BARD": 1,
+    "SNT": 1,
+    "SWEAT": 1,
+    "MANA": 1,
+    "EURCV": 1,
+    "GRT": 1,
+    "ALCX": 1,
+    "OXT": 1,
+    "TRU": 1,
+    "EURR": 1,
+    "AIOZ": 1,
+    "SYRUP": 1,
+    "ALICE": 1,
+    "L3": 1,
+    "SKL": 1,
+    "AGLD": 1,
+    "AVA": 1,
+    "CPOOL": 1,
+    "ZKP": 1,
+    "NEWT": 1,
+    "ZKJ": 1,
+    "RED": 1,
+    "JASMY": 1,
+    "NIL": 1,
+    "INX": 1,
+    "MAV": 1,
+    "1INCH": 1,
+    "SPX": 1,
+    "PTB": 1,
+    "EDEN": 1,
+    "SXT": 1,
+    "AEVO": 1,
+    "TRIA": 1,
+    "AGI": 1
+  },
+  "token_details": {
+    "EURC": {
+      "contract": "0x1abaea1f7c830bd89acc67ec4af516284b1bc33c",
+      "name": "EURC",
+      "decimals": "6"
+    },
+    "FLOKI": {
+      "contract": "0xcf0c122c6b73ff809c693db761e7baebe62b6a2e",
+      "name": "FLOKI",
+      "decimals": "9"
+    },
+    "LINK": {
+      "contract": "0x514910771af9ca656af840dff83e8264ecf986ca",
+      "name": "Chainlink",
+      "decimals": "18"
+    },
+    "PEPE": {
+      "contract": "0x6982508145454ce325ddbe47a25d4ec3d2311933",
+      "name": "Pepe",
+      "decimals": "18"
+    },
+    "UNI": {
+      "contract": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+      "name": "Uniswap",
+      "decimals": "18"
+    },
+    "PAXG": {
+      "contract": "0x45804880de22913dafe09f4980848ece6ecbaf78",
+      "name": "PAX Gold",
+      "decimals": "18"
+    },
+    "ETHFI": {
+      "contract": "0xfe0c30065b384f05761f15d0cc899d4f9f9cc0eb",
+      "name": "Ether.fi",
+      "decimals": "18"
+    },
+    "CRVUSD": {
+      "contract": "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e",
+      "name": "crvUSD",
+      "decimals": "18"
+    },
+    "SEI": {
+      "contract": "0xbdf43ecadc5cef51b7d1772f722e40596bc1788b",
+      "name": "LayerZero Bridged Sei",
+      "decimals": "18"
+    },
+    "FLUID": {
+      "contract": "0x6f40d4a6237c257fff2db00fa0510deeecd303eb",
+      "name": "Fluid",
+      "decimals": "18"
+    },
+    "WSTETH": {
+      "contract": "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+      "name": "Wrapped stETH",
+      "decimals": "18"
+    },
+    "SHIB": {
+      "contract": "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce",
+      "name": "Shiba Inu",
+      "decimals": "18"
+    },
+    "ZAMA": {
+      "contract": "0xa12cc123ba206d4031d1c7f6223d1c2ec249f4f3",
+      "name": "Zama",
+      "decimals": "18"
+    },
+    "ENA": {
+      "contract": "0x57e114b691db790c35207b2e685d4a43181e6061",
+      "name": "Ethena",
+      "decimals": "18"
+    },
+    "GRVT": {
+      "contract": "0xad29f2723fcdbcf665f210f25e06f97477e417cf",
+      "name": "GRVT Token",
+      "decimals": "18"
+    },
+    "STORJ": {
+      "contract": "0xb64ef51c888972c908cfacf59b47c1afbc0ab8ac",
+      "name": "Storj",
+      "decimals": "8"
+    },
+    "ERA": {
+      "contract": "0xe2ad0bf751834f2fbdc62a41014f84d67ca1de2a",
+      "name": "Caldera",
+      "decimals": "18"
+    },
+    "ZKC": {
+      "contract": "0x000006c2a22ff4a44ff1f5d0f2ed65f781f55555",
+      "name": "Boundless",
+      "decimals": "18"
+    },
+    "STRK": {
+      "contract": "0xca14007eff0db1f8135f4c25b34de49ab0d42766",
+      "name": "Starknet",
+      "decimals": "18"
+    },
+    "AMP": {
+      "contract": "0xff20817765cb7f73d4bde2e66e067e58d11095c2",
+      "name": "Amp",
+      "decimals": "18"
+    },
+    "CRV": {
+      "contract": "0xd533a949740bb3306d119cc777fa900ba034cd52",
+      "name": "Curve DAO",
+      "decimals": "18"
+    },
+    "ARKM": {
+      "contract": "0x6e2a43be0b1d33b726f0ca3b8de60b3482b8b050",
+      "name": "Arkham",
+      "decimals": "18"
+    },
+    "SPELL": {
+      "contract": "0x090185f2135308bad17527004364ebcc2d37e5f6",
+      "name": "Spell",
+      "decimals": "18"
+    },
+    "XCN": {
+      "contract": "0xa2cd3d43c775978a96bdbf12d733d5a1ed94fb18",
+      "name": "Onyxcoin",
+      "decimals": "18"
+    },
+    "GALA": {
+      "contract": "0xd1d2eb1b1e90b638588728b4130137d262c87cae",
+      "name": "GALA",
+      "decimals": "8"
+    },
+    "XAUT": {
+      "contract": "0x68749665ff8d2d112fa859aa293f07a622782f38",
+      "name": "Tether Gold",
+      "decimals": "6"
+    },
+    "BIO": {
+      "contract": "0xcb1592591996765ec0efc1f92599a19767ee5ffa",
+      "name": "Bio Protocol",
+      "decimals": "18"
+    },
+    "ZRO": {
+      "contract": "0x6985884c4392d348587b19cb9eaaf157f13271cd",
+      "name": "LayerZero",
+      "decimals": "18"
+    },
+    "ANIME": {
+      "contract": "0x4dc26fc5854e7648a064a4abd590bbe71724c277",
+      "name": "Animecoin",
+      "decimals": "18"
+    },
+    "BICO": {
+      "contract": "0xf17e65822b568b3903685a7c9f496cf7656cc6c2",
+      "name": "Biconomy",
+      "decimals": "18"
+    },
+    "MORPHO": {
+      "contract": "0x58d97b57bb95320f9a05dc918aef65434969c2b2",
+      "name": "Morpho",
+      "decimals": "18"
+    },
+    "LIT": {
+      "contract": "0x232ce3bd40fcd6f80f3d55a522d03f25df784ee2",
+      "name": "Lighter",
+      "decimals": "18"
+    },
+    "ONDO": {
+      "contract": "0xfaba6f8e4a5e8ab82f62fe7c39859fa577269be3",
+      "name": "Ondo",
+      "decimals": "18"
+    },
+    "SKY": {
+      "contract": "0x56072c95faa701256059aa122697b133aded9279",
+      "name": "Sky",
+      "decimals": "18"
+    },
+    "WLD": {
+      "contract": "0x163f8c2467924be0ae7b5347228cabf260318753",
+      "name": "Worldcoin",
+      "decimals": "18"
+    },
+    "ATH": {
+      "contract": "0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b",
+      "name": "Aethir",
+      "decimals": "18"
+    },
+    "AUCTION": {
+      "contract": "0xa9b1eb5908cfc3cdf91f9b8b3a74108598009096",
+      "name": "Bounce",
+      "decimals": "18"
+    },
+    "AAVE": {
+      "contract": "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
+      "name": "Aave",
+      "decimals": "18"
+    },
+    "ENS": {
+      "contract": "0xc18360217d8f7ab5e7c516566761ea12ce7f9d72",
+      "name": "Ethereum Name Service",
+      "decimals": "18"
+    },
+    "ARB": {
+      "contract": "0xb50721bcf8d664c30412cfbc6cf7a15145234ad1",
+      "name": "Arbitrum",
+      "decimals": "18"
+    },
+    "CHZ": {
+      "contract": "0x3506424f91fd33084466f402d5d97f05f8e3b4af",
+      "name": "Chiliz",
+      "decimals": "18"
+    },
+    "WLFI": {
+      "contract": "0xda5e1988097297dcdc1f90d4dfe7909e847cbef6",
+      "name": "World Liberty Financial",
+      "decimals": "18"
+    },
+    "ACH": {
+      "contract": "0xed04915c23f00a313a544955524eb7dbd823143d",
+      "name": "Alchemy Pay",
+      "decimals": "8"
+    },
+    "QNT": {
+      "contract": "0x4a220e6096b25eadb88358cb44068a3248254675",
+      "name": "Quant",
+      "decimals": "18"
+    },
+    "GLM": {
+      "contract": "0x7dd9c5cba05e151c895fde1cf355c9a1d5da6429",
+      "name": "Golem",
+      "decimals": "18"
+    },
+    "ARPA": {
+      "contract": "0xba50933c268f567bdc86e1ac131be072c6b0b71a",
+      "name": "ARPA",
+      "decimals": "18"
+    },
+    "LDO": {
+      "contract": "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
+      "name": "Lido DAO",
+      "decimals": "18"
+    },
+    "APE": {
+      "contract": "0x4d224452801aced8b2f0aebe155379bb5d594381",
+      "name": "ApeCoin",
+      "decimals": "18"
+    },
+    "SPK": {
+      "contract": "0xc20059e0317de91738d13af027dfc4a50781b066",
+      "name": "Spark",
+      "decimals": "18"
+    },
+    "MASK": {
+      "contract": "0x69af81e73a73b40adf4f3d4223cd9b1ece623074",
+      "name": "Mask Network",
+      "decimals": "18"
+    },
+    "RESOLV": {
+      "contract": "0x259338656198ec7a76c729514d3cb45dfbf768a1",
+      "name": "Resolv",
+      "decimals": "18"
+    },
+    "AUDIO": {
+      "contract": "0x18aaa7115705e8be94bffebde57af9bfc265b998",
+      "name": "Audius",
+      "decimals": "18"
+    },
+    "SAND": {
+      "contract": "0x3845badade8e6dff049820680d1f14bd3903a5d0",
+      "name": "The Sandbox",
+      "decimals": "18"
+    },
+    "USDG": {
+      "contract": "0xe343167631d89b6ffc58b88d6b7fb0228795491d",
+      "name": "Global Dollar",
+      "decimals": "6"
+    },
+    "AXS": {
+      "contract": "0xbb0e17ef65f82ab018d8edd776e8dd940327b28b",
+      "name": "Axie Infinity",
+      "decimals": "18"
+    },
+    "MOVE": {
+      "contract": "0x3073f7aaa4db83f95e9fff17424f71d4751a3073",
+      "name": "Movement",
+      "decimals": "8"
+    },
+    "PEOPLE": {
+      "contract": "0x7a58c0be72be218b41c608b7fe7c5bb630736c71",
+      "name": "ConstitutionDAO",
+      "decimals": "18"
+    },
+    "ZRX": {
+      "contract": "0xe41d2489571d322189246dafa5ebde1f4699f498",
+      "name": "0x Protocol",
+      "decimals": "18"
+    },
+    "API3": {
+      "contract": "0x0b38210ea11411557c13457d4da7dc6ea731b88a",
+      "name": "Api3",
+      "decimals": "18"
+    },
+    "BAND": {
+      "contract": "0xba11d00c5f74255f56a5e366f4f77f5a186d7f55",
+      "name": "Band",
+      "decimals": "18"
+    },
+    "SNX": {
+      "contract": "0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f",
+      "name": "Synthetix",
+      "decimals": "18"
+    },
+    "OKB": {
+      "contract": "0x75231f58b43240c9718dd58b4967c5114342a86c",
+      "name": "OKB",
+      "decimals": "18"
+    },
+    "RLUSD": {
+      "contract": "0x8292bb45bf1ee4d140127049757c2e0ff06317ed",
+      "name": "Ripple USD",
+      "decimals": "18"
+    },
+    "KITE": {
+      "contract": "0x118b70df4f06fa5678e7d543e6066e028c8ea0c0",
+      "name": "Kite",
+      "decimals": "18"
+    },
+    "SLP": {
+      "contract": "0xcc8fa225d80b9c7d42f96e9570156c65d6caaa25",
+      "name": "Smooth Love Potion",
+      "decimals": "0"
+    },
+    "USAT": {
+      "contract": "0x07041776f5007aca2a54844f50503a18a72a8b68",
+      "name": "USAT",
+      "decimals": "6"
+    },
+    "NES": {
+      "contract": "0x863f08a3d3b14fbd3d42ffd061d0e290f7dbc538",
+      "name": "Nesa",
+      "decimals": "18"
+    },
+    "OL": {
+      "contract": "0x1f57da732a77636d913c9a75d685b26cc85dcc3a",
+      "name": "OPENLOOT",
+      "decimals": "18"
+    },
+    "NEIRO": {
+      "contract": "0x812ba41e071c7b7fa4ebcfb62df5f45f6fa853ee",
+      "name": "Neiro",
+      "decimals": "9"
+    },
+    "COMP": {
+      "contract": "0xc00e94cb662c3520282e6f5717214004a7f26888",
+      "name": "Compound",
+      "decimals": "18"
+    },
+    "PYUSD": {
+      "contract": "0x6c3ea9036406852006290770bedfcaba0e23a0e8",
+      "name": "PayPal USD",
+      "decimals": "6"
+    },
+    "EIGEN": {
+      "contract": "0xec53bf9167f50cdeb3ae105f56099aaab9061f83",
+      "name": "EigenCloud (prev. EigenLayer)",
+      "decimals": "18"
+    },
+    "DOS": {
+      "contract": "0x951f086a127e280724fd93ccc543f65065afeb5e",
+      "name": "DAPPOS",
+      "decimals": "18"
+    },
+    "SUSHI": {
+      "contract": "0x6b3595068778dd592e39a122f4f5a5cf09c90fe2",
+      "name": "Sushi",
+      "decimals": "18"
+    },
+    "BARD": {
+      "contract": "0xf0db65d17e30a966c2ae6a21f6bba71cea6e9754",
+      "name": "Lombard",
+      "decimals": "18"
+    },
+    "SNT": {
+      "contract": "0x744d70fdbe2ba4cf95131626614a1763df805b9e",
+      "name": "Status",
+      "decimals": "18"
+    },
+    "SWEAT": {
+      "contract": "0xb4b9dc1c77bdbb135ea907fd5a08094d98883a35",
+      "name": "SWEAT",
+      "decimals": "18"
+    },
+    "MANA": {
+      "contract": "0x0f5d2fb29fb7d3cfee444a200298f468908cc942",
+      "name": "Decentraland",
+      "decimals": "18"
+    },
+    "POL": {
+      "contract": "0x455e53cbb86018ac2b8092fdcd39d8444affc3f6",
+      "name": "POL (ex-MATIC)",
+      "decimals": "18"
+    },
+    "EURCV": {
+      "contract": "0x5f7827fdeb7c20b443265fc2f40845b715385ff2",
+      "name": "EUR CoinVertible",
+      "decimals": "18"
+    },
+    "GRT": {
+      "contract": "0xc944e90c64b2c07662a292be6244bdf05cda44a7",
+      "name": "The Graph",
+      "decimals": "18"
+    },
+    "ALCX": {
+      "contract": "0xdbdb4d16eda451d0503b854cf79d55697f90c8df",
+      "name": "Alchemix",
+      "decimals": "18"
+    },
+    "MLN": {
+      "contract": "0xec67005c4e498ec7f55e092bd1d35cbc47c91892",
+      "name": "Enzyme",
+      "decimals": "18"
+    },
+    "OXT": {
+      "contract": "0x4575f41308ec1483f3d399aa9a2826d74da13deb",
+      "name": "Orchid Protocol",
+      "decimals": "18"
+    },
+    "TRU": {
+      "contract": "0x4c19596f5aaff459fa38b0f7ed92f11ae6543784",
+      "name": "TrueFi",
+      "decimals": "8"
+    },
+    "EURR": {
+      "contract": "0x8e9c32a536ab623a2e0e9961bce6f5fe7504e084",
+      "name": "Revolut Euro",
+      "decimals": "6"
+    },
+    "AIOZ": {
+      "contract": "0x626e8036deb333b408be468f951bdb42433cbf18",
+      "name": "AIOZ Network",
+      "decimals": "18"
+    },
+    "SYRUP": {
+      "contract": "0x643c4e15d7d62ad0abec4a9bd4b001aa3ef52d66",
+      "name": "Maple Finance",
+      "decimals": "18"
+    },
+    "ALICE": {
+      "contract": "0xac51066d7bec65dc4589368da368b212745d63e8",
+      "name": "My Neighbor Alice",
+      "decimals": "6"
+    },
+    "L3": {
+      "contract": "0x88909d489678dd17aa6d9609f89b0419bf78fd9a",
+      "name": "Layer3",
+      "decimals": "18"
+    },
+    "SKL": {
+      "contract": "0x00c83aecc790e8a4453e5dd3b0b4b3680501a7a7",
+      "name": "SKALE",
+      "decimals": "18"
+    },
+    "AGLD": {
+      "contract": "0x32353a6c91143bfd6c7d363b546e62a9a2489a20",
+      "name": "Adventure Gold",
+      "decimals": "18"
+    },
+    "AVA": {
+      "contract": "0xa6c0c097741d55ecd9a3a7def3a8253fd022ceb9",
+      "name": "AVA (Travala)",
+      "decimals": "18"
+    },
+    "CPOOL": {
+      "contract": "0x66761fa41377003622aee3c7675fc7b5c1c2fac5",
+      "name": "Clearpool",
+      "decimals": "18"
+    },
+    "ZKP": {
+      "contract": "0xe1be424f442d0687129128c6c38aace44f8c8dbc",
+      "name": "zkPass",
+      "decimals": "18"
+    },
+    "NEWT": {
+      "contract": "0xd0ec028a3d21533fdd200838f39c85b03679285d",
+      "name": "Newton Protocol",
+      "decimals": "18"
+    },
+    "ZKJ": {
+      "contract": "0xc71b5f631354be6853efe9c3ab6b9590f8302e81",
+      "name": "Polyhedra Network",
+      "decimals": "18"
+    },
+    "RED": {
+      "contract": "0xc43c6bfeda065fe2c4c11765bf838789bd0bb5de",
+      "name": "RedStone",
+      "decimals": "18"
+    },
+    "JASMY": {
+      "contract": "0x7420b4b9a0110cdc71fb720908340c03f9bc03ec",
+      "name": "JasmyCoin",
+      "decimals": "18"
+    },
+    "NIL": {
+      "contract": "0x7cf9a80db3b29ee8efe3710aadb7b95270572d47",
+      "name": "Nillion",
+      "decimals": "6"
+    },
+    "INX": {
+      "contract": "0xdef1b2d939edc0e4d35806c59b3166f790175afe",
+      "name": "Infinex",
+      "decimals": "18"
+    },
+    "MAV": {
+      "contract": "0x7448c7456a97769f6cd04f1e83a4a23ccdc46abd",
+      "name": "Maverick Protocol",
+      "decimals": "18"
+    },
+    "1INCH": {
+      "contract": "0x111111111117dc0aa78b770fa6a738034120c302",
+      "name": "1INCH",
+      "decimals": "18"
+    },
+    "SPX": {
+      "contract": "0xe0f63a424a4439cbe457d80e4f4b51ad25b2c56c",
+      "name": "SPX6900",
+      "decimals": "8"
+    },
+    "PTB": {
+      "contract": "0x30a25cc9c9eade4d4d9e9349be6e68c3411367d3",
+      "name": "Portal to Bitcoin",
+      "decimals": "18"
+    },
+    "EDEN": {
+      "contract": "0x24a3d725c37a8d1a66eb87f0e5d07fe67c120035",
+      "name": "OpenEden",
+      "decimals": "18"
+    },
+    "SXT": {
+      "contract": "0xe6bfd33f52d82ccb5b37e16d3dd81f9ffdabb195",
+      "name": "Space and Time",
+      "decimals": "18"
+    },
+    "AEVO": {
+      "contract": "0xb528edbef013aff855ac3c50b381f253af13b997",
+      "name": "Aevo",
+      "decimals": "18"
+    },
+    "TRIA": {
+      "contract": "0x228bec415ade4b61d7caf0adf8c91eac587ba369",
+      "name": "TRIA",
+      "decimals": "18"
+    },
+    "AGI": {
+      "contract": "0x7da2641000cbb407c329310c461b2cb9c70c3046",
+      "name": "Delysium",
+      "decimals": "18"
+    }
+  },
+  "per_wallet": [
+    {
+      "address": "0x1157a2076b9bb22a85cc2c162f20fab3898f4101",
+      "score": 1.120557,
+      "inflow_count": 4,
+      "tokens": {
+        "EURC": 1,
+        "FLOKI": 1,
+        "LINK": 1,
+        "PEPE": 1
+      }
+    },
+    {
+      "address": "0x51c72848c68a965f66fa7a88855f9f7784502a7f",
+      "score": 0.978437,
+      "inflow_count": 29,
+      "tokens": {
+        "UNI": 8,
+        "PAXG": 1,
+        "ETHFI": 8,
+        "CRVUSD": 1,
+        "SEI": 2,
+        "FLUID": 1,
+        "WSTETH": 2,
+        "SHIB": 1,
+        "ZAMA": 2,
+        "ENA": 3
+      }
+    },
+    {
+      "address": "0xb334a61a6209f14b5fa5f1684a4ed7621f66e1ef",
+      "score": 0.930826,
+      "inflow_count": 48,
+      "tokens": {
+        "GRVT": 9,
+        "STORJ": 6,
+        "ERA": 3,
+        "ZKC": 2,
+        "UNI": 1,
+        "STRK": 2,
+        "AMP": 3,
+        "CRV": 6,
+        "ARKM": 1,
+        "SPELL": 2,
+        "XCN": 1,
+        "GALA": 1,
+        "LINK": 1,
+        "PEPE": 3,
+        "XAUT": 2,
+        "BIO": 1,
+        "SHIB": 1,
+        "ZRO": 1,
+        "PAXG": 1,
+        "ANIME": 1
+      }
+    },
+    {
+      "address": "0x4a4aaa0155237881fbd5c34bfae16e985a7b068d",
+      "score": 0.810725,
+      "inflow_count": 75,
+      "tokens": {
+        "ENA": 2,
+        "ZAMA": 1,
+        "BICO": 4,
+        "BIO": 1,
+        "MORPHO": 3,
+        "UNI": 2,
+        "LIT": 7,
+        "ONDO": 2,
+        "SKY": 1,
+        "WLD": 3,
+        "PEPE": 12,
+        "ATH": 2,
+        "AUCTION": 1,
+        "AAVE": 5,
+        "ENS": 1,
+        "ARB": 2,
+        "STORJ": 1,
+        "XAUT": 18,
+        "GRVT": 1,
+        "LINK": 3,
+        "CHZ": 1,
+        "PAXG": 1,
+        "CRV": 1
+      }
+    },
+    {
+      "address": "0x86a067030a9668c13ff2a8c4d5415afc776d4c63",
+      "score": 0.788605,
+      "inflow_count": 52,
+      "tokens": {
+        "WLFI": 1,
+        "CRV": 6,
+        "ACH": 2,
+        "SKY": 12,
+        "UNI": 8,
+        "QNT": 1,
+        "GLM": 2,
+        "MORPHO": 1,
+        "ARPA": 1,
+        "LINK": 4,
+        "LDO": 2,
+        "APE": 1,
+        "SPK": 1,
+        "AAVE": 2,
+        "MASK": 1,
+        "RESOLV": 1,
+        "ENA": 3,
+        "AUDIO": 1,
+        "SAND": 1,
+        "FLOKI": 1
+      }
+    },
+    {
+      "address": "0x91d40e4818f4d4c57b4578d9eca6afc92ac8debe",
+      "score": 0.716388,
+      "inflow_count": 141,
+      "tokens": {
+        "USDG": 5,
+        "GRVT": 4,
+        "LDO": 3,
+        "UNI": 7,
+        "AXS": 6,
+        "ONDO": 3,
+        "SHIB": 7,
+        "WLD": 2,
+        "MOVE": 4,
+        "AAVE": 7,
+        "PEOPLE": 3,
+        "LIT": 7,
+        "ENA": 8,
+        "ENS": 1,
+        "ZRX": 1,
+        "API3": 3,
+        "BAND": 1,
+        "CRV": 10,
+        "SNX": 1,
+        "OKB": 4,
+        "RLUSD": 1,
+        "KITE": 1,
+        "SLP": 1,
+        "STORJ": 3,
+        "USAT": 2,
+        "NES": 1,
+        "OL": 1,
+        "SKY": 1,
+        "NEIRO": 1,
+        "COMP": 2,
+        "PYUSD": 1,
+        "BICO": 2,
+        "SPK": 1,
+        "LINK": 4,
+        "XAUT": 4,
+        "EIGEN": 1,
+        "APE": 1,
+        "DOS": 4,
+        "PEPE": 7,
+        "CHZ": 4,
+        "SUSHI": 1,
+        "BARD": 1,
+        "ATH": 1,
+        "SNT": 1,
+        "SWEAT": 1,
+        "AUCTION": 2,
+        "ARB": 1,
+        "MANA": 1,
+        "SAND": 2
+      }
+    },
+    {
+      "address": "0x7f604d597c15b2e2f60dc645844f68b1d781b752",
+      "score": 0.707596,
+      "inflow_count": 15,
+      "tokens": {
+        "POL": 2,
+        "PAXG": 1,
+        "LINK": 3,
+        "ONDO": 1,
+        "ENA": 1,
+        "EURCV": 1,
+        "SAND": 2,
+        "UNI": 1,
+        "GRT": 1,
+        "CRV": 1,
+        "AAVE": 1
+      }
+    },
+    {
+      "address": "0x9b0c45d46d386cedd98873168c36efd0dcba8d46",
+      "score": 0.674985,
+      "inflow_count": 15,
+      "tokens": {
+        "ALCX": 1,
+        "STORJ": 1,
+        "ENA": 1,
+        "MLN": 1,
+        "PEPE": 2,
+        "OXT": 1,
+        "TRU": 1,
+        "EURR": 1,
+        "AIOZ": 1,
+        "SYRUP": 1,
+        "AAVE": 1,
+        "ALICE": 1,
+        "L3": 1,
+        "AUDIO": 1
+      }
+    },
+    {
+      "address": "0xe67821b76985007b4cf744b0f045c8933b3e91d9",
+      "score": 0.614808,
+      "inflow_count": 2,
+      "tokens": {
+        "ENA": 2
+      }
+    },
+    {
+      "address": "0xab782bc7d4a2b306825de5a7730034f8f63ee1bc",
+      "score": 0.591532,
+      "inflow_count": 33,
+      "tokens": {
+        "BICO": 2,
+        "EURC": 1,
+        "MASK": 1,
+        "SKL": 1,
+        "AGLD": 1,
+        "AVA": 1,
+        "MLN": 2,
+        "CPOOL": 1,
+        "ZKP": 1,
+        "EIGEN": 1,
+        "ETHFI": 1,
+        "NEWT": 1,
+        "ZKJ": 1,
+        "RED": 1,
+        "AAVE": 2,
+        "BIO": 1,
+        "JASMY": 1,
+        "CRV": 1,
+        "NIL": 1,
+        "INX": 1,
+        "MAV": 1,
+        "1INCH": 1,
+        "SPX": 1,
+        "PTB": 1,
+        "EDEN": 1,
+        "SXT": 1,
+        "LDO": 1,
+        "AEVO": 1,
+        "TRIA": 1,
+        "AGI": 1
+      }
+    }
+  ]
+}

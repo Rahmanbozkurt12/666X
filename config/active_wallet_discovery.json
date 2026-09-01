@@ -5,27 +5,21 @@
     "max_wallet_age_days": 90,
     "hard_max_age_days": 120,
     "min_wallet_age_days": 0,
-    "min_fet_received": 50,
-    "max_fet_received": 250000,
+    "min_token_received": 50,
+    "max_token_received": 250000,
     "max_wallets": 1000,
-    "transfer_pages": 10,
+    "transfer_pages": 5,
     "transfer_page_size": 100,
     "exclude_labeled_cex": true,
     "exclude_dex_routers": true,
-    "mode": "new_only"
+    "mode": "new_only",
+    "use_contract_cache": true,
+    "contract_cache_file": "output/contract_cache.json"
   },
-  "tokens": [
-    {
-      "symbol": "FET",
-      "contract": "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85",
-      "decimals": 18,
-      "chain": "ethereum"
-    }
-  ],
+  "exclude_symbols": ["FET"],
+  "tokens": [],
   "notes": {
-    "mode": "new_or_active | new_only | active_only",
-    "new_or_active": "Yaş <= max_wallet_age_days VEYA son activity_hours içinde FET almış",
-    "new_only": "Sadece yeni cüzdanlar (ilk tx son X gün içinde)",
-    "active_only": "Yaş fark etmez, son X saatte FET alan aktif cüzdanlar"
+    "FET": "FET alan cüzdanlar istenmiyor — exclude_symbols içinde",
+    "tokens_empty": "use_contract_cache=true ise contract_cache.json'daki tüm ETH tokenları taranır (FET hariç)"
   }
 }

@@ -258,7 +258,13 @@ def main() -> int:
     if not wallets:
         raise SystemExit("izlenecek cüzdan yok")
 
-    tokens = [t for t in (config.get("tokens") or []) if t.get("enabled", True)]
+    tokens = [
+        t
+        for t in (config.get("tokens") or [])
+        if t.get("enabled", True)
+        and (t.get("symbol") or "").upper()
+        not in {s.upper() for s in (config.get("exclude_symbols") or ["FET"])}
+    ]
     if not tokens:
         raise SystemExit("token listesi boş")
 

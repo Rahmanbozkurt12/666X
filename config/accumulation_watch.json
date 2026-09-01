@@ -9,21 +9,36 @@
     "min_accumulators_for_alert": 100,
     "alert_cooldown_minutes": 60
   },
+  "exclude_symbols": ["FET"],
   "tokens": [
+    {
+      "symbol": "LINK",
+      "contract": "0x514910771af9ca656af840dff83e8264ecf986ca",
+      "decimals": 18,
+      "chain": "ethereum",
+      "enabled": true
+    },
+    {
+      "symbol": "PEPE",
+      "contract": "0x6982508145454ce325ddbe47a25d4ec3d2311933",
+      "decimals": 18,
+      "chain": "ethereum",
+      "enabled": true
+    },
+    {
+      "symbol": "LDO",
+      "contract": "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
+      "decimals": 18,
+      "chain": "ethereum",
+      "enabled": true
+    },
     {
       "symbol": "FET",
       "contract": "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85",
       "decimals": 18,
       "chain": "ethereum",
-      "enabled": true
-    }
-  ],
-  "fetch_sources": [
-    {
-      "source": "eth_labels",
-      "chain_id": 1,
-      "name_tag": "Binance",
-      "note": "5100+ Binance deposit adresi — eth-labels ücretsiz API"
+      "enabled": false,
+      "note": "KAPALI — FET alanları istemiyoruz"
     }
   ]
 }

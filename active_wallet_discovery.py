@@ -30,6 +30,7 @@ import requests
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config" / "active_wallet_discovery.json"
 DEFAULT_OUT = ROOT / "output" / "active_wallets.json"
+CONTRACT_CACHE = ROOT / "output" / "contract_cache.json"
 WATCHED_PATH = ROOT / "config" / "watched_wallets.json"
 ETH_LABELS = "https://eth-labels.com/labels"
 ZERO = "0x0000000000000000000000000000000000000000"
@@ -175,6 +176,52 @@ def fetch_recent_token_receivers(
     return receivers
 
 
+def load_token_list(config: dict[str, Any]) -> list[dict[str, Any]]:
+    exclude = {s.upper() for s in (config.get("exclude_symbols") or ["FET"])}
+    settings = config.get("settings") or {}
+    tokens: list[dict[str, Any]] = []
+
+    for row in config.get("tokens") or []:
+        sym = (row.get("symbol") or "").upper()
+        if sym in exclude:
+            continue
+        tokens.append(row)
+
+    if settings.get("use_contract_cache") and CONTRACT_CACHE.exists():
+        cache = load_json(CONTRACT_CACHE)
+        for sym, entries in cache.items():
+            if sym.upper() in exclude:
+                continue
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if (entry.get("chain") or "") not in ("ethereum", "eth"):
+                    continue
+                contract = entry.get("contract")
+                if not contract:
+                    continue
+                tokens.append(
+                    {
+                        "symbol": sym.upper(),
+                        "contract": contract,
+                        "decimals": 18,
+                        "chain": "ethereum",
+                    }
+                )
+                break
+
+    # dedupe by contract
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for t in tokens:
+        c = (t.get("contract") or "").lower()
+        if c in seen:
+            continue
+        seen.add(c)
+        unique.append(t)
+    return unique
+
+
 def passes_mode(
     *,
     mode: str,
@@ -194,19 +241,16 @@ def passes_mode(
 
 def discover(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
     settings = config.get("settings") or {}
-    token = (config.get("tokens") or [{}])[0]
-    contract = (token.get("contract") or "").lower()
-    symbol = token.get("symbol") or "TOKEN"
-    decimals = int(token.get("decimals") or 18)
     api = settings.get("explorer_api") or "https://eth.blockscout.com/api"
+    token_list = load_token_list(config)
+    if not token_list:
+        raise ValueError("taranacak token yok (FET hariç liste boş)")
 
     activity_hours = int(settings.get("activity_hours") or 72)
     max_age_days = float(settings.get("max_wallet_age_days") or 90)
     min_age_days = float(settings.get("min_wallet_age_days") or 0)
-    min_received = float(settings.get("min_fet_received") or 50)
-    max_received = float(settings.get("max_fet_received") or 0)
-    min_received_raw = int(min_received * (10**decimals))
-    max_received_raw = int(max_received * (10**decimals)) if max_received > 0 else 0
+    min_received = float(settings.get("min_token_received") or settings.get("min_fet_received") or 50)
+    max_received = float(settings.get("max_token_received") or settings.get("max_fet_received") or 0)
     hard_max_age = float(settings.get("hard_max_age_days") or 0)
     max_wallets = int(settings.get("max_wallets") or 1000)
     mode = settings.get("mode") or "new_or_active"
@@ -217,56 +261,68 @@ def discover(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]
     since_ts = now - activity_hours * 3600
     routers = load_router_blocklist() if exclude_routers else set()
 
-    print(f"[discover] {symbol} transfers last {activity_hours}h | max_age={max_age_days}d | mode={mode}")
-    receivers = fetch_recent_token_receivers(
-        api,
-        contract,
-        pages=int(settings.get("transfer_pages") or 10),
-        page_size=int(settings.get("transfer_page_size") or 100),
-        since_ts=since_ts,
-    )
-    print(f"[discover] raw receivers in window: {len(receivers)}")
+    all_candidates: dict[str, dict[str, Any]] = {}
+    scanned_tokens: list[str] = []
 
-    candidates: list[dict[str, Any]] = []
-    checked = 0
-    for addr, stats in receivers.items():
-        if stats["received_raw"] < min_received_raw:
-            continue
-        if max_received_raw and stats["received_raw"] > max_received_raw:
-            continue
-        if addr in routers:
-            continue
-        if exclude_cex and is_labeled_cex(addr):
-            continue
+    for token in token_list:
+        contract = (token.get("contract") or "").lower()
+        symbol = token.get("symbol") or "TOKEN"
+        decimals = int(token.get("decimals") or 18)
+        min_received_raw = int(min_received * (10**decimals))
+        max_received_raw = int(max_received * (10**decimals)) if max_received > 0 else 0
 
-        first_ts = wallet_first_tx_ts(api, addr)
-        age_days = wallet_age_days(first_ts, now)
-        active_in_window = stats["tx_count"] > 0 and stats["last_ts"] >= since_ts
+        print(f"[discover] {symbol} | last {activity_hours}h | max_age={max_age_days}d | mode={mode}")
+        receivers = fetch_recent_token_receivers(
+            api,
+            contract,
+            pages=int(settings.get("transfer_pages") or 5),
+            page_size=int(settings.get("transfer_page_size") or 100),
+            since_ts=since_ts,
+        )
+        scanned_tokens.append(symbol)
+        print(f"[discover] {symbol} raw receivers: {len(receivers)}")
 
-        # 2 yıllık eski cüzdanları asla alma (hard cap)
-        if hard_max_age > 0 and age_days is not None and age_days > hard_max_age:
-            continue
+        for addr, stats in receivers.items():
+            if stats["received_raw"] < min_received_raw:
+                continue
+            if max_received_raw and stats["received_raw"] > max_received_raw:
+                continue
+            if addr in routers:
+                continue
+            if exclude_cex and is_labeled_cex(addr):
+                continue
 
-        if not passes_mode(
-            mode=mode,
-            age_days=age_days,
-            max_age_days=max_age_days,
-            min_age_days=min_age_days,
-            active_in_window=active_in_window,
-        ):
-            continue
+            first_ts = wallet_first_tx_ts(api, addr)
+            age_days = wallet_age_days(first_ts, now)
+            active_in_window = stats["tx_count"] > 0 and stats["last_ts"] >= since_ts
 
-        received_human = stats["received_raw"] / (10**decimals)
-        score = received_human * (2.0 if (age_days is not None and age_days <= 30) else 1.0)
-        score += stats["tx_count"] * 5
+            if hard_max_age > 0 and age_days is not None and age_days > hard_max_age:
+                continue
+            if not passes_mode(
+                mode=mode,
+                age_days=age_days,
+                max_age_days=max_age_days,
+                min_age_days=min_age_days,
+                active_in_window=active_in_window,
+            ):
+                continue
 
-        candidates.append(
-            {
+            received_human = stats["received_raw"] / (10**decimals)
+            score = received_human * (2.0 if (age_days is not None and age_days <= 30) else 1.0)
+            score += stats["tx_count"] * 5
+
+            existing = all_candidates.get(addr)
+            if existing and existing["score"] >= score:
+                continue
+
+            all_candidates[addr] = {
                 "address": addr,
                 "label": "active" if active_in_window else "new",
                 "name_tag": f"{symbol} receiver | age={age_days:.0f}d" if age_days else f"{symbol} receiver",
                 "chain_id": 1,
                 "source": "active_wallet_discovery",
+                "token": symbol,
+                "token_contract": contract,
                 "wallet_age_days": round(age_days, 1) if age_days is not None else None,
                 "first_tx_at": datetime.fromtimestamp(first_ts, tz=timezone.utc).isoformat()
                 if first_ts
@@ -278,20 +334,16 @@ def discover(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]
                 else None,
                 "score": round(score, 2),
             }
-        )
-        checked += 1
-        if checked % 25 == 0:
-            print(f"[discover] screened {checked} candidates, kept {len(candidates)}")
-        time.sleep(0.12)
+            time.sleep(0.08)
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)
+    candidates = sorted(all_candidates.values(), key=lambda x: x["score"], reverse=True)
     picked = candidates[:max_wallets]
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "count": len(picked),
-        "token": symbol,
-        "contract": contract,
+        "tokens_scanned": scanned_tokens,
+        "exclude_symbols": config.get("exclude_symbols") or ["FET"],
         "filters": {
             "activity_hours": activity_hours,
             "max_wallet_age_days": max_age_days,
@@ -300,8 +352,7 @@ def discover(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]
             "exclude_labeled_cex": exclude_cex,
         },
         "stats": {
-            "raw_receivers": len(receivers),
-            "after_filters": len(candidates),
+            "unique_candidates": len(candidates),
             "saved": len(picked),
         },
         "wallets": picked,
@@ -309,11 +360,14 @@ def discover(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]
 
     if not dry_run:
         save_json(DEFAULT_OUT, payload)
-        print(f"wrote {len(picked)} active/new wallets → {DEFAULT_OUT}")
+        print(f"wrote {len(picked)} active/new wallets → {DEFAULT_OUT} (FET hariç)")
     else:
-        print(f"[dry-run] would save {len(picked)} wallets")
+        print(f"[dry-run] would save {len(picked)} wallets from {len(scanned_tokens)} tokens (no FET)")
         for w in picked[:5]:
-            print(f"  {w['address'][:12]}… age={w['wallet_age_days']}d recv={w['received']} score={w['score']}")
+            print(
+                f"  {w['token']} {w['address'][:12]}… "
+                f"age={w['wallet_age_days']}d recv={w['received']}"
+            )
 
     return payload
 
