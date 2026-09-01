@@ -13,6 +13,42 @@ Bookmap'i mevcut Python kod tabanına bağlamak için iki parçalı bir yapı ku
 
 > `bookmap` paketi normal `pip install` ile çalışmaz; yalnızca Bookmap uygulaması içinden yüklenir.
 
+## Sık hata: `Import "bookmap" could not be resolved`
+
+VS Code veya terminalde `python wall_alert_addon.py` çalıştırırsanız bu hatayı alırsınız. **Bu beklenen davranıştır.**
+
+| Dosya | Nerede çalışır? |
+|-------|-----------------|
+| `bookmap/wall_alert_addon.py` | **Yalnızca Bookmap içinde** (Python API editörü) |
+| `bookmap_telegram_bridge.py` | VS Code / terminal (bookmap import yok) |
+
+Pylance uyarısını görmezden gelebilirsiniz; script Bookmap'ten çalıştırıldığında modül orada vardır.
+
+### Bookmap'te doğru çalıştırma (Windows)
+
+1. Bookmap'i açın
+2. **Settings → Manage plugins → Bookmap Add-ons (L1)** → **Python API** kurulu olsun
+3. Bookmap menüsünden **Python API / Scripts** editörünü açın
+4. `wall_alert_addon.py` dosyasını yükleyin (veya içeriği yapıştırın)
+5. Grafiğinizde (BTC futures vb.) add-on'u **Enable** edin
+6. Bookmap konsolunda `[wall_alert] depth subscribed: ...` mesajını görmelisiniz
+
+### VS Code'da çalıştırılacak script
+
+Telegram köprüsü normal Python ile çalışır:
+
+```powershell
+cd C:\Users\Rahman\...\666X
+pip install requests
+$env:TELEGRAM_BOT_TOKEN="..."
+$env:TELEGRAM_CHAT_ID="..."
+python bookmap_telegram_bridge.py --dry-run
+```
+
+### Python sürümü
+
+Bookmap resmi olarak **Python 3.7.14+** ister; **3.13** henüz desteklenmeyebilir. Bookmap kendi Python yolunu kullanır — VS Code'daki 3.13 seçimi add-on için önemli değildir, script zaten Bookmap içinden koşar.
+
 ## Kurulum
 
 ### 1. Bookmap add-on'u yükle

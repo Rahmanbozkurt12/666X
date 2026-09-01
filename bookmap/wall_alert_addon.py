@@ -12,20 +12,29 @@ Kurulum:
   4. Ayrı terminalde: python bookmap_telegram_bridge.py
 
 Not: Bookmap 7.4+, Python 3.7.14+ gerekir.
+
+ÖNEMLİ — VS Code / terminalden ÇALIŞTIRMAYIN!
+  `import bookmap` hatası normaldir; bookmap modülü yalnızca Bookmap uygulaması
+  içinden script çalıştırıldığında yüklenir. Bu dosyayı Bookmap → Python API
+  editöründen açıp oradan Run edin.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import bookmap as bm
+import bookmap as bm  # type: ignore[import-not-found]  # noqa: F401 — yalnızca Bookmap içinde mevcut
 
-ROOT = Path(__file__).resolve().parent.parent
+_SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("BOOKMAP_ROOT", _SCRIPT_DIR))
 CONFIG_PATH = ROOT / "config" / "bookmap_alerts.json"
+if not CONFIG_PATH.exists():
+    CONFIG_PATH = _SCRIPT_DIR / "bookmap_alerts.json"
 
 # --- state ---
 alias_to_order_book: dict[str, Any] = {}
