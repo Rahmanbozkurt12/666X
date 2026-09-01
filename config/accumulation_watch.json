@@ -2,7 +2,7 @@
   "settings": {
     "poll_seconds": 300,
     "rpc_url": "https://ethereum-rpc.publicnode.com",
-    "wallet_file": "output/labeled_wallets.json",
+    "wallet_file": "output/active_wallets.json",
     "max_wallets_to_scan": 1000,
     "min_token_balance": 100,
     "min_balance_increase": 10,

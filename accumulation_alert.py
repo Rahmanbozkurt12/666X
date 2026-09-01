@@ -249,7 +249,8 @@ def main() -> int:
     if not wallet_file.exists():
         raise SystemExit(
             f"cüzdan dosyası yok: {wallet_file}\n"
-            "önce: python labeled_wallet_fetcher.py --name-tag Binance --max 1000"
+            "önce: python active_wallet_discovery.py\n"
+            "veya: python labeled_wallet_fetcher.py --name-tag Binance --max 1000"
         )
 
     max_wallets = int(settings.get("max_wallets_to_scan") or 1000)

@@ -34,19 +34,22 @@ Spam airdrops (decimals=0 + huge amount) are filtered by default.
 - Phantom is a user wallet app — add specific addresses you care about under `venue: Phantom`
 - CEX hot-wallet traffic is noisy; start with a short watchlist
 
-## Etiketli cüzdan + birikim sinyali (FET vb.)
+## Yeni / aktif cüzdan keşfi + birikim sinyali (FET vb.)
 
-Ücretsiz eth-labels API ile cüzdan kaydet, sonra token birikimini izle:
+Eski Binance Dep cüzdanları (2+ yıl) yerine **son günlerde FET alan yeni veya aktif** cüzdanlar:
 
 ```bash
-# 1) Cüzdanları kaydet (ekrandaki gibi — API key yok)
-python labeled_wallet_fetcher.py --name-tag Binance --max 1000
-
-# 2) Birikim izle (ör. 1000 cüzdandan 100+ FET birikince alert)
+python active_wallet_discovery.py --max-age-days 90 --activity-hours 72
 python accumulation_alert.py --once --dry-run
 python accumulation_alert.py
 ```
 
-Ayarlar: `config/accumulation_watch.json` (`min_token_balance`, `min_accumulators_for_alert`, …)
+Ayarlar: `config/active_wallet_discovery.json`, `config/accumulation_watch.json`
 
-Not: `Binance Dep` adresleri borsaya yatırım içindir; alım sinyali için `smart_money_wallets.json` ile `--merge` kullanmak daha mantıklı olabilir.
+### Eski yöntem (eth-labels — önerilmez)
+
+```bash
+python labeled_wallet_fetcher.py --name-tag Binance --max 1000
+```
+
+`Binance Dep` = borsaya satış için yatırım adresleri.

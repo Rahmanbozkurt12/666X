@@ -1,0 +1,31 @@
+{
+  "settings": {
+    "explorer_api": "https://eth.blockscout.com/api",
+    "activity_hours": 72,
+    "max_wallet_age_days": 90,
+    "hard_max_age_days": 120,
+    "min_wallet_age_days": 0,
+    "min_fet_received": 50,
+    "max_fet_received": 250000,
+    "max_wallets": 1000,
+    "transfer_pages": 10,
+    "transfer_page_size": 100,
+    "exclude_labeled_cex": true,
+    "exclude_dex_routers": true,
+    "mode": "new_only"
+  },
+  "tokens": [
+    {
+      "symbol": "FET",
+      "contract": "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85",
+      "decimals": 18,
+      "chain": "ethereum"
+    }
+  ],
+  "notes": {
+    "mode": "new_or_active | new_only | active_only",
+    "new_or_active": "Yaş <= max_wallet_age_days VEYA son activity_hours içinde FET almış",
+    "new_only": "Sadece yeni cüzdanlar (ilk tx son X gün içinde)",
+    "active_only": "Yaş fark etmez, son X saatte FET alan aktif cüzdanlar"
+  }
+}
