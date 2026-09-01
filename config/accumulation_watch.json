@@ -1,0 +1,29 @@
+{
+  "settings": {
+    "poll_seconds": 300,
+    "rpc_url": "https://ethereum-rpc.publicnode.com",
+    "wallet_file": "output/labeled_wallets.json",
+    "max_wallets_to_scan": 1000,
+    "min_token_balance": 100,
+    "min_balance_increase": 10,
+    "min_accumulators_for_alert": 100,
+    "alert_cooldown_minutes": 60
+  },
+  "tokens": [
+    {
+      "symbol": "FET",
+      "contract": "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85",
+      "decimals": 18,
+      "chain": "ethereum",
+      "enabled": true
+    }
+  ],
+  "fetch_sources": [
+    {
+      "source": "eth_labels",
+      "chain_id": 1,
+      "name_tag": "Binance",
+      "note": "5100+ Binance deposit adresi — eth-labels ücretsiz API"
+    }
+  ]
+}
