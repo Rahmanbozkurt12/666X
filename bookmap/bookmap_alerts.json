@@ -1,0 +1,10 @@
+{
+  "settings": {
+    "export_path": "",
+    "scan_interval_sec": 2,
+    "min_wall_size": 50000,
+    "near_wall_pct": 5.0,
+    "cooldown_sec": 120,
+    "export_to_file": true
+  }
+}
