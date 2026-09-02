@@ -13,65 +13,83 @@ Bookmap'i mevcut Python kod tabanına bağlamak için iki parçalı bir yapı ku
 
 > `bookmap` paketi normal `pip install` ile çalışmaz; yalnızca Bookmap uygulaması içinden yüklenir.
 
-## Sık hata: `Import "bookmap" could not be resolved`
+---
 
-VS Code veya terminalde `python wall_alert_addon.py` çalıştırırsanız bu hatayı alırsınız. **Bu beklenen davranıştır.**
+## Bookmap'te doğru çalıştırma (Windows)
 
-| Dosya | Nerede çalışır? |
-|-------|-----------------|
-| `bookmap/wall_alert_addon.py` | **Yalnızca Bookmap içinde** (Python API editörü) |
-| `bookmap_telegram_bridge.py` | VS Code / terminal (bookmap import yok) |
+1. Bookmap'i açın  
+2. **Settings → Manage plugins → Bookmap Add-ons (L1)** → **Python API** kurulu olsun  
+3. Bookmap menüsünden **Python API / Scripts** editörünü açın  
+4. `bookmap/wall_alert_addon.py` dosyasını yükleyin (veya içeriği yapıştırın)  
+5. Canlı bir enstrüman grafiği açın (BTC futures vb.) — **Data: Live** olmalı  
+6. Add-on listesinden **wall_alert_addon**'u **Enable** edin  
+7. Bookmap mesaj / konsol logunda şunları görmelisiniz:
+   - `[wall_alert] depth subscribed: ...`
+   - `[wall_alert] ready — events -> C:\Users\...\Documents\666X\output\bookmap_events.jsonl`
 
-Pylance uyarısını görmezden gelebilirsiniz; script Bookmap'ten çalıştırıldığında modül orada vardır.
-
-### Bookmap'te doğru çalıştırma (Windows)
-
-1. Bookmap'i açın
-2. **Settings → Manage plugins → Bookmap Add-ons (L1)** → **Python API** kurulu olsun
-3. Bookmap menüsünden **Python API / Scripts** editörünü açın
-4. `wall_alert_addon.py` dosyasını yükleyin (veya içeriği yapıştırın)
-5. Grafiğinizde (BTC futures vb.) add-on'u **Enable** edin
-6. Bookmap konsolunda `[wall_alert] depth subscribed: ...` mesajını görmelisiniz
-
-### VS Code'da çalıştırılacak script
-
-Telegram köprüsü normal Python ile çalışır:
+### Telegram köprüsü (VS Code / PowerShell)
 
 ```powershell
 cd C:\Users\Rahman\...\666X
 pip install requests
 $env:TELEGRAM_BOT_TOKEN="..."
 $env:TELEGRAM_CHAT_ID="..."
-python bookmap_telegram_bridge.py --dry-run
+# Bookmap logundaki yolu aynen verin:
+python bookmap_telegram_bridge.py --dry-run --events "$env:USERPROFILE\Documents\666X\output\bookmap_events.jsonl"
 ```
 
-### Python sürümü
+---
 
-Bookmap resmi olarak **Python 3.7.14+** ister; **3.13** henüz desteklenmeyebilir. Bookmap kendi Python yolunu kullanır — VS Code'daki 3.13 seçimi add-on için önemli değildir, script zaten Bookmap içinden koşar.
+## Sık hatalar ve çözümleri
 
-## Kurulum
+### 1) VS Code: `Import "bookmap" could not be resolved`
 
-### 1. Bookmap add-on'u yükle
+**Beklenen.** Add-on'u VS Code'dan çalıştırmayın. Yalnızca Bookmap Python API editöründen Enable edin.
 
-Bookmap'te **Scripts** veya **Python API** editöründen `bookmap/wall_alert_addon.py` dosyasını açın.
+| Dosya | Nerede çalışır? |
+|-------|-----------------|
+| `bookmap/wall_alert_addon.py` | **Yalnızca Bookmap içinde** |
+| `bookmap_telegram_bridge.py` | VS Code / terminal |
 
-Alternatif: dosyayı Bookmap'in script klasörüne kopyalayın ve oradan çalıştırın.
+### 2) Bookmap içinde Enable → hata / addon kapanıyor
 
-### 2. Enstrümanda etkinleştir
+Önceki sürümde boş order book üzerinde `get_bbos` açılırken şu hata oluşabiliyordu:
 
-- BTC futures gibi bir enstrüman açın (ekran görüntünüzdeki DOM/ladder görünümü)
-- Add-on listesinden **wall_alert_addon**'u etkinleştirin
-- Bookmap ayar panelinden **Min wall size** ve **Near wall %** değerlerini ayarlayın
-
-### 3. Telegram köprüsünü başlat
-
-```bash
-pip install -r requirements.txt
-set -a; source .env; set +a   # TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
-
-python bookmap_telegram_bridge.py
-python bookmap_telegram_bridge.py --dry-run   # test
+```text
+TypeError: cannot unpack non-iterable NoneType object
 ```
+
+Bu sürümde BBO okuma güvenli hale getirildi; handler'lar try/except ile sarıldı.  
+Hâlâ kapanıyorsa Bookmap **Messages / Python console** çıktısının tamamını kopyalayıp gönderin.
+
+Kontrol listesi:
+
+- Python API eklentisi kurulu mu?
+- Enstrüman **Live** mi? (Simulated trading OK; feed Live olmalı)
+- BookmapData / dxFeed kullanıyorsanız Python API **desteklemez** — Java API gerekir
+- Aynı addon'u aynı anda iki enstrümanda Enable etmeyin (bilinen Bookmap bug'ı)
+
+### 3) Add-on çalışıyor ama Telegram'a bir şey gelmiyor
+
+Bookmap script'i genelde `C:\Bookmap\Python\tmp\...` altına kopyalanır; eski kod olayları yanlış klasöre yazıyordu.
+
+Bu sürüm varsayılan olarak şuraya yazar:
+
+```text
+%USERPROFILE%\Documents\666X\output\bookmap_events.jsonl
+```
+
+1. Bookmap logunda `events -> ...` satırındaki **mutlak yolu** bulun  
+2. Köprüyü o yolla başlatın:  
+   `python bookmap_telegram_bridge.py --events "O_YOL"`  
+3. Bookmap add-on ayarından **Export path** alanını da aynı mutlak yola çekebilirsiniz  
+4. `Min wall size` değerini düşürün (ör. `10000`) — duvar eşiği yüksekse olay üretmez
+
+### 4) Python sürümü
+
+Bookmap kendi Python yolunu kullanır. VS Code'daki 3.13 seçimi add-on için önemli değildir.
+
+---
 
 ## Nasıl çalışır?
 
@@ -79,7 +97,7 @@ python bookmap_telegram_bridge.py --dry-run   # test
 Bookmap (canlı veri)
     │
     ▼
-wall_alert_addon.py  ──►  output/bookmap_events.jsonl
+wall_alert_addon.py  ──►  Documents/666X/output/bookmap_events.jsonl
     │                              │
     │                              ▼
     │                    bookmap_telegram_bridge.py
@@ -98,33 +116,24 @@ wall_alert_addon.py  ──►  output/bookmap_events.jsonl
 
 ### Yapılandırma
 
-`config/bookmap_alerts.json`:
+`config/bookmap_alerts.json` — `export_path` boş bırakılırsa Documents yolu kullanılır.
 
-```json
-{
-  "settings": {
-    "min_wall_size": 50000,
-    "near_wall_pct": 5.0,
-    "cooldown_sec": 120
-  }
-}
+Bookmap UI ayarları: **Min wall size**, **Near wall %**, **Export path**.
+
+---
+
+## Hızlı test (Telegram köprüsü)
+
+```powershell
+# örnek olay yaz
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Documents\666X\output" | Out-Null
+'{"type":"wall_detected","alias":"TEST","side":"ask","price":80000,"size":850000,"mid_price":76880,"ts":"2026-09-02T12:00:00Z"}' |
+  Out-File -Encoding utf8 -Append "$env:USERPROFILE\Documents\666X\output\bookmap_events.jsonl"
+
+python bookmap_telegram_bridge.py --dry-run --once --replay --events "$env:USERPROFILE\Documents\666X\output\bookmap_events.jsonl"
 ```
 
-## Kendi kodunuzla kullanım
-
-JSONL dosyasını doğrudan okuyabilirsiniz:
-
-```python
-import json
-from pathlib import Path
-
-for line in Path("output/bookmap_events.jsonl").open():
-    event = json.loads(line)
-    if event["type"] == "wall_detected" and event["side"] == "ask":
-        print(f"Direnç: {event['price']} — hacim {event['size']}")
-```
-
-Mevcut `telegram_cex_alert.py` ile aynı `.env` dosyasını kullanır; iki script paralel çalışabilir.
+---
 
 ## Sınırlamalar
 

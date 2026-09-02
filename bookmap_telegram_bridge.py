@@ -2,14 +2,16 @@
 """
 Bookmap add-on'un yazdığı JSONL olaylarını okuyup Telegram'a gönderir.
 
-Bookmap add-on (bookmap/wall_alert_addon.py) output/bookmap_events.jsonl dosyasına yazar;
-bu script o dosyayı tail eder ve uyarı üretir.
+Bookmap add-on (bookmap/wall_alert_addon.py) varsayılan olarak
+  ~/Documents/666X/output/bookmap_events.jsonl
+dosyasına yazar; bu script o dosyayı (veya --events ile verilen yolu) tail eder.
 
 Kullanım:
   export TELEGRAM_BOT_TOKEN=...
   export TELEGRAM_CHAT_ID=...
   python bookmap_telegram_bridge.py
   python bookmap_telegram_bridge.py --dry-run
+  python bookmap_telegram_bridge.py --events "C:/Users/Rahman/Documents/666X/output/bookmap_events.jsonl"
   python bookmap_telegram_bridge.py --replay   # mevcut dosyayı baştan oku (test)
 """
 
@@ -47,6 +49,34 @@ def save_json(path: Path, data: Any) -> None:
 def env(name: str) -> str | None:
     value = os.environ.get(name)
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def candidate_event_paths() -> list[Path]:
+    home = Path.home()
+    return [
+        home / "Documents" / "666X" / "output" / "bookmap_events.jsonl",
+        home / "666X" / "output" / "bookmap_events.jsonl",
+        home / "OneDrive" / "Documents" / "666X" / "output" / "bookmap_events.jsonl",
+        DEFAULT_EVENTS,
+        ROOT / "bookmap" / "output" / "bookmap_events.jsonl",
+    ]
+
+
+def resolve_events_path(cli_path: str | None, cfg: dict[str, Any], settings: dict[str, Any]) -> Path:
+    env_path = env("BOOKMAP_EXPORT_PATH")
+    if cli_path:
+        return Path(cli_path).expanduser()
+    if env_path:
+        return Path(env_path).expanduser()
+    configured = (cfg.get("events_path") or settings.get("export_path") or "").strip()
+    if configured:
+        p = Path(configured).expanduser()
+        return p if p.is_absolute() else ROOT / p
+    for candidate in candidate_event_paths():
+        if candidate.exists():
+            return candidate
+    # Prefer Documents path even if not created yet (addon creates it)
+    return candidate_event_paths()[0]
 
 
 def telegram_send(token: str, chat_id: str, text: str, *, dry_run: bool) -> bool:
@@ -125,11 +155,14 @@ def event_fingerprint(event: dict[str, Any]) -> str:
     return "|".join(parts)
 
 
-def load_config() -> dict[str, Any]:
+def load_config() -> tuple[dict[str, Any], dict[str, Any]]:
     if not CONFIG_PATH.exists():
-        return {"poll_seconds": 3, "alert_types": ["wall_detected", "wall_removed", "price_near_wall"]}
+        return (
+            {"poll_seconds": 3, "alert_types": ["wall_detected", "wall_removed", "price_near_wall"]},
+            {},
+        )
     raw = load_json(CONFIG_PATH)
-    return raw.get("telegram_bridge") or {}
+    return raw.get("telegram_bridge") or {}, raw.get("settings") or {}
 
 
 def tail_events(
@@ -140,7 +173,6 @@ def tail_events(
     token: str | None,
     chat_id: str | None,
     allowed_types: set[str],
-    poll_seconds: int,
     replay: bool,
 ) -> int:
     sent = 0
@@ -183,6 +215,7 @@ def tail_events(
 
     state["offset"] = offset
     state["seen"] = list(seen)[-5000:]
+    state["events_path"] = str(path)
     save_json(STATE_PATH, state)
     return sent
 
@@ -192,16 +225,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Telegram gönderme, konsola yaz")
     parser.add_argument("--replay", action="store_true", help="Dosyayı baştan oku")
     parser.add_argument("--once", action="store_true", help="Tek tur oku ve çık")
+    parser.add_argument("--events", help="bookmap_events.jsonl mutlak yolu")
     args = parser.parse_args()
 
-    cfg = load_config()
-    events_path = DEFAULT_EVENTS
-    if CONFIG_PATH.exists():
-        settings = load_json(CONFIG_PATH).get("settings") or {}
-        rel = settings.get("export_path")
-        if rel:
-            p = Path(rel)
-            events_path = p if p.is_absolute() else ROOT / p
+    cfg, settings = load_config()
+    events_path = resolve_events_path(args.events, cfg, settings)
 
     poll_seconds = int(cfg.get("poll_seconds") or 3)
     allowed_types = set(cfg.get("alert_types") or ["wall_detected", "wall_removed", "price_near_wall"])
@@ -214,6 +242,12 @@ def main() -> int:
 
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {"offset": 0, "seen": []}
     print(f"watching {events_path} | poll={poll_seconds}s | dry_run={dry_run}")
+    if not events_path.exists():
+        print(
+            "[info] Dosya henüz yok. Bookmap add-on Enable edilince oluşur.\n"
+            "       Bookmap logunda 'events -> ...' satırındaki yolu --events ile verin.",
+            file=sys.stderr,
+        )
 
     total = 0
     while True:
@@ -224,7 +258,6 @@ def main() -> int:
             token=token,
             chat_id=chat_id,
             allowed_types=allowed_types,
-            poll_seconds=poll_seconds,
             replay=args.replay and total == 0,
         )
         total += n

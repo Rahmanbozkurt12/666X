@@ -1,6 +1,6 @@
 {
   "settings": {
-    "export_path": "output/bookmap_events.jsonl",
+    "export_path": "",
     "scan_interval_sec": 2,
     "min_wall_size": 50000,
     "near_wall_pct": 5.0,
@@ -13,6 +13,7 @@
       "wall_detected",
       "wall_removed",
       "price_near_wall"
-    ]
+    ],
+    "events_path": ""
   }
 }
