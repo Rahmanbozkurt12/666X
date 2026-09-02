@@ -5,6 +5,52 @@ Bookmap'i mevcut Python kod tabanına bağlamak için iki parçalı bir yapı ku
 1. **Bookmap add-on** (`bookmap/wall_alert_addon.py`) — Bookmap içinde çalışır, order book'u izler
 2. **Telegram köprüsü** (`bookmap_telegram_bridge.py`) — Olayları JSONL dosyasından okuyup Telegram'a gönderir
 
+---
+
+## Tıkandığınız nokta: `book.jar` / Configure add-ons
+
+**Bu projede `book.jar` (veya herhangi bir add-on `.jar`) üretilmez.** Kod Python'dır; Bookmap'e jar seçmeniz gerekmez.
+
+| Yaptığınız (yanlış) | Doğrusu |
+|---------------------|---------|
+| `Settings → Configure add-ons → Add...` ile `.jar` / `.lnk` seçmek | **Settings → Manage plugins → Bookmap Add-ons (L1) → Python API** kurmak |
+| Masaüstü kısayolu (`.lnk`) seçmek | Kısayol asla seçilmez; bizim add-on zaten `.py` |
+| `C:\Program Files\Bookmap\Bookmap.jar` seçmek | Bu Bookmap'in **kendi uygulaması**; add-on değil, buraya eklenmez |
+| VS Code'dan `wall_alert_addon.py` çalıştırmak | Add-on **yalnızca Bookmap içinden** çalışır |
+
+Configure add-ons ekranı **Java** eklentileri içindir. Bizim köprü **Python API** kullanır; o ekranda mavi tik aramayın.
+
+### Windows — doğru 6 adım (tik burada değil)
+
+1. Bookmap'i açın (canlı veri / BTC vb. grafik açık olsun).
+2. **Settings → Manage plugins → Bookmap Add-ons (L1)** → **Python API** → **Install** (veya zaten kurulu görünsün).
+3. Bookmap içinde **Python API / Scripts** editörünü açın (eklenti kurulunca menüde çıkar).
+4. Şu dosyayı açın / içeriğini yapıştırın (kısayol değil, gerçek `.py`):
+   - Repo: `bookmap\wall_alert_addon.py`
+   - OneDrive kopyanız varsa: `C:\Users\Rahman\OneDrive\bookmap çalıştırma.py`
+5. Grafikte add-on'u **Enable** edin. Konsolda şunu görmelisiniz:
+   `[wall_alert] depth subscribed: ...`
+6. Ayrı bir VS Code / PowerShell penceresinde köprüyü çalıştırın:
+
+```powershell
+cd <666X-repo-klasörü>
+python bookmap_telegram_bridge.py --dry-run
+```
+
+Add-on yazmaya başlayınca `output\bookmap_events.jsonl` oluşur; köprü o dosyayı dinleyip satırları ekrana / Telegram'a basar.
+
+### Yol bulucu (Windows)
+
+PowerShell'de repo kökünden:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File bookmap\find_paths.ps1
+```
+
+Script şunları yazar: gerçek `.py` yolu, beklenen JSONL yolu, varsa `Bookmap.jar` (uygulama — add-on değil).
+
+---
+
 ## Gereksinimler
 
 - [Bookmap](https://bookmap.com/) 7.4 veya üzeri
@@ -23,15 +69,6 @@ VS Code veya terminalde `python wall_alert_addon.py` çalıştırırsanız bu ha
 | `bookmap_telegram_bridge.py` | VS Code / terminal (bookmap import yok) |
 
 Pylance uyarısını görmezden gelebilirsiniz; script Bookmap'ten çalıştırıldığında modül orada vardır.
-
-### Bookmap'te doğru çalıştırma (Windows)
-
-1. Bookmap'i açın
-2. **Settings → Manage plugins → Bookmap Add-ons (L1)** → **Python API** kurulu olsun
-3. Bookmap menüsünden **Python API / Scripts** editörünü açın
-4. `wall_alert_addon.py` dosyasını yükleyin (veya içeriği yapıştırın)
-5. Grafiğinizde (BTC futures vb.) add-on'u **Enable** edin
-6. Bookmap konsolunda `[wall_alert] depth subscribed: ...` mesajını görmelisiniz
 
 ### VS Code'da çalıştırılacak script
 
@@ -59,7 +96,7 @@ Alternatif: dosyayı Bookmap'in script klasörüne kopyalayın ve oradan çalı�
 
 ### 2. Enstrümanda etkinleştir
 
-- BTC futures gibi bir enstrüman açın (ekran görüntünüzdeki DOM/ladder görünümü)
+- BTC futures gibi bir enstrüman açın
 - Add-on listesinden **wall_alert_addon**'u etkinleştirin
 - Bookmap ayar panelinden **Min wall size** ve **Near wall %** değerlerini ayarlayın
 
@@ -129,10 +166,11 @@ Mevcut `telegram_cex_alert.py` ile aynı `.env` dosyasını kullanır; iki scrip
 ## Sınırlamalar
 
 - Python API şu an **beta**; replay modu desteklenmiyor
-- BookmapData / dxFeed için Java API gerekir
+- BookmapData / dxFeed için Java API gerekir (o durumda gerçekten `.jar` derlenir — bu repo o yolu kullanmaz)
 - Add-on Bookmap dışında çalıştırılamaz; köprü scripti bağımsız çalışır
 
 ## Kaynaklar
 
 - [Bookmap Python API](https://github.com/BookmapAPI/python-api)
 - [Bookmap Knowledge Base — Python API](https://bookmap.com/knowledgebase/docs/Addons-Python-API)
+- [Python API Quick Guide](https://docs.google.com/document/d/178YRno3iKKdbuvVjVh380ayR-VsSUlQGZt2tDFjjD3A)
