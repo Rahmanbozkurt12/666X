@@ -24,7 +24,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import requests
+try:
+    import requests
+except ImportError:  # dry-run için zorunlu değil
+    requests = None  # type: ignore[assignment]
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config" / "bookmap_alerts.json"
@@ -187,21 +190,43 @@ def tail_events(
     return sent
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Bookmap JSONL → Telegram köprüsü")
-    parser.add_argument("--dry-run", action="store_true", help="Telegram gönderme, konsola yaz")
-    parser.add_argument("--replay", action="store_true", help="Dosyayı baştan oku")
-    parser.add_argument("--once", action="store_true", help="Tek tur oku ve çık")
-    args = parser.parse_args()
+def resolve_events_path(cli: str | None) -> Path:
+    if cli:
+        p = Path(cli)
+        return p if p.is_absolute() else (ROOT / p).resolve()
 
-    cfg = load_config()
-    events_path = DEFAULT_EVENTS
     if CONFIG_PATH.exists():
         settings = load_json(CONFIG_PATH).get("settings") or {}
         rel = settings.get("export_path")
         if rel:
             p = Path(rel)
-            events_path = p if p.is_absolute() else ROOT / p
+            return p if p.is_absolute() else (ROOT / p).resolve()
+
+    candidates = [
+        DEFAULT_EVENTS,
+        ROOT / "New Folder" / "output" / "bookmap_events.jsonl",
+        ROOT / "bookmap" / "output" / "bookmap_events.jsonl",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path.resolve()
+    return DEFAULT_EVENTS.resolve()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Bookmap JSONL → Telegram köprüsü")
+    parser.add_argument("--dry-run", action="store_true", help="Telegram gönderme, konsola yaz")
+    parser.add_argument("--replay", action="store_true", help="Dosyayı baştan oku")
+    parser.add_argument("--once", action="store_true", help="Tek tur oku ve çık")
+    parser.add_argument(
+        "--events",
+        default=None,
+        help="bookmap_events.jsonl yolu (örn. 'New Folder/output/bookmap_events.jsonl')",
+    )
+    args = parser.parse_args()
+
+    cfg = load_config()
+    events_path = resolve_events_path(args.events)
 
     poll_seconds = int(cfg.get("poll_seconds") or 3)
     allowed_types = set(cfg.get("alert_types") or ["wall_detected", "wall_removed", "price_near_wall"])
@@ -213,6 +238,15 @@ def main() -> int:
         print("[info] Telegram env yok → dry-run", file=sys.stderr)
 
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {"offset": 0, "seen": []}
+    if not events_path.exists():
+        print(
+            f"[bekle] Dosya henüz yok: {events_path}\n"
+            "  bot.py'yi VS Code'dan ÇALIŞTIRMAYIN (bookmap hatası normal).\n"
+            "  Bookmap → Configure add-ons → Python API tik → Open embedded editor\n"
+            "  → bot.py yapıştır → Build → jar'ı Add... ile ekle → mavi tik.\n"
+            "  Sonra bu köprü otomatik dinlemeye devam eder.",
+            file=sys.stderr,
+        )
     print(f"watching {events_path} | poll={poll_seconds}s | dry_run={dry_run}")
 
     total = 0
