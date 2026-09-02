@@ -38,9 +38,10 @@ last_alert_at: dict[str, float] = {}
 settings: dict[str, Any] = {
     "export_path": "output/bookmap_events.jsonl",
     "scan_interval_sec": 2,
-    "min_wall_size": 5.0,  # kripto icin dusuk; sonra artirin
-    "near_wall_pct": 5.0,
-    "cooldown_sec": 60,
+    # BTC-USDT: 5 cok dusuk → binlerce satir. Anlamli duvar icin yuksek tutun.
+    "min_wall_size": 100.0,
+    "near_wall_pct": 0.3,
+    "cooldown_sec": 180,
     "export_to_file": True,
 }
 req_id = 0

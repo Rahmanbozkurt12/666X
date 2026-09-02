@@ -2,9 +2,9 @@
   "settings": {
     "export_path": "output/bookmap_events.jsonl",
     "scan_interval_sec": 2,
-    "min_wall_size": 50000,
-    "near_wall_pct": 5.0,
-    "cooldown_sec": 120,
+    "min_wall_size": 100,
+    "near_wall_pct": 0.3,
+    "cooldown_sec": 180,
     "export_to_file": true
   },
   "telegram_bridge": {
