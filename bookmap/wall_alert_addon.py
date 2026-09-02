@@ -5,11 +5,14 @@ Bookmap Python API add-on — likidite duvarı (wall) tespiti ve harici koda kö
 Bookmap içinde çalışır (bookmap kütüphanesi yalnızca Bookmap ortamında yüklüdür).
 Tespit edilen olayları JSONL dosyasına yazar; bookmap_telegram_bridge.py bu dosyayı okur.
 
-Kurulum:
+Kurulum (JAR YOK — Configure add-ons ekranını KULLANMAYIN):
   1. Bookmap → Settings → Manage plugins → Bookmap Add-ons (L1) → Python API
-  2. Bu dosyayı Bookmap'te açın veya Scripts klasörüne kopyalayın
-  3. Enstrüman grafiğinde add-on'u etkinleştirin
+  2. Bu .py dosyasını Bookmap → Python API / Scripts editöründe açın
+  3. Enstrüman grafiğinde add-on'u Enable edin
   4. Ayrı terminalde: python bookmap_telegram_bridge.py
+
+Bu repo .jar üretmez. Settings → Configure add-ons → Add... Java eklentileri
+içindir; masaüstü .lnk veya Bookmap.jar buraya seçilmez.
 
 Not: Bookmap 7.4+, Python 3.7.14+ gerekir.
 
