@@ -2,113 +2,96 @@
 
 Bookmap'i mevcut Python kod tabanına bağlamak için iki parçalı bir yapı kullanılır:
 
-1. **Bookmap add-on** (`bookmap/wall_alert_addon.py`) — Bookmap içinde çalışır, order book'u izler
-2. **Telegram köprüsü** (`bookmap_telegram_bridge.py`) — Olayları JSONL dosyasından okuyup Telegram'a gönderir
+1. **Bookmap add-on** (`bookmap/wall_alert_addon.py`) — Bookmap Python editöründe yazılır, **Build** ile `.jar` olur
+2. **Telegram köprüsü** (`bookmap_telegram_bridge.py`) — Olayları JSONL dosyasından okuyup Telegram'a / ekrana basar
 
 ---
 
-## Tıkandığınız nokta: `book.jar` / Configure add-ons
+## Şu an neredeyiz? (Python API kurulu)
 
-**Bu projede `book.jar` (veya herhangi bir add-on `.jar`) üretilmez.** Kod Python'dır; Bookmap'e jar seçmeniz gerekmez.
+Plugins manager'da **Python API v0.2.0** görünüyorsa 1. adım bitti. **OK** ile kapatın.
 
-| Yaptığınız (yanlış) | Doğrusu |
-|---------------------|---------|
-| `Settings → Configure add-ons → Add...` ile `.jar` / `.lnk` seçmek | **Settings → Manage plugins → Bookmap Add-ons (L1) → Python API** kurmak |
-| Masaüstü kısayolu (`.lnk`) seçmek | Kısayol asla seçilmez; bizim add-on zaten `.py` |
-| `C:\Program Files\Bookmap\Bookmap.jar` seçmek | Bu Bookmap'in **kendi uygulaması**; add-on değil, buraya eklenmez |
-| VS Code'dan `wall_alert_addon.py` çalıştırmak | Add-on **yalnızca Bookmap içinden** çalışır |
+Jar henüz yok; bir sonraki adımlarda Bookmap editöründe **Build** deyince oluşur.
 
-Configure add-ons ekranı **Java** eklentileri içindir. Bizim köprü **Python API** kullanır; o ekranda mavi tik aramayın.
+### Adım 2 — Python API'yi etkinleştir + editörü aç
 
-### Windows — doğru 6 adım (tik burada değil)
+1. Bookmap ana pencerede: **Settings → Configure add-ons**  
+   (veya araç çubuğundaki Configure add-ons ikonu)
+2. Listede **Python API** satırını bulun → soldaki **mavi tik / checkbox**'ı işaretleyin
+3. Yanındaki ayar / düğmeden **Open embedded editor** (veya benzeri) seçin
 
-1. Bookmap'i açın (canlı veri / BTC vb. grafik açık olsun).
-2. **Settings → Manage plugins → Bookmap Add-ons (L1)** → **Python API** → **Install** (veya zaten kurulu görünsün).
-3. Bookmap içinde **Python API / Scripts** editörünü açın (eklenti kurulunca menüde çıkar).
-4. Şu dosyayı açın / içeriğini yapıştırın (kısayol değil, gerçek `.py`):
-   - Repo: `bookmap\wall_alert_addon.py`
-   - OneDrive kopyanız varsa: `C:\Users\Rahman\OneDrive\bookmap çalıştırma.py`
-5. Grafikte add-on'u **Enable** edin. Konsolda şunu görmelisiniz:
-   `[wall_alert] depth subscribed: ...`
-6. Ayrı bir VS Code / PowerShell penceresinde köprüyü çalıştırın:
+Editör açılmazsa: bir enstrüman (BTC) abone olduğunuzdan emin olun, Python API tikini kapatıp tekrar açın.
+
+### Adım 3 — Scripti koy + Build (jar burada oluşur)
+
+1. Editör sol panelde sağ tık → **New Python file** → örn. `wall_alert`
+2. `bookmap/wall_alert_addon.py` içeriğinin **tamamını** yapıştırın (VS Code'daki dosyadan kopyalayın)
+3. **Save**
+4. Gerekirse **Set custom runtime** → sisteminizdeki `python.exe` (3.7–3.12)
+5. **Build**'e basın
+6. Başarılı olunca: editör menüsü **File → Open build folder**
+
+Bu klasördeki `.jar` dosyası aradığınız add-on jar'ıdır (kısayol `.lnk` değil, gerçek dosya).
+
+Yaygın konum örneği:
+
+`C:\Bookmap\Python\...` veya build folder penceresinin gösterdiği yol
+
+### Adım 4 — Build edilen jar'ı Configure add-ons'a ekle
+
+1. Ana Bookmap: yine **Settings → Configure add-ons → Add...**
+2. Az önce açılan **build folder** içindeki `.jar` dosyasını seçin (`.lnk` seçmeyin)
+3. Popup'ta add-on'u **Load** edin
+4. Listede çıkan satırın yanına **mavi tik** koyun (Enable)
+
+Konsolda / log'da şunu arayın: `[wall_alert] depth subscribed: ...`  
+(Log: Bookmap **File → Show log file**, `[PYTHON-CLIENT]` satırları)
+
+### Adım 5 — VS Code köprüsü
 
 ```powershell
 cd <666X-repo-klasörü>
 python bookmap_telegram_bridge.py --dry-run
 ```
 
-Add-on yazmaya başlayınca `output\bookmap_events.jsonl` oluşur; köprü o dosyayı dinleyip satırları ekrana / Telegram'a basar.
+Add-on yazınca `output\bookmap_events.jsonl` oluşur; köprü canlı satır basar.
 
-### Yol bulucu (Windows)
-
-PowerShell'de repo kökünden:
+### Yol bulucu
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File bookmap\find_paths.ps1
 ```
 
-Script şunları yazar: gerçek `.py` yolu, beklenen JSONL yolu, varsa `Bookmap.jar` (uygulama — add-on değil).
+---
+
+## Sık karışıklıklar
+
+| Yanlış | Doğru |
+|--------|--------|
+| Plugins manager'da jar aramak | Orada sadece **Python API Install** yapılır |
+| Masaüstü `.lnk` seçmek | Build folder'daki gerçek `.jar` |
+| `C:\Program Files\Bookmap\Bookmap.jar` eklemek | Bu uygulama jar'ı; add-on değil |
+| Repo'dan hazır `book.jar` beklemek | Jar **Build** butonuyla üretilir |
+| VS Code'dan `wall_alert_addon.py` çalıştırmak | Add-on Bookmap editöründe Build + Enable ile çalışır |
 
 ---
 
 ## Gereksinimler
 
-- [Bookmap](https://bookmap.com/) 7.4 veya üzeri
-- Python 3.7.14+ (Bookmap'in Python API eklentisi ile)
-- Bookmap → **Settings → Manage plugins → Bookmap Add-ons (L1)** → Python API kurulu olmalı
+- Bookmap 7.4+
+- Python 3.7.14+ (3.13 sorun çıkarabilir)
+- Plugins manager → **Python API** kurulu
 
-> `bookmap` paketi normal `pip install` ile çalışmaz; yalnızca Bookmap uygulaması içinden yüklenir.
+> `bookmap` paketi normal pip ile Bookmap dışında çalışmaz; script Bookmap'in Python ortamında koşar.
 
 ## Sık hata: `Import "bookmap" could not be resolved`
 
-VS Code veya terminalde `python wall_alert_addon.py` çalıştırırsanız bu hatayı alırsınız. **Bu beklenen davranıştır.**
+VS Code'da Pylance uyarısı **normaldir**. Dosyayı VS Code'dan `python ...` ile çalıştırmayın.
 
-| Dosya | Nerede çalışır? |
-|-------|-----------------|
-| `bookmap/wall_alert_addon.py` | **Yalnızca Bookmap içinde** (Python API editörü) |
-| `bookmap_telegram_bridge.py` | VS Code / terminal (bookmap import yok) |
-
-Pylance uyarısını görmezden gelebilirsiniz; script Bookmap'ten çalıştırıldığında modül orada vardır.
-
-### VS Code'da çalıştırılacak script
-
-Telegram köprüsü normal Python ile çalışır:
-
-```powershell
-cd C:\Users\Rahman\...\666X
-pip install requests
-$env:TELEGRAM_BOT_TOKEN="..."
-$env:TELEGRAM_CHAT_ID="..."
-python bookmap_telegram_bridge.py --dry-run
-```
-
-### Python sürümü
-
-Bookmap resmi olarak **Python 3.7.14+** ister; **3.13** henüz desteklenmeyebilir. Bookmap kendi Python yolunu kullanır — VS Code'daki 3.13 seçimi add-on için önemli değildir, script zaten Bookmap içinden koşar.
-
-## Kurulum
-
-### 1. Bookmap add-on'u yükle
-
-Bookmap'te **Scripts** veya **Python API** editöründen `bookmap/wall_alert_addon.py` dosyasını açın.
-
-Alternatif: dosyayı Bookmap'in script klasörüne kopyalayın ve oradan çalıştırın.
-
-### 2. Enstrümanda etkinleştir
-
-- BTC futures gibi bir enstrüman açın
-- Add-on listesinden **wall_alert_addon**'u etkinleştirin
-- Bookmap ayar panelinden **Min wall size** ve **Near wall %** değerlerini ayarlayın
-
-### 3. Telegram köprüsünü başlat
-
-```bash
-pip install -r requirements.txt
-set -a; source .env; set +a   # TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
-
-python bookmap_telegram_bridge.py
-python bookmap_telegram_bridge.py --dry-run   # test
-```
+| Dosya | Nerede? |
+|-------|---------|
+| `bookmap/wall_alert_addon.py` | Bookmap embedded editor → Build → Enable |
+| `bookmap_telegram_bridge.py` | VS Code / PowerShell |
 
 ## Nasıl çalışır?
 
@@ -116,22 +99,22 @@ python bookmap_telegram_bridge.py --dry-run   # test
 Bookmap (canlı veri)
     │
     ▼
-wall_alert_addon.py  ──►  output/bookmap_events.jsonl
-    │                              │
-    │                              ▼
-    │                    bookmap_telegram_bridge.py
-    │                              │
-    ▼                              ▼
-  DOM / ladder              Telegram uyarıları
+wall_alert_addon.py  --Build-->  *.jar  --Enable-->  output/bookmap_events.jsonl
+                                                         │
+                                                         ▼
+                                               bookmap_telegram_bridge.py
+                                                         │
+                                                         ▼
+                                                   ekran / Telegram
 ```
 
-### Tespit edilen olaylar
+### Olaylar
 
 | Olay | Açıklama |
 |------|----------|
-| `wall_detected` | Büyük likidite duvarı oluştu (ör. 80.000'de 850K satış) |
-| `wall_removed` | Duvar emildi veya kaldırıldı |
-| `price_near_wall` | Fiyat duvara belirlenen % mesafesine girdi |
+| `wall_detected` | Büyük likidite duvarı |
+| `wall_removed` | Duvar kalktı / emildi |
+| `price_near_wall` | Fiyat duvara yaklaştı |
 
 ### Yapılandırma
 
@@ -147,30 +130,16 @@ wall_alert_addon.py  ──►  output/bookmap_events.jsonl
 }
 ```
 
-## Kendi kodunuzla kullanım
-
-JSONL dosyasını doğrudan okuyabilirsiniz:
-
-```python
-import json
-from pathlib import Path
-
-for line in Path("output/bookmap_events.jsonl").open():
-    event = json.loads(line)
-    if event["type"] == "wall_detected" and event["side"] == "ask":
-        print(f"Direnç: {event['price']} — hacim {event['size']}")
-```
-
-Mevcut `telegram_cex_alert.py` ile aynı `.env` dosyasını kullanır; iki script paralel çalışabilir.
+Add-on dosya yolunu bulamazsa Bookmap'ten `BOOKMAP_ROOT` ortam değişkenini repo köküne ayarlayın; yoksa olaylar `bookmap/` yanına yazılabilir — köprüyü `--events` ile o yola yönlendirin.
 
 ## Sınırlamalar
 
-- Python API şu an **beta**; replay modu desteklenmiyor
-- BookmapData / dxFeed için Java API gerekir (o durumda gerçekten `.jar` derlenir — bu repo o yolu kullanmaz)
-- Add-on Bookmap dışında çalıştırılamaz; köprü scripti bağımsız çalışır
+- Python API beta; replay desteklenmiyor
+- BookmapData / dxFeed için Java API gerekir
+- Her Build sonrası genelde yeni jar'ı Configure add-ons'a yeniden eklemeniz gerekebilir
 
 ## Kaynaklar
 
-- [Bookmap Python API](https://github.com/BookmapAPI/python-api)
-- [Bookmap Knowledge Base — Python API](https://bookmap.com/knowledgebase/docs/Addons-Python-API)
 - [Python API Quick Guide](https://docs.google.com/document/d/178YRno3iKKdbuvVjVh380ayR-VsSUlQGZt2tDFjjD3A)
+- [Bookmap Python API GitHub](https://github.com/BookmapAPI/python-api)
+- [KB — Python API](https://bookmap.com/knowledgebase/docs/Addons-Python-API)
