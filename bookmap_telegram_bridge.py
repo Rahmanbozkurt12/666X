@@ -56,6 +56,9 @@ def telegram_send(token: str, chat_id: str, text: str, *, dry_run: bool) -> bool
     if dry_run:
         print("--- DRY-RUN TELEGRAM ---\n" + text + "\n------------------------")
         return True
+    if requests is None:
+        print("[telegram] 'pip install requests' gerekli", file=sys.stderr)
+        return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
