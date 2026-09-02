@@ -40,6 +40,28 @@ python bookmap_telegram_bridge.py --dry-run --events "$env:USERPROFILE\Documents
 
 ---
 
+## Desktop\\bot kurulumu (ekran görüntünüz)
+
+Sizde iki pencere var:
+
+| Pencere | Dosya | Ne yapmalı |
+|---------|--------|------------|
+| VS Code | `C:\Users\Rahman\OneDrive\Desktop\bot\bookmap_bridge.py` | Köprü — düzeltilmiş kopya: `bot/bookmap_bridge.py` |
+| Bookmap code editor | `book.py` | Add-on — düzeltilmiş kopya: `bot/book.py` |
+
+### Ekrandaki hata
+
+```text
+SyntaxError: unterminated string literal (detected at line 65)
+output = Path(r"C:\Users\Rahman\OneDrive\desk...
+```
+
+Yol satırı yarım kalmış (tırnak kapanmamış). `bot/bookmap_bridge.py` ile değiştirin; `main()` bittikten sonra ekstra `output = Path(...)` satırı olmamalı.
+
+Adım adım: **`bot/README.md`**
+
+---
+
 ## Sık hatalar ve çözümleri
 
 ### 1) VS Code: `Import "bookmap" could not be resolved`
