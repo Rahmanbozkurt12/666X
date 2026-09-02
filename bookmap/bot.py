@@ -35,16 +35,10 @@ from typing import Any
 import bookmap as bm  # type: ignore[import-not-found]  # noqa: F401 — yalnızca Bookmap içinde mevcut
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-# Bookmap tmp klasöründen çalışınca Desktop\bot'u tercih et (köprü orayı dinler)
-_DESKTOP_BOT = Path.home() / "OneDrive" / "Desktop" / "bot"
-if not _DESKTOP_BOT.exists():
-    _DESKTOP_BOT = Path.home() / "Desktop" / "bot"
-ROOT = Path(os.environ.get("BOOKMAP_ROOT", str(_DESKTOP_BOT if _DESKTOP_BOT.exists() else _SCRIPT_DIR)))
+ROOT = Path(os.environ.get("BOOKMAP_ROOT", _SCRIPT_DIR))
 CONFIG_PATH = ROOT / "config" / "bookmap_alerts.json"
 if not CONFIG_PATH.exists():
     CONFIG_PATH = _SCRIPT_DIR / "bookmap_alerts.json"
-if not CONFIG_PATH.exists():
-    CONFIG_PATH = ROOT / "bookmap_alerts.json"
 
 # --- state ---
 alias_to_order_book: dict[str, Any] = {}
