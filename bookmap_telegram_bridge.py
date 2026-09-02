@@ -171,6 +171,9 @@ def tail_events(
             except json.JSONDecodeError:
                 continue
             if event.get("type") not in allowed_types:
+                # dry-run'da addon_started gibi tanınmayanları da göster
+                if dry_run:
+                    print(f"[raw] {event}")
                 continue
             fp = event_fingerprint(event)
             if fp in seen:
