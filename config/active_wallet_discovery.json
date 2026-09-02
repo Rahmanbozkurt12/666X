@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "explorer_api": "https://eth.blockscout.com/api",
+    "activity_hours": 72,
+    "max_wallet_age_days": 90,
+    "hard_max_age_days": 120,
+    "min_wallet_age_days": 0,
+    "min_token_received": 50,
+    "max_token_received": 250000,
+    "max_wallets": 1000,
+    "transfer_pages": 5,
+    "transfer_page_size": 100,
+    "exclude_labeled_cex": true,
+    "exclude_dex_routers": true,
+    "mode": "new_only",
+    "use_contract_cache": true,
+    "contract_cache_file": "output/contract_cache.json"
+  },
+  "exclude_symbols": ["FET"],
+  "tokens": [],
+  "notes": {
+    "FET": "FET alan cüzdanlar istenmiyor — exclude_symbols içinde",
+    "tokens_empty": "use_contract_cache=true ise contract_cache.json'daki tüm ETH tokenları taranır (FET hariç)"
+  }
+}

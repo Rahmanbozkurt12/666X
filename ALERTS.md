@@ -33,3 +33,28 @@ Spam airdrops (decimals=0 + huge amount) are filtered by default.
 - Solana: public RPC or `HELIUS_API_KEY`
 - Phantom is a user wallet app — add specific addresses you care about under `venue: Phantom`
 - CEX hot-wallet traffic is noisy; start with a short watchlist
+
+## Yeni / aktif cüzdan keşfi + birikim sinyali
+
+**FET alan cüzdanlar istenmiyor** — `exclude_symbols: ["FET"]` varsayılan.
+
+```bash
+# Balina cüzdanlarda son 3 saatte hangi altcoin girişi var? (FET hariç)
+python whale_altcoin_scan.py --hours 3
+
+# Yeni/aktif cüzdan keşfi (LINK, PEPE, LDO… — FET hariç)
+python active_wallet_discovery.py --activity-hours 72
+
+# Birikim sinyali
+python accumulation_alert.py --once --dry-run
+```
+
+Ayarlar: `config/active_wallet_discovery.json`, `config/accumulation_watch.json`
+
+### Eski yöntem (eth-labels — önerilmez)
+
+```bash
+python labeled_wallet_fetcher.py --name-tag Binance --max 1000
+```
+
+`Binance Dep` = borsaya satış için yatırım adresleri.

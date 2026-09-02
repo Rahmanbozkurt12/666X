@@ -1,0 +1,23 @@
+{
+  "settings": {
+    "explorer_api": "https://eth.blockscout.com/api",
+    "activity_hours": 3,
+    "wallet_source": "output/smart_money_wallets.json",
+    "max_wallets": 10,
+    "min_token_usd_estimate": 0,
+    "top_results": 10
+  },
+  "exclude_symbols": [
+    "FET",
+    "ETH",
+    "WETH",
+    "USDT",
+    "USDC",
+    "DAI",
+    "WBTC",
+    "STETH"
+  ],
+  "exclude_contracts": [
+    "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85"
+  ]
+}
