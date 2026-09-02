@@ -78,24 +78,51 @@ def telegram_send(token: str, chat_id: str, text: str, *, dry_run: bool) -> bool
 
 
 def side_label(side: str) -> str:
-    if side == "ask":
+    if side in ("ask", "satis"):
         return "SATIŞ (direnç)"
-    if side == "bid":
+    if side in ("bid", "alis"):
         return "ALIŞ (destek)"
-    return side
+    return side or "?"
+
+
+def normalize_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Türkçe veya İngilizce alanları tek forma getir."""
+    type_map = {
+        "duvar_tespit": "wall_detected",
+        "duvar_kalkti": "wall_removed",
+        "fiyat_duvara_yakin": "price_near_wall",
+        "eklenti_basladi": "addon_started",
+    }
+    side_map = {"alis": "bid", "satis": "ask"}
+    etype = event.get("type") or event.get("olay")
+    etype = type_map.get(etype, etype)
+    side = event.get("side") or event.get("yon")
+    side = side_map.get(side, side)
+    return {
+        "type": etype,
+        "alias": event.get("alias") or event.get("sembol") or "?",
+        "side": side or "",
+        "price": event.get("price", event.get("fiyat")),
+        "size": event.get("size", event.get("hacim")),
+        "mid_price": event.get("mid_price", event.get("orta_fiyat")),
+        "distance_pct": event.get("distance_pct", event.get("mesafe_yuzde")),
+        "ts": event.get("ts") or event.get("zaman") or "",
+        "olay": event.get("olay") or etype,
+    }
 
 
 def format_event(event: dict[str, Any]) -> str | None:
-    etype = event.get("type")
-    alias = event.get("alias", "?")
-    side = event.get("side", "")
-    price = event.get("price")
-    size = event.get("size")
-    mid = event.get("mid_price")
-    dist = event.get("distance_pct")
+    e = normalize_event(event)
+    etype = e.get("type")
+    alias = e.get("alias", "?")
+    side = e.get("side", "")
+    price = e.get("price")
+    size = e.get("size")
+    mid = e.get("mid_price")
+    dist = e.get("distance_pct")
 
     if etype == "wall_detected":
-        mid_line = f"Mid: {mid:,.2f}\n" if mid else ""
+        mid_line = f"Orta fiyat: {mid:,.2f}\n" if mid else ""
         return (
             f"🧱 <b>Bookmap — Likidite duvarı</b>\n"
             f"<b>{alias}</b>\n"
@@ -114,19 +141,22 @@ def format_event(event: dict[str, Any]) -> str | None:
             f"⚠️ <b>Bookmap — Fiyat duvara yakın</b>\n"
             f"<b>{alias}</b>\n"
             f"{side_label(side)} @ <b>{price:,.2f}</b> (hacim {size:,.0f})\n"
-            f"Mid: {mid:,.2f} | Mesafe: <b>{dist:.2f}%</b>"
+            f"Orta: {mid:,.2f} | Mesafe: <b>{dist:.2f}%</b>"
         )
+    if etype == "addon_started":
+        return f"✅ <b>Bookmap eklenti başladı</b>\n{alias}"
     return None
 
 
 def event_fingerprint(event: dict[str, Any]) -> str:
+    e = normalize_event(event)
     parts = [
-        event.get("type", ""),
-        event.get("alias", ""),
-        str(event.get("side", "")),
-        str(event.get("price", "")),
-        str(event.get("size", "")),
-        event.get("ts", ""),
+        e.get("type", ""),
+        e.get("alias", ""),
+        str(e.get("side", "")),
+        str(e.get("price", "")),
+        str(e.get("size", "")),
+        e.get("ts", ""),
     ]
     return "|".join(parts)
 
@@ -170,21 +200,22 @@ def tail_events(
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if event.get("type") not in allowed_types:
+            norm = normalize_event(event)
+            if norm.get("type") not in allowed_types:
                 # dry-run'da addon_started gibi tanınmayanları da göster
                 if dry_run:
-                    print(f"[raw] {event}")
+                    print(f"[ham] {event.get('olay') or event}")
                 continue
-            fp = event_fingerprint(event)
+            fp = event_fingerprint(norm)
             if fp in seen:
                 continue
-            msg = format_event(event)
+            msg = format_event(norm)
             if not msg:
                 continue
             if token and chat_id and telegram_send(token, chat_id, msg, dry_run=dry_run):
                 sent += 1
                 seen.add(fp)
-                print(f"[{datetime.now(timezone.utc).isoformat()}] alert: {event.get('type')} {event.get('alias')}")
+                print(f"[{datetime.now(timezone.utc).isoformat()}] uyari: {norm.get('olay') or norm.get('type')} {norm.get('alias')}")
             elif dry_run and telegram_send("", "", msg, dry_run=True):
                 sent += 1
                 seen.add(fp)
@@ -235,7 +266,10 @@ def main() -> int:
     events_path = resolve_events_path(args.events)
 
     poll_seconds = int(cfg.get("poll_seconds") or 3)
-    allowed_types = set(cfg.get("alert_types") or ["wall_detected", "wall_removed", "price_near_wall"])
+    allowed_types = set(
+        cfg.get("alert_types")
+        or ["wall_detected", "wall_removed", "price_near_wall", "addon_started"]
+    )
 
     token = env("TELEGRAM_BOT_TOKEN")
     chat_id = env("TELEGRAM_CHAT_ID")

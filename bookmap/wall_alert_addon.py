@@ -58,19 +58,49 @@ def export_path() -> Path:
 def emit_event(event: dict[str, Any]) -> None:
     if not settings.get("export_to_file", True):
         return
-    event.setdefault("ts", datetime.now(timezone.utc).isoformat())
+    # Dosyada Türkçe alanlar (okunabilir); type/side köprü uyumu için de kalır
+    tr_type = {
+        "wall_detected": "duvar_tespit",
+        "wall_removed": "duvar_kalkti",
+        "price_near_wall": "fiyat_duvara_yakin",
+        "addon_started": "eklenti_basladi",
+    }
+    tr_side = {"bid": "alis", "ask": "satis"}
+    etype = event.get("type")
+    side = event.get("side")
+    out = {
+        "olay": tr_type.get(etype, etype),
+        "sembol": event.get("alias"),
+        "yon": tr_side.get(side, side) if side else None,
+        "fiyat": event.get("price"),
+        "hacim": event.get("size"),
+        "orta_fiyat": event.get("mid_price"),
+        "mesafe_yuzde": event.get("distance_pct"),
+        "zaman": event.get("ts") or datetime.now(timezone.utc).isoformat(),
+        # geriye uyumluluk
+        "type": etype,
+        "alias": event.get("alias"),
+        "side": side,
+        "price": event.get("price"),
+        "size": event.get("size"),
+        "mid_price": event.get("mid_price"),
+        "distance_pct": event.get("distance_pct"),
+        "ts": event.get("ts") or datetime.now(timezone.utc).isoformat(),
+    }
+    # None alanları temizle
+    out = {k: v for k, v in out.items() if v is not None}
     path = export_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            f.write(json.dumps(out, ensure_ascii=False) + "\n")
         print(
-            "[wall_alert] wrote %s -> %s" % (event.get("type"), path),
+            "[wall_alert] yazildi %s -> %s" % (out.get("olay"), path),
             flush=True,
         )
     except Exception:
         traceback.print_exc()
-        print("[wall_alert] WRITE FAILED path=%s" % path, flush=True)
+        print("[wall_alert] YAZMA HATASI path=%s" % path, flush=True)
 
 
 def cooldown_ok(key: str) -> bool:
@@ -251,10 +281,10 @@ def handle_subscribe_instrument(
 
     try:
         bm.add_number_settings_parameter(
-            addon, alias, "Min wall size", float(settings["min_wall_size"]), 0.1, 5_000_000.0, 0.1
+            addon, alias, "Min wall size", float(settings["min_wall_size"]), 1.0, 5_000_000.0, 1.0
         )
         bm.add_number_settings_parameter(
-            addon, alias, "Near wall %", float(settings["near_wall_pct"]), 0.1, 50.0, 0.1
+            addon, alias, "Near wall %", float(settings["near_wall_pct"]), 0.05, 20.0, 0.05
         )
     except Exception:
         traceback.print_exc()
