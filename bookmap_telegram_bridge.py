@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+Bookmap add-on'un yazdığı JSONL olaylarını okuyup Telegram'a gönderir.
+
+Bookmap add-on (bookmap/wall_alert_addon.py) output/bookmap_events.jsonl dosyasına yazar;
+bu script o dosyayı tail eder ve uyarı üretir.
+
+Kullanım:
+  export TELEGRAM_BOT_TOKEN=...
+  export TELEGRAM_CHAT_ID=...
+  python bookmap_telegram_bridge.py
+  python bookmap_telegram_bridge.py --dry-run
+  python bookmap_telegram_bridge.py --replay   # mevcut dosyayı baştan oku (test)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+try:
+    import requests
+except ImportError:  # dry-run için zorunlu değil
+    requests = None  # type: ignore[assignment]
+
+ROOT = Path(__file__).resolve().parent
+CONFIG_PATH = ROOT / "config" / "bookmap_alerts.json"
+DEFAULT_EVENTS = ROOT / "output" / "bookmap_events.jsonl"
+STATE_PATH = ROOT / "output" / "bookmap_bridge_state.json"
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def env(name: str) -> str | None:
+    value = os.environ.get(name)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def telegram_send(token: str, chat_id: str, text: str, *, dry_run: bool) -> bool:
+    if dry_run:
+        print("--- DRY-RUN TELEGRAM ---\n" + text + "\n------------------------")
+        return True
+    if requests is None:
+        print("[telegram] 'pip install requests' gerekli", file=sys.stderr)
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+        "parse_mode": "HTML",
+    }
+    try:
+        r = requests.post(url, json=payload, timeout=30)
+        if r.status_code != 200:
+            print(f"[telegram] HTTP {r.status_code}: {r.text[:300]}", file=sys.stderr)
+            return False
+        return True
+    except requests.RequestException as exc:
+        print(f"[telegram] {exc}", file=sys.stderr)
+        return False
+
+
+def side_label(side: str) -> str:
+    if side in ("ask", "satis"):
+        return "SATIŞ (direnç)"
+    if side in ("bid", "alis"):
+        return "ALIŞ (destek)"
+    return side or "?"
+
+
+def normalize_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Türkçe veya İngilizce alanları tek forma getir."""
+    type_map = {
+        "duvar_tespit": "wall_detected",
+        "duvar_kalkti": "wall_removed",
+        "fiyat_duvara_yakin": "price_near_wall",
+        "eklenti_basladi": "addon_started",
+    }
+    side_map = {"alis": "bid", "satis": "ask"}
+    etype = event.get("type") or event.get("olay")
+    etype = type_map.get(etype, etype)
+    side = event.get("side") or event.get("yon")
+    side = side_map.get(side, side)
+    return {
+        "type": etype,
+        "alias": event.get("alias") or event.get("sembol") or "?",
+        "side": side or "",
+        "price": event.get("price", event.get("fiyat")),
+        "size": event.get("size", event.get("hacim")),
+        "mid_price": event.get("mid_price", event.get("orta_fiyat")),
+        "distance_pct": event.get("distance_pct", event.get("mesafe_yuzde")),
+        "ts": event.get("ts") or event.get("zaman") or "",
+        "olay": event.get("olay") or etype,
+    }
+
+
+def format_event(event: dict[str, Any]) -> str | None:
+    e = normalize_event(event)
+    etype = e.get("type")
+    alias = e.get("alias", "?")
+    side = e.get("side", "")
+    price = e.get("price")
+    size = e.get("size")
+    mid = e.get("mid_price")
+    dist = e.get("distance_pct")
+
+    if etype == "wall_detected":
+        mid_line = f"Orta fiyat: {mid:,.2f}\n" if mid else ""
+        return (
+            f"🧱 <b>Bookmap — Likidite duvarı</b>\n"
+            f"<b>{alias}</b>\n"
+            f"{side_label(side)} @ <b>{price:,.2f}</b>\n"
+            f"Hacim: <b>{size:,.0f}</b>\n"
+            f"{mid_line}"
+        ).rstrip()
+    if etype == "wall_removed":
+        return (
+            f"↩️ <b>Bookmap — Duvar kalktı</b>\n"
+            f"<b>{alias}</b>\n"
+            f"{side_label(side)} @ {price:,.2f}"
+        )
+    if etype == "price_near_wall":
+        return (
+            f"⚠️ <b>Bookmap — Fiyat duvara yakın</b>\n"
+            f"<b>{alias}</b>\n"
+            f"{side_label(side)} @ <b>{price:,.2f}</b> (hacim {size:,.0f})\n"
+            f"Orta: {mid:,.2f} | Mesafe: <b>{dist:.2f}%</b>"
+        )
+    if etype == "addon_started":
+        return f"✅ <b>Bookmap eklenti başladı</b>\n{alias}"
+    return None
+
+
+def event_fingerprint(event: dict[str, Any]) -> str:
+    e = normalize_event(event)
+    parts = [
+        e.get("type", ""),
+        e.get("alias", ""),
+        str(e.get("side", "")),
+        str(e.get("price", "")),
+        str(e.get("size", "")),
+        e.get("ts", ""),
+    ]
+    return "|".join(parts)
+
+
+def load_config() -> dict[str, Any]:
+    if not CONFIG_PATH.exists():
+        return {"poll_seconds": 3, "alert_types": ["wall_detected", "wall_removed", "price_near_wall"]}
+    raw = load_json(CONFIG_PATH)
+    return raw.get("telegram_bridge") or {}
+
+
+def tail_events(
+    path: Path,
+    *,
+    state: dict[str, Any],
+    dry_run: bool,
+    token: str | None,
+    chat_id: str | None,
+    allowed_types: set[str],
+    poll_seconds: int,
+    replay: bool,
+) -> int:
+    sent = 0
+    seen: set[str] = set(state.get("seen") or [])
+    offset = 0 if replay else int(state.get("offset") or 0)
+
+    if not path.exists():
+        return 0
+
+    size = path.stat().st_size
+    if offset > size:
+        offset = 0
+
+    with path.open(encoding="utf-8") as f:
+        f.seek(offset)
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            norm = normalize_event(event)
+            if norm.get("type") not in allowed_types:
+                # dry-run'da addon_started gibi tanınmayanları da göster
+                if dry_run:
+                    print(f"[ham] {event.get('olay') or event}")
+                continue
+            fp = event_fingerprint(norm)
+            if fp in seen:
+                continue
+            msg = format_event(norm)
+            if not msg:
+                continue
+            if token and chat_id and telegram_send(token, chat_id, msg, dry_run=dry_run):
+                sent += 1
+                seen.add(fp)
+                print(f"[{datetime.now(timezone.utc).isoformat()}] uyari: {norm.get('olay') or norm.get('type')} {norm.get('alias')}")
+            elif dry_run and telegram_send("", "", msg, dry_run=True):
+                sent += 1
+                seen.add(fp)
+        offset = f.tell()
+
+    state["offset"] = offset
+    state["seen"] = list(seen)[-5000:]
+    save_json(STATE_PATH, state)
+    return sent
+
+
+def resolve_events_path(cli: str | None) -> Path:
+    if cli:
+        p = Path(cli)
+        return p if p.is_absolute() else (ROOT / p).resolve()
+
+    if CONFIG_PATH.exists():
+        settings = load_json(CONFIG_PATH).get("settings") or {}
+        rel = settings.get("export_path")
+        if rel:
+            p = Path(rel)
+            return p if p.is_absolute() else (ROOT / p).resolve()
+
+    candidates = [
+        DEFAULT_EVENTS,
+        ROOT / "New Folder" / "output" / "bookmap_events.jsonl",
+        ROOT / "bookmap" / "output" / "bookmap_events.jsonl",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path.resolve()
+    return DEFAULT_EVENTS.resolve()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Bookmap JSONL → Telegram köprüsü")
+    parser.add_argument("--dry-run", action="store_true", help="Telegram gönderme, konsola yaz")
+    parser.add_argument("--replay", action="store_true", help="Dosyayı baştan oku")
+    parser.add_argument("--once", action="store_true", help="Tek tur oku ve çık")
+    parser.add_argument(
+        "--events",
+        default=None,
+        help="bookmap_events.jsonl yolu (örn. 'New Folder/output/bookmap_events.jsonl')",
+    )
+    args = parser.parse_args()
+
+    cfg = load_config()
+    events_path = resolve_events_path(args.events)
+
+    poll_seconds = int(cfg.get("poll_seconds") or 3)
+    allowed_types = set(
+        cfg.get("alert_types")
+        or ["wall_detected", "wall_removed", "price_near_wall", "addon_started"]
+    )
+
+    token = env("TELEGRAM_BOT_TOKEN")
+    chat_id = env("TELEGRAM_CHAT_ID")
+    dry_run = bool(args.dry_run) or not (token and chat_id)
+    if dry_run and not args.dry_run:
+        print("[info] Telegram env yok → dry-run", file=sys.stderr)
+
+    state = load_json(STATE_PATH) if STATE_PATH.exists() else {"offset": 0, "seen": []}
+    if not events_path.exists():
+        print(
+            f"[bekle] Dosya henüz yok: {events_path}\n"
+            "  bot.py'yi VS Code'dan ÇALIŞTIRMAYIN (bookmap hatası normal).\n"
+            "  Bookmap → Configure add-ons → Python API tik → Open embedded editor\n"
+            "  → bot.py yapıştır → Build → jar'ı Add... ile ekle → mavi tik.\n"
+            "  Sonra bu köprü otomatik dinlemeye devam eder.",
+            file=sys.stderr,
+        )
+    print(f"watching {events_path} | poll={poll_seconds}s | dry_run={dry_run}")
+
+    total = 0
+    while True:
+        n = tail_events(
+            events_path,
+            state=state,
+            dry_run=dry_run,
+            token=token,
+            chat_id=chat_id,
+            allowed_types=allowed_types,
+            poll_seconds=poll_seconds,
+            replay=args.replay and total == 0,
+        )
+        total += n
+        if args.once:
+            break
+        time.sleep(poll_seconds)
+
+    print(f"done, alerts={total}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
