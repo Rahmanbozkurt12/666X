@@ -32,15 +32,74 @@ from side_color import (
     diff_path_for,
     enable_windows_color,
     format_console_event,
+    format_telegram_event,
     load_recent_events,
+    normalize_event,
     parse_event_line,
     recolor_jsonl_to_diff,
     viewer_html_path,
 )
 
+DEFAULT_CHAT_ID = "5555764362"
+
 
 def bot_root() -> Path:
     return Path(__file__).resolve().parent
+
+
+def load_dotenv(path: Path | None = None) -> None:
+    env_path = path or (bot_root() / ".env")
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def load_chat_id() -> str:
+    cfg_path = bot_root() / "bookmap_alerts.json"
+    if cfg_path.is_file():
+        try:
+            raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+            cfg = raw.get("telegram_bridge") or {}
+            if cfg.get("chat_id"):
+                return str(cfg["chat_id"])
+        except (OSError, json.JSONDecodeError):
+            pass
+    return os.environ.get("TELEGRAM_CHAT_ID", "").strip() or DEFAULT_CHAT_ID
+
+
+def telegram_send(token: str, chat_id: str, text: str) -> bool:
+    try:
+        import requests
+    except ImportError:
+        print("[telegram] requests yok → pip install requests", file=sys.stderr)
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        r = requests.post(
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": True,
+                "parse_mode": "HTML",
+            },
+            timeout=30,
+        )
+        if r.status_code != 200:
+            print(f"[telegram] HTTP {r.status_code}: {r.text[:200]}", file=sys.stderr)
+            return False
+        return True
+    except Exception as exc:
+        print(f"[telegram] {exc}", file=sys.stderr)
+        return False
 
 
 def candidate_event_files() -> list[Path]:
@@ -76,11 +135,29 @@ def resolve_events_path(cli: str | None) -> Path:
     return candidate_event_files()[0]
 
 
-def analyze_event(event: dict[str, Any], *, color: bool) -> None:
+def analyze_event(
+    event: dict[str, Any],
+    *,
+    color: bool,
+    token: str | None = None,
+    chat_id: str | None = None,
+) -> None:
     print(format_console_event(event, color=color), flush=True)
+    if token and chat_id:
+        msg = format_telegram_event(normalize_event(event))
+        if msg:
+            telegram_send(token, chat_id, msg)
 
 
-def tail_file(path: Path, *, offset: int, replay: bool, color: bool) -> tuple[int, int]:
+def tail_file(
+    path: Path,
+    *,
+    offset: int,
+    replay: bool,
+    color: bool,
+    token: str | None = None,
+    chat_id: str | None = None,
+) -> tuple[int, int]:
     if not path.exists():
         return offset, 0
 
@@ -97,7 +174,7 @@ def tail_file(path: Path, *, offset: int, replay: bool, color: bool) -> tuple[in
             event = parse_event_line(line)
             if event is None:
                 continue
-            analyze_event(event, color=color)
+            analyze_event(event, color=color, token=token, chat_id=chat_id)
             processed += 1
         offset = f.tell()
     return offset, processed
@@ -170,13 +247,21 @@ def main() -> int:
     parser.add_argument("--viewer", action="store_true", help="Tarayıcıda renkli canlı görünüm")
     parser.add_argument("--port", type=int, default=8765, help="--viewer portu")
     parser.add_argument("--no-color", action="store_true", help="Terminal renklerini kapat")
+    parser.add_argument("--telegram", action="store_true", help="Telegram'a da gönder (token gerekir)")
     args = parser.parse_args()
 
+    load_dotenv()
     events_path = resolve_events_path(args.events)
     events_path.parent.mkdir(parents=True, exist_ok=True)
     color = not args.no_color and sys.stdout.isatty()
     if color:
         enable_windows_color()
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip() or None
+    chat_id = load_chat_id()
+    send_tg = bool(args.telegram and token)
+    if args.telegram and not token:
+        print("[info] --telegram için TELEGRAM_BOT_TOKEN gerekli (.env)", file=sys.stderr)
 
     if args.boya:
         if not events_path.exists():
@@ -193,6 +278,7 @@ def main() -> int:
     print("Bookmap Canlı Likidite Analizörü Başlatıldı...")
     print("Alış = yeşil  |  Satış = kırmızı")
     print(f"Dosya izleniyor: {events_path}")
+    print(f"Telegram chat_id={chat_id} | gönderim={'açık' if send_tg else 'kapalı'}")
     print(f"VS Code renkli kopya: {diff_path_for(events_path)}  (python bookmap_bridge.py --boya)")
     if not events_path.exists():
         print("Bookmap veri dosyası bekleniyor...")
@@ -203,7 +289,12 @@ def main() -> int:
     first = True
     while True:
         offset, n = tail_file(
-            events_path, offset=offset, replay=args.replay and first, color=color
+            events_path,
+            offset=offset,
+            replay=args.replay and first,
+            color=color,
+            token=token if send_tg else None,
+            chat_id=chat_id if send_tg else None,
         )
         first = False
         if args.once:

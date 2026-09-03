@@ -63,3 +63,21 @@ New-Item -ItemType Directory -Force -Path .\output | Out-Null
 ```
 
 Terminalde 🔴 SATIŞ ve 🟢 ALIŞ satırları görünmeli.
+
+## Telegram (senin numaran)
+
+Chat ID kaydedildi: **5555764362** (`@rbozkurt`)
+
+1. Botuna (`@X_666ZebaniBot` veya BotFather botun) bir kez **/start** yaz  
+2. `bot/.env.example` → `bot/.env` kopyala  
+3. `TELEGRAM_BOT_TOKEN=` satırına BotFather token’ını yapıştır  
+
+```powershell
+cd C:\Users\Rahman\OneDrive\Desktop\bot
+copy .env.example .env
+# .env içinde TELEGRAM_BOT_TOKEN=... doldur (CHAT_ID zaten 5555764362)
+pip install requests
+.\venv\Scripts\python.exe bookmap_bridge.py --telegram
+```
+
+Token olmadan köprü yine çalışır; sadece konsola yazar.

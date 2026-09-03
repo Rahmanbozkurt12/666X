@@ -6,7 +6,8 @@ Public labeled CEX/DEX wallets (Binance, BtcTurk, Coinbase, OKX, Paribu, Pancake
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # fill TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
+cp .env.example .env   # TELEGRAM_CHAT_ID=5555764362 hazır; BOT_TOKEN doldur
+
 set -a; source .env; set +a
 ```
 

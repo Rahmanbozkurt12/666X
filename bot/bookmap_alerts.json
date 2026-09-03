@@ -6,5 +6,14 @@
     "near_wall_pct": 5.0,
     "cooldown_sec": 120,
     "export_to_file": true
+  },
+  "telegram_bridge": {
+    "poll_seconds": 3,
+    "alert_types": [
+      "wall_detected",
+      "wall_removed",
+      "price_near_wall"
+    ],
+    "chat_id": "5555764362"
   }
 }

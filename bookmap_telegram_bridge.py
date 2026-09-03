@@ -40,6 +40,21 @@ from side_color import (  # noqa: E402
 CONFIG_PATH = ROOT / "config" / "bookmap_alerts.json"
 DEFAULT_EVENTS = ROOT / "output" / "bookmap_events.jsonl"
 STATE_PATH = ROOT / "output" / "bookmap_bridge_state.json"
+DEFAULT_CHAT_ID = "5555764362"
+
+
+def load_dotenv(path: Path = ROOT / ".env") -> None:
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -200,6 +215,7 @@ def main() -> int:
     parser.add_argument("--events", help="bookmap_events.jsonl mutlak yolu")
     args = parser.parse_args()
 
+    load_dotenv()
     cfg, settings = load_config()
     events_path = resolve_events_path(args.events, cfg, settings)
 
@@ -207,10 +223,12 @@ def main() -> int:
     allowed_types = set(cfg.get("alert_types") or ["wall_detected", "wall_removed", "price_near_wall"])
 
     token = env("TELEGRAM_BOT_TOKEN")
-    chat_id = env("TELEGRAM_CHAT_ID")
-    dry_run = bool(args.dry_run) or not (token and chat_id)
+    chat_id = env("TELEGRAM_CHAT_ID") or str(cfg.get("chat_id") or DEFAULT_CHAT_ID)
+    dry_run = bool(args.dry_run) or not token
     if dry_run and not args.dry_run:
-        print("[info] Telegram env yok → dry-run", file=sys.stderr)
+        print("[info] TELEGRAM_BOT_TOKEN yok → dry-run (chat_id hazır: %s)" % chat_id, file=sys.stderr)
+    else:
+        print(f"[info] Telegram chat_id={chat_id}", file=sys.stderr)
 
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {"offset": 0, "seen": []}
     print(f"watching {events_path} | poll={poll_seconds}s | dry_run={dry_run}")

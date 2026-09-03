@@ -75,6 +75,16 @@ cd C:\Users\Rahman\OneDrive\Desktop\bot
 
 Telegram ve terminal uyarılarında da 🟢 ALIŞ / 🔴 SATIŞ kullanılır.
 
+Senin Telegram chat ID: **5555764362** (`@rbozkurt`) — config’e yazıldı. Eksik olan sadece bot token:
+
+```powershell
+# .env
+TELEGRAM_BOT_TOKEN=BotFather_token_buraya
+TELEGRAM_CHAT_ID=5555764362
+```
+
+Bot’a bir kez `/start` yazmayı unutma.
+
 ---
 
 ## Sık hatalar ve çözümleri
