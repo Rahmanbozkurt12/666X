@@ -17,7 +17,28 @@ import time
 import traceback
 from datetime import datetime
 
-import bookmap as bm  # type: ignore[import-not-found]
+try:
+    import bookmap as bm  # type: ignore[import-not-found]
+except ImportError:
+    sys.stderr.write(
+        "\n"
+        "============================================================\n"
+        "  BU DOSYA VS CODE / PowerShell'DEN CALISMAZ.\n"
+        "  'No module named bookmap' HATASI BUNUN ICIN NORMALDIR.\n"
+        "============================================================\n"
+        "\n"
+        "Dogru kullanim:\n"
+        "  1) Bookmap uygulamasini ac\n"
+        "  2) Bookmap code editor'e bu dosyanin icerigini yapistir\n"
+        "     (Save -> Enable on Live chart)\n"
+        "  3) VS Code'da SADECE kopruyu calistir:\n"
+        "       cd Desktop\\bot\n"
+        "       python bookmap_bridge.py\n"
+        "\n"
+        "bookmap paketi pip ile kurulmaz; sadece Bookmap icinde vardir.\n"
+        "\n"
+    )
+    raise SystemExit(2)
 
 try:
     _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
