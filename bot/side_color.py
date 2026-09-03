@@ -189,7 +189,7 @@ def format_telegram_event(event: dict[str, Any]) -> str | None:
             f"{mark} <b>Bookmap — Fiyat {title_side_lc} duvarına yakın</b>\n"
             f"<b>{alias}</b>\n"
             f"{mark} {label} @ <b>{_fmt_num(price)}</b> (hacim {size_txt})\n"
-            f"Orta: {mid_txt} | Mesafe: <b>{dist_txt}%</b>"
+            f"Orta fiyat: {mid_txt} | Mesafe: <b>%{dist_txt}</b>"
         )
     return None
 
@@ -208,7 +208,7 @@ def format_console_event(event: dict[str, Any], *, color: bool = True) -> str:
     label = side_label(side)
 
     if etype == "wall_detected":
-        text = f"[{ts}] {mark} DUVAR  {alias}  {label} @ {price}  hacim={size}  mid={mid}"
+        text = f"[{ts}] {mark} DUVAR  {alias}  {label} @ {price}  hacim={size}  orta={mid}"
     elif etype == "wall_removed":
         text = f"[{ts}] {mark} KALKTİ  {alias}  {label} @ {price}"
     elif etype == "price_near_wall":
