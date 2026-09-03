@@ -29,6 +29,14 @@ from typing import Any
 import requests
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "bot"))
+from side_color import (  # noqa: E402
+    format_telegram_event,
+    normalize_event,
+    parse_event_line,
+    side_emoji,
+)
+
 CONFIG_PATH = ROOT / "config" / "bookmap_alerts.json"
 DEFAULT_EVENTS = ROOT / "output" / "bookmap_events.jsonl"
 STATE_PATH = ROOT / "output" / "bookmap_bridge_state.json"
@@ -101,56 +109,19 @@ def telegram_send(token: str, chat_id: str, text: str, *, dry_run: bool) -> bool
         return False
 
 
-def side_label(side: str) -> str:
-    if side == "ask":
-        return "SATIŞ (direnç)"
-    if side == "bid":
-        return "ALIŞ (destek)"
-    return side
-
-
 def format_event(event: dict[str, Any]) -> str | None:
-    etype = event.get("type")
-    alias = event.get("alias", "?")
-    side = event.get("side", "")
-    price = event.get("price")
-    size = event.get("size")
-    mid = event.get("mid_price")
-    dist = event.get("distance_pct")
-
-    if etype == "wall_detected":
-        mid_line = f"Mid: {mid:,.2f}\n" if mid else ""
-        return (
-            f"🧱 <b>Bookmap — Likidite duvarı</b>\n"
-            f"<b>{alias}</b>\n"
-            f"{side_label(side)} @ <b>{price:,.2f}</b>\n"
-            f"Hacim: <b>{size:,.0f}</b>\n"
-            f"{mid_line}"
-        ).rstrip()
-    if etype == "wall_removed":
-        return (
-            f"↩️ <b>Bookmap — Duvar kalktı</b>\n"
-            f"<b>{alias}</b>\n"
-            f"{side_label(side)} @ {price:,.2f}"
-        )
-    if etype == "price_near_wall":
-        return (
-            f"⚠️ <b>Bookmap — Fiyat duvara yakın</b>\n"
-            f"<b>{alias}</b>\n"
-            f"{side_label(side)} @ <b>{price:,.2f}</b> (hacim {size:,.0f})\n"
-            f"Mid: {mid:,.2f} | Mesafe: <b>{dist:.2f}%</b>"
-        )
-    return None
+    return format_telegram_event(event)
 
 
 def event_fingerprint(event: dict[str, Any]) -> str:
+    ev = normalize_event(event)
     parts = [
-        event.get("type", ""),
-        event.get("alias", ""),
-        str(event.get("side", "")),
-        str(event.get("price", "")),
-        str(event.get("size", "")),
-        event.get("ts", ""),
+        ev.get("type", ""),
+        ev.get("alias", ""),
+        str(ev.get("side", "")),
+        str(ev.get("price", "")),
+        str(ev.get("size", "")),
+        ev.get("ts", ""),
     ]
     return "|".join(parts)
 
@@ -189,13 +160,10 @@ def tail_events(
     with path.open(encoding="utf-8") as f:
         f.seek(offset)
         for line in f:
-            line = line.strip()
-            if not line:
+            event = parse_event_line(line)
+            if event is None:
                 continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+            event = normalize_event(event)
             if event.get("type") not in allowed_types:
                 continue
             fp = event_fingerprint(event)
@@ -207,7 +175,11 @@ def tail_events(
             if token and chat_id and telegram_send(token, chat_id, msg, dry_run=dry_run):
                 sent += 1
                 seen.add(fp)
-                print(f"[{datetime.now(timezone.utc).isoformat()}] alert: {event.get('type')} {event.get('alias')}")
+                mark = side_emoji(event.get("side"))
+                print(
+                    f"[{datetime.now(timezone.utc).isoformat()}] {mark} alert: "
+                    f"{event.get('type')} {event.get('alias')}"
+                )
             elif dry_run and telegram_send("", "", msg, dry_run=True):
                 sent += 1
                 seen.add(fp)

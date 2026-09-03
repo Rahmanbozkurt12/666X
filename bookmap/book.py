@@ -128,6 +128,31 @@ def notify(addon, alias, message):
         pass
 
 
+def _side_kind(side):
+    value = str(side or "").strip().lower()
+    if value in ("bid", "alis", "alış", "buy", "alım", "alim"):
+        return "buy"
+    if value in ("ask", "satis", "satış", "sell", "satim", "satım"):
+        return "sell"
+    return "other"
+
+
+def _side_mark(side):
+    kind = _side_kind(side)
+    if kind == "buy":
+        return "🟢 ALIŞ"
+    if kind == "sell":
+        return "🔴 SATIŞ"
+    return str(side or "?")
+
+
+def _diff_path(jsonl_path):
+    root, ext = os.path.splitext(jsonl_path)
+    if ext.lower() == ".jsonl":
+        return root + ".diff"
+    return jsonl_path + ".diff"
+
+
 def emit_event(event, addon=None, alias=None):
     global _export_error_logged
     if not settings.get("export_to_file", True):
@@ -135,11 +160,26 @@ def emit_event(event, addon=None, alias=None):
     event.setdefault("ts", _utc_now_iso())
     try:
         path = resolve_export_path()
+        line = json.dumps(event, ensure_ascii=False)
         with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            f.write(line + "\n")
+        # VS Code Diff görünümü: + yeşil (alış), - kırmızı (satış)
+        kind = _side_kind(event.get("side"))
+        prefix = "+" if kind == "buy" else "-" if kind == "sell" else " "
+        try:
+            with open(_diff_path(path), "a", encoding="utf-8") as f:
+                f.write(prefix + line + "\n")
+        except Exception:
+            pass
         print(
             "[book] %s %s %s @%s size=%s"
-            % (event.get("type"), event.get("alias"), event.get("side"), event.get("price"), event.get("size")),
+            % (
+                _side_mark(event.get("side")),
+                event.get("type"),
+                event.get("alias"),
+                event.get("price"),
+                event.get("size"),
+            ),
             flush=True,
         )
     except Exception as exc:

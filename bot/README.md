@@ -1,20 +1,25 @@
 # Bookmap + bot klasörü (Desktop)
 
-Ekran görüntünüzdeki hata:
+## Alış yeşil / satış kırmızı
 
-```text
-SyntaxError: unterminated string literal (detected at line 65)
-output = Path(r"C:\Users\Rahman\OneDrive\desk...
-```
+Ekrandaki `bookmap_events.jsonl` dosyasında tüm satırlar aynı renkte görünür. Artık üç yerde renk var:
 
-`bookmap_bridge.py` içinde yol satırı yarım kalmıştı (tırnak kapanmamış). Bu klasördeki dosyalar düzeltilmiş tam kopyadır.
+| Yer | Nasıl |
+|-----|--------|
+| **VS Code** | `python bookmap_bridge.py --boya` → `bookmap_events.diff` dosyasını aç (alış yeşil, satış kırmızı) |
+| **Tarayıcı** | `python bookmap_bridge.py --viewer` |
+| **Terminal / Telegram** | 🟢 ALIŞ · 🔴 SATIŞ |
 
-## Kurulum (2 dosya)
+Bookmap add-on yeni olaylarda `bookmap_events.diff` dosyasını da otomatik yazar.
+
+## Kurulum (Desktop\\bot)
 
 Hedef klasör:
 
 `C:\Users\Rahman\OneDrive\Desktop\bot`  
 (Türkçe Windows’ta `Masaüstü` olabilir — script ikisini de dener.)
+
+Kopyalanacaklar: `book.py`, `bookmap_bridge.py`, `side_color.py`, `events_viewer.html`, `bookmap_alerts.json`
 
 ### 1) Bookmap code editor
 
@@ -24,33 +29,26 @@ Hedef klasör:
 4. Logda şunu görün:
    - `[book] depth subscribed: ...`
    - `[book] ready — events -> C:\Users\Rahman\OneDrive\Desktop\bot\output\bookmap_events.jsonl`
-
-**Düzeltmeler (eski book.py’de bozulanlar):**
-- `bm.on_mbo(...)` diye bir API **yok** → `on_new_order` / `on_replace_order` / `on_remove_order`
-- `bm.add_on_interval_handler(addon, handler, ms)` **yanlış** → sadece 2 argüman: `(addon, handler)`
-- `get_bbos` None dönünce çökme engellendi
+   - `[book] 🟢 ALIŞ ...` veya `[book] 🔴 SATIŞ ...`
 
 ### 2) VS Code köprüsü
-
-1. `bot/bookmap_bridge.py` dosyasını `Desktop\bot\bookmap_bridge.py` olarak kopyalayın (eski bozuk dosyanın üstüne)  
-2. Terminal:
 
 ```powershell
 cd C:\Users\Rahman\OneDrive\Desktop\bot
 .\venv\Scripts\python.exe bookmap_bridge.py
 ```
 
-Beklenen çıktı:
-
-```text
-Bookmap Canlı Likidite Analizörü Başlatıldı...
-Dosya izleniyor: C:\Users\Rahman\OneDrive\Desktop\bot\output\bookmap_events.jsonl
-```
-
-Dosya yoksa Bookmap Enable edilince oluşur. Hâlâ yoksa Bookmap logundaki `events ->` yolunu `--events` ile verin:
+Mevcut uzun JSONL’i VS Code’da boyamak:
 
 ```powershell
-.\venv\Scripts\python.exe bookmap_bridge.py --events "C:\Users\Rahman\OneDrive\Desktop\bot\output\bookmap_events.jsonl"
+.\venv\Scripts\python.exe bookmap_bridge.py --boya
+# sonra output\bookmap_events.diff dosyasını VS Code’da açın
+```
+
+Canlı renkli görünüm (tarayıcı):
+
+```powershell
+.\venv\Scripts\python.exe bookmap_bridge.py --viewer
 ```
 
 ## Hızlı test (Bookmap olmadan)
@@ -59,7 +57,9 @@ Dosya yoksa Bookmap Enable edilince oluşur. Hâlâ yoksa Bookmap logundaki `eve
 New-Item -ItemType Directory -Force -Path .\output | Out-Null
 '{"type":"wall_detected","alias":"TEST","side":"ask","price":80000,"size":850000,"mid_price":76880,"ts":"2026-09-02T12:00:00Z"}' |
   Out-File -Encoding utf8 -Append .\output\bookmap_events.jsonl
+'{"type":"wall_detected","alias":"TEST","side":"bid","price":79000,"size":500000,"mid_price":76880,"ts":"2026-09-02T12:00:01Z"}' |
+  Out-File -Encoding utf8 -Append .\output\bookmap_events.jsonl
 .\venv\Scripts\python.exe bookmap_bridge.py --once --replay
 ```
 
-`DUVAR  TEST  SATIŞ ... @ 80000` görmelisiniz.
+Terminalde 🔴 SATIŞ ve 🟢 ALIŞ satırları görünmeli.

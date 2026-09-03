@@ -167,14 +167,29 @@ def emit_event(event, addon=None, alias=None):
     event.setdefault("ts", _utc_now_iso())
     try:
         path = resolve_export_path()
+        line = json.dumps(event, ensure_ascii=False)
         with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            f.write(line + "\n")
+        side = str(event.get("side") or "").lower()
+        if side in ("bid", "alis", "alış", "buy"):
+            prefix, mark = "+", "🟢 ALIŞ"
+        elif side in ("ask", "satis", "satış", "sell"):
+            prefix, mark = "-", "🔴 SATIŞ"
+        else:
+            prefix, mark = " ", side or "?"
+        try:
+            root, ext = os.path.splitext(path)
+            diff = root + ".diff" if ext.lower() == ".jsonl" else path + ".diff"
+            with open(diff, "a", encoding="utf-8") as f:
+                f.write(prefix + line + "\n")
+        except Exception:
+            pass
         print(
             "[wall_alert] %s %s %s @%s size=%s"
             % (
+                mark,
                 event.get("type"),
                 event.get("alias"),
-                event.get("side"),
                 event.get("price"),
                 event.get("size"),
             ),

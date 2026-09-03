@@ -60,6 +60,21 @@ Yol satırı yarım kalmış (tırnak kapanmamış). `bot/bookmap_bridge.py` ile
 
 Adım adım: **`bot/README.md`**
 
+### Alış yeşil / satış kırmızı
+
+Ham `bookmap_events.jsonl` VS Code’da tek renk görünür. Renkli bakmak için:
+
+```powershell
+cd C:\Users\Rahman\OneDrive\Desktop\bot
+.\venv\Scripts\python.exe bookmap_bridge.py --boya
+# output\bookmap_events.diff → VS Code’da aç (alış yeşil, satış kırmızı)
+
+.\venv\Scripts\python.exe bookmap_bridge.py --viewer
+# tarayıcıda canlı yeşil/kırmızı liste
+```
+
+Telegram ve terminal uyarılarında da 🟢 ALIŞ / 🔴 SATIŞ kullanılır.
+
 ---
 
 ## Sık hatalar ve çözümleri
