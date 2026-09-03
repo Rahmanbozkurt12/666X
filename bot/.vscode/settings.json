@@ -1,0 +1,6 @@
+{
+  "files.associations": {
+    "bookmap_events.diff": "diff",
+    "**/output/bookmap_events.diff": "diff"
+  }
+}

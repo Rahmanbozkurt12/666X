@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bookmap — alış yeşil / satış kırmızı</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0b1110;
+      --fog: #d7efe4;
+      --buy: #3ee07a;
+      --sell: #ff5a4f;
+      --muted: #8aa399;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      color: var(--fog);
+      background:
+        radial-gradient(1200px 500px at 0% -10%, rgba(62, 224, 122, 0.16), transparent 55%),
+        radial-gradient(900px 480px at 100% 0%, rgba(255, 90, 79, 0.14), transparent 50%),
+        linear-gradient(180deg, #10201a 0%, var(--ink) 42%, #140c0c 100%);
+      min-height: 100%;
+    }
+    .stage {
+      min-height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    header {
+      padding: 1.25rem 1.5rem 0.75rem;
+    }
+    h1 {
+      font-family: Syne, sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      margin: 0;
+      line-height: 0.9;
+    }
+    h1 span { color: var(--buy); }
+    h1 em {
+      font-style: normal;
+      color: var(--sell);
+    }
+    .lede {
+      margin: 0.55rem 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem 1rem;
+      align-items: baseline;
+      margin-top: 1rem;
+    }
+    button, label.file {
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid color-mix(in srgb, var(--fog) 35%, transparent);
+      padding: 0.15rem 0;
+      cursor: pointer;
+    }
+    button[aria-pressed="true"] { color: var(--fog); border-bottom-color: var(--fog); }
+    button.buy[aria-pressed="true"] { color: var(--buy); border-bottom-color: var(--buy); }
+    button.sell[aria-pressed="true"] { color: var(--sell); border-bottom-color: var(--sell); }
+    input[type="file"] { display: none; }
+    #log {
+      margin: 0;
+      padding: 0.5rem 1.5rem 2rem;
+      overflow: auto;
+      font-size: 0.78rem;
+      line-height: 1.55;
+    }
+    .row { white-space: pre-wrap; word-break: break-all; animation: rise 0.35s ease both; }
+    .row.buy { color: var(--buy); }
+    .row.sell { color: var(--sell); }
+    .row.other { color: var(--muted); }
+    .empty { color: var(--muted); padding: 2rem 1.5rem; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (max-width: 720px) {
+      #log { font-size: 0.7rem; padding-inline: 1rem; }
+      header { padding-inline: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <header>
+      <h1>Bookmap <span>alış</span> / <em>satış</em></h1>
+      <p class="lede">Yeşil = alış (bid). Kırmızı = satış (ask).</p>
+      <div class="toolbar">
+        <button type="button" data-filter="all" aria-pressed="true">Tümü</button>
+        <button type="button" class="buy" data-filter="buy" aria-pressed="false">Alış</button>
+        <button type="button" class="sell" data-filter="sell" aria-pressed="false">Satış</button>
+        <label class="file">JSONL yükle<input id="file" type="file" accept=".jsonl,.diff,.json,.txt" /></label>
+      </div>
+    </header>
+    <pre id="log"><div class="empty" id="hint">Canlı sunucu bekleniyor veya JSONL dosyasını yükleyin.</div></pre>
+  </div>
+  <script>
+    const BUY = new Set(["bid", "alis", "alış", "buy", "alım", "alim"]);
+    const SELL = new Set(["ask", "satis", "satış", "sell"]);
+    const logEl = document.getElementById("log");
+    const hint = document.getElementById("hint");
+    let filter = "all";
+    let rows = [];
+    let live = location.protocol.startsWith("http");
+
+    function kindOf(side) {
+      const v = String(side || "").toLowerCase();
+      if (BUY.has(v)) return "buy";
+      if (SELL.has(v)) return "sell";
+      return "other";
+    }
+
+    function parseLine(line) {
+      let text = line.trim();
+      if (!text) return null;
+      if ("+- ".includes(text[0]) && text[1] === "{") text = text.slice(1);
+      try { return JSON.parse(text); } catch { return null; }
+    }
+
+    function paint(list) {
+      const keep = list.filter((ev) => filter === "all" || kindOf(ev.side || ev.yon) === filter);
+      if (!keep.length) {
+        logEl.innerHTML = '<div class="empty">Bu filtrede olay yok.</div>';
+        return;
+      }
+      logEl.innerHTML = keep.map((ev) => {
+        const kind = kindOf(ev.side || ev.yon);
+        return `<div class="row ${kind}">${JSON.stringify(ev)}</div>`;
+      }).join("");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function pullLive() {
+      try {
+        const res = await fetch("/api/events?limit=500", { cache: "no-store" });
+        if (!res.ok) throw new Error("api");
+        rows = await res.json();
+        hint?.remove();
+        paint(rows);
+      } catch {
+        if (!rows.length && hint) hint.textContent = "JSONL dosyasını yükleyin (sürükle-bırak da olur).";
+      }
+    }
+
+    document.querySelectorAll("[data-filter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        filter = btn.dataset.filter;
+        document.querySelectorAll("[data-filter]").forEach((b) => {
+          b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+        });
+        paint(rows);
+      });
+    });
+
+    function ingestText(text) {
+      rows = text.split(/\n/).map(parseLine).filter(Boolean);
+      hint?.remove();
+      paint(rows);
+    }
+
+    document.getElementById("file").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      ingestText(await file.text());
+      live = false;
+    });
+
+    document.body.addEventListener("dragover", (e) => e.preventDefault());
+    document.body.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      ingestText(await file.text());
+      live = false;
+    });
+
+    if (live) {
+      pullLive();
+      setInterval(() => { if (live) pullLive(); }, 2000);
+    }
+  </script>
+</body>
+</html>

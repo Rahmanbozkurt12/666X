@@ -1,5 +1,8 @@
 .env
 output/alert_state.json
 output/marscoin_binance_flows.json
+output/bookmap_events.jsonl
+output/bookmap_events.diff
+output/bookmap_bridge_state.json
 *.pyc
 __pycache__/

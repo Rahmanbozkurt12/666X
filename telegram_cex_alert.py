@@ -36,6 +36,22 @@ ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config" / "watched_wallets.json"
 STATE_PATH = ROOT / "output" / "alert_state.json"
 RANKED_PATH = ROOT / "output" / "cex_wallets_ranked.json"
+DEFAULT_CHAT_ID = "5555764362"
+
+
+def load_dotenv(path: Path = ROOT / ".env") -> None:
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
 
 @dataclass(frozen=True)
 class Watched:
@@ -489,16 +505,20 @@ def main() -> int:
     if not config_path.exists():
         raise SystemExit(f"config yok: {config_path}")
 
+    load_dotenv()
     config = load_json(config_path)
     watched = load_watched(config)
     if not watched:
         raise SystemExit("izlenecek cüzdan yok")
 
     token = env("TELEGRAM_BOT_TOKEN")
-    chat_id = env("TELEGRAM_CHAT_ID")
-    dry_run = bool(args.dry_run) or not (token and chat_id)
+    chat_id = env("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID
+    dry_run = bool(args.dry_run) or not token
     if dry_run and not args.dry_run:
-        print("[info] Telegram env yok → dry-run modunda çalışıyor", file=sys.stderr)
+        print(
+            f"[info] TELEGRAM_BOT_TOKEN yok → dry-run (chat_id={chat_id})",
+            file=sys.stderr,
+        )
 
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {"seen": [], "bootstrapped": []}
     poll_seconds = int((config.get("settings") or {}).get("poll_seconds") or 45)
