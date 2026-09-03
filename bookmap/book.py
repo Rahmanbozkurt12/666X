@@ -153,6 +153,39 @@ def _diff_path(jsonl_path):
     return jsonl_path + ".diff"
 
 
+def _turkce_event(event):
+    """Telegram/VS Code için Türkçe alanlar ekler (İngilizce alanlar da kalır)."""
+    out = dict(event)
+    kind = _side_kind(out.get("side") or out.get("yon"))
+    type_tr = {
+        "wall_detected": "duvar_tespit",
+        "wall_removed": "duvar_kalkti",
+        "price_near_wall": "fiyat_duvara_yakin",
+    }
+    etype = out.get("type")
+    if etype in type_tr:
+        out["olay"] = type_tr[etype]
+    if out.get("alias") and "sembol" not in out:
+        out["sembol"] = out.get("alias")
+    if kind == "buy":
+        out["yon"] = "alis"
+        out["side"] = out.get("side") or "bid"
+    elif kind == "sell":
+        out["yon"] = "satis"
+        out["side"] = out.get("side") or "ask"
+    if "price" in out and "fiyat" not in out:
+        out["fiyat"] = out["price"]
+    if "size" in out and "hacim" not in out:
+        out["hacim"] = out["size"]
+    if "mid_price" in out and "orta_fiyat" not in out:
+        out["orta_fiyat"] = out["mid_price"]
+    if "distance_pct" in out and "mesafe_yuzde" not in out:
+        out["mesafe_yuzde"] = out["distance_pct"]
+    if "ts" in out and "zaman" not in out:
+        out["zaman"] = out["ts"]
+    return out
+
+
 def emit_event(event, addon=None, alias=None):
     global _export_error_logged
     if not settings.get("export_to_file", True):
@@ -160,11 +193,12 @@ def emit_event(event, addon=None, alias=None):
     event.setdefault("ts", _utc_now_iso())
     try:
         path = resolve_export_path()
-        line = json.dumps(event, ensure_ascii=False)
+        payload = _turkce_event(event)
+        line = json.dumps(payload, ensure_ascii=False)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
         # VS Code Diff görünümü: + yeşil (alış), - kırmızı (satış)
-        kind = _side_kind(event.get("side"))
+        kind = _side_kind(payload.get("side") or payload.get("yon"))
         prefix = "+" if kind == "buy" else "-" if kind == "sell" else " "
         try:
             with open(_diff_path(path), "a", encoding="utf-8") as f:
@@ -172,13 +206,13 @@ def emit_event(event, addon=None, alias=None):
         except Exception:
             pass
         print(
-            "[book] %s %s %s @%s size=%s"
+            "[book] %s %s %s @%s hacim=%s"
             % (
-                _side_mark(event.get("side")),
-                event.get("type"),
-                event.get("alias"),
-                event.get("price"),
-                event.get("size"),
+                _side_mark(payload.get("side") or payload.get("yon")),
+                payload.get("olay") or payload.get("type"),
+                payload.get("sembol") or payload.get("alias"),
+                payload.get("fiyat") if "fiyat" in payload else payload.get("price"),
+                payload.get("hacim") if "hacim" in payload else payload.get("size"),
             ),
             flush=True,
         )
