@@ -18,6 +18,17 @@ python3 binance_momentum_scanner.py
 python3 binance_momentum_scanner.py --top 3
 ```
 
+## Binance radar scanner (ileri seviye)
+
+Momentum + kademeli hacim + order-book derinliği + büyük işlem akışı + duyuru eşleşmesi.  
+On-chain holder / DEX pool için güvenli placeholder bırakır (kontrat eşlemesi olmadan uydurma yapmaz).  
+Telegram opsiyonel.
+
+```bash
+python3 binance_radar_scanner.py --top 10
+python3 binance_radar_scanner.py --loop --interval 300 --top 10
+```
+
 ## Setup
 
 ```bash
