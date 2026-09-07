@@ -4,24 +4,18 @@ Public labeled CEX/DEX wallets (Binance, BtcTurk, Coinbase, OKX, Paribu, Pancake
 
 ## Binance momentum scanner (yükseliş adayı)
 
-Public Binance market data ile USDT spot coinleri tarar (API key gerekmez).  
-30 dk momentum + hacim artışı filtreler. Bu bir tahmin / %70 garanti değildir.
+Public Binance market data ile USDT spot coinleri tarar (API key gerekmez, Telegram yok).  
+Her çalıştırmada 30 dk momentum + hacim artışı olan adayları konsola yazar.  
+Bu bir tahmin / %70 garanti değildir.
 
 ```bash
 pip install -r requirements.txt
 
-# tek tarama
-python binance_momentum_scanner.py --top 5
+# her çalıştırdığında güncel yükseliş adayını söyler
+python3 binance_momentum_scanner.py
 
-# her 30 dk tekrar
-python binance_momentum_scanner.py --loop --interval 1800
-
-# Telegram'a gönder (aynı .env)
-set -a; source .env; set +a
-python binance_momentum_scanner.py --telegram --top 5
-
-# mesajı sadece konsolda gör
-python binance_momentum_scanner.py --dry-run
+# sadece en güçlü 3 aday
+python3 binance_momentum_scanner.py --top 3
 ```
 
 ## Setup
