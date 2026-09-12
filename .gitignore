@@ -1,5 +1,7 @@
 .env
 output/alert_state.json
 output/marscoin_binance_flows.json
+output/binance_spot_bot_state.json
+output/binance_spot_bot_state.json.tmp
 *.pyc
 __pycache__/
