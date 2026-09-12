@@ -1,0 +1,29 @@
+{
+  "target_wallet": "A6PSQFRfv93hoAn1LhQGRT2dYQtjDKX6SE2vN9MEvbot",
+  "rpc_url": "https://api.mainnet-beta.solana.com",
+  "signature_limit": 40,
+  "min_fee_sol": 0.001,
+  "known_programs": {
+    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": "pump.fun_amm",
+    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "pump.fun_legacy",
+    "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C": "raydium_cpmm",
+    "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo": "meteora_dlmm",
+    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "jupiter_v6"
+  },
+  "known_fee_brands": {
+    "FAST": "private_fast_*_fee (custom/closed bot fingerprint)",
+    "FLASH": "landing tip / flash-style tip account",
+    "Land": "landing tip account",
+    "node": "landing tip account",
+    "Axiom": "axiom.trade"
+  },
+  "reconstructed_loop": {
+    "1_listen": "Pump.fun create / early buy logs (gRPC or logsSubscribe)",
+    "2_filter": "dev history / liquidity / age / size (PRIVATE — not on-chain)",
+    "3_buy": "pAMMBay BuyExactQuoteIn + compute budget + optional tip",
+    "4_manage": "TP / SL / time exit (inferred from rapid Sell)",
+    "5_sell": "pAMMBay Sell or Raydium/Meteora after migrate",
+    "6_fee": "transfer SOL to FAST* vanity fee wallets"
+  },
+  "notes": "Source code is NOT public. Config only encodes on-chain fingerprints."
+}
