@@ -2,6 +2,7 @@
 output/alert_state.json
 output/marscoin_binance_flows.json
 output/mega_confluence_state.json
+output/mega_confluence_last.json
 *.pyc
 __pycache__/
 mega_confluence/__pycache__/
