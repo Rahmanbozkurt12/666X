@@ -1,0 +1,31 @@
+{
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "interval": "1m",
+  "klines_limit": 120,
+  "poll_seconds": 15,
+  "starting_cash_usdt": 1000,
+  "position_fraction": 0.95,
+  "max_open_positions": 1,
+  "strategy": {
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "rsi_period": 14,
+    "rsi_buy_max": 65,
+    "rsi_sell_min": 70
+  },
+  "risk": {
+    "hard_stop_pct": 1.5,
+    "take_profit_pct": 3.0,
+    "trail_pct": 0.8
+  },
+  "live": {
+    "enabled": false,
+    "quote_asset": "USDT",
+    "recv_window_ms": 5000
+  },
+  "notes": {
+    "mode": "DRY_RUN varsayılan — gerçek para için live.enabled=true ve API key gerekir",
+    "keys": "BINANCE_API_KEY / BINANCE_API_SECRET (.env) — sadece Spot Trade, withdrawal KAPALI",
+    "strategy": "EMA9>EMA21 ve RSI<65 → BUY; ters sinyal / TP / stop / trail → SELL"
+  }
+}
