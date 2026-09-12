@@ -1,0 +1,10 @@
+{
+  "strategy": "NostalgiaForInfinityX7",
+  "add_config_files": [
+    "../configs/trading_mode-spot.json",
+    "../configs/pairlist-volume-binance-usdt.json",
+    "../configs/blacklist-binance.json",
+    "../configs/exampleconfig.json",
+    "../configs/exampleconfig_secret.json"
+  ]
+}

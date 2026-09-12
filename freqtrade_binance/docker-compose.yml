@@ -1,0 +1,22 @@
+---
+# Freqtrade + NostalgiaForInfinityX7 on Binance spot (DRY-RUN by default)
+# Official stack: https://github.com/freqtrade/freqtrade
+# Strategy:     https://github.com/iterativv/NostalgiaForInfinity
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    restart: unless-stopped
+    container_name: freqtrade-nfi-binance
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+      - "./configs:/freqtrade/configs"
+      - "./user_data/strategies/NostalgiaForInfinityX7.py:/freqtrade/NostalgiaForInfinityX7.py"
+    ports:
+      - "127.0.0.1:8080:8080"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade-nfi-binance.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3-nfi-binance.sqlite
+      --config /freqtrade/user_data/config.json
+      --strategy NostalgiaForInfinityX7
+      --strategy-path /freqtrade

@@ -1,0 +1,7 @@
+user_data/strategies/NostalgiaForInfinityX7.py
+user_data/strategies/NostalgiaForInfinityX*.py
+user_data/logs/
+user_data/data/
+user_data/*.sqlite
+user_data/*.sqlite-journal
+.env
