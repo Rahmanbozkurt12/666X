@@ -1,0 +1,14 @@
+{
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "interval": "15m",
+  "hard_stop_pct": 1.0,
+  "trail_pct": 0.45,
+  "starting_cash": 10000,
+  "poll_seconds": 60,
+  "min_quote_volume_usdt": 5000000,
+  "notes": {
+    "hard_stop": "PnL <= -1% → immediate SELL",
+    "trail": "Sell when price drops trail_pct from peak (ride up, exit on turn)",
+    "execute": "Paper trading only unless you wire a live exchange adapter"
+  }
+}
