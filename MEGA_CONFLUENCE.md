@@ -2,10 +2,19 @@
 
 128 kripto analiz metodunu tarar, confluence skoru üretir, paper trader ile **AL / SAT** yapar.
 
-## Risk kuralları (istenildiği gibi)
+## Tek dosya (önerilen)
+
+Tüm kod birleştirildi:
+
+```bash
+python mega_confluence_all_in_one.py --symbol BTCUSDT
+python mega_confluence_all_in_one.py --symbol BTCUSDT --execute --loop --poll 60
+```
+
+## Risk kuralları
 
 1. Confluence **BUY** ise al (paper)
-2. Peak’ten `trail_pct` (varsayılan **%0.45**) geri çekilince sat → yükselişi olabildiğince sür, dönüşte çık
+2. Peak’ten `trail` (varsayılan **%0.45**) geri çekilince sat
 3. Girişten **%-1** olunca hard stop sat
 4. Confluence **SELL** ve kârdayken de satabilir
 
@@ -15,40 +24,20 @@
 
 Price Action + Wyckoff + Market Structure + Volume/Footprint + CVD/Delta + OI/Liquidations + Liquidity + On-chain proxy + SMC/ICT + Risk Management
 
-API’si olmayan metodlar (MEV, mempool, ETF flow, NVT, …) **neutral / düşük ağırlık** döner; tarama listesinde yine görünür.
+API’si olmayan metodlar (MEV, mempool, ETF flow, NVT, …) neutral / düşük ağırlık döner.
 
-## Kullanım
+## Diğer komutlar
 
 ```bash
-# Tek tarama
-python mega_confluence_scanner.py --symbol BTCUSDT
-
-# Birkaç coin
-python mega_confluence_scanner.py --symbol BTCUSDT --symbol ETHUSDT --symbol SOLUSDT
-
-# JSON + paper trade (al/sat state: output/mega_confluence_state.json)
-python mega_confluence_scanner.py --symbol BTCUSDT --execute --json
-
-# Canlı döngü (paper)
-python mega_confluence_scanner.py --symbol BTCUSDT --execute --loop --poll 60
-
-# Top hacimli USDT çiftlerini de tara
-python mega_confluence_scanner.py --top 10 --execute
+python mega_confluence_all_in_one.py --symbol BTCUSDT --symbol ETHUSDT --execute --json
+python mega_confluence_all_in_one.py --top 10 --execute
+python mega_confluence_scanner.py --symbol BTCUSDT   # aynı tek dosyayı çağırır
 ```
 
 Ayarlar: `config/mega_confluence.json`
 
-```json
-{
-  "hard_stop_pct": 1.0,
-  "trail_pct": 0.45,
-  "starting_cash": 10000
-}
-```
-
 ## Çıktı
 
-- Konsol: verdict, top bull/bear metodlar, trade event
 - `output/mega_confluence_last.json` — son tarama
 - `output/mega_confluence_state.json` — paper pozisyon / trades
 
