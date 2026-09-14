@@ -1,1 +1,3 @@
 requests>=2.31.0
+python-binance>=1.0.19
+websockets>=12.0

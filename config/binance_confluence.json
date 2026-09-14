@@ -1,0 +1,55 @@
+{
+  "dry_run": true,
+  "max_open_positions": 1,
+  "stake_fraction": 0.95,
+  "poll_seconds": 15,
+  "min_quote_volume_usdt": 500000,
+  "scan_batch_size": 40,
+  "trail_pct": 0.020,
+  "stop_pct": 0.50,
+  "daily_loss_limit_usdt": 50,
+  "cooldown_seconds": 120,
+  "confluence": {
+    "min_score": 2.0,
+    "weights": {
+      "volume_spike": 1.0,
+      "orderbook_imbalance": 1.2,
+      "holder_velocity": 1.5,
+      "smart_money": 1.5,
+      "news_sentiment": 1.0
+    }
+  },
+  "orderbook": {
+    "top_levels": 10,
+    "min_bid_ask_ratio": 3.0,
+    "ws_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+  },
+  "volume_spike": {
+    "interval": "5m",
+    "lookback": 15,
+    "min_volume_mult": 2.5,
+    "min_price_change": 0.005
+  },
+  "onchain": {
+    "enabled": true,
+    "holder_growth_mult": 3.0,
+    "chains": ["ethereum", "bsc", "solana"],
+    "watchlist": [
+      {
+        "binance_symbol": "ETHUSDT",
+        "chain": "ethereum",
+        "contract": "native",
+        "note": "placeholder — replace with listed token contracts"
+      }
+    ]
+  },
+  "news": {
+    "enabled": true,
+    "min_sentiment": 0.35,
+    "currencies": ["BTC", "ETH", "SOL"]
+  },
+  "notes": {
+    "latency": "Production: run near Binance (AWS ap-northeast-1 Tokyo or eu-central-1 Frankfurt).",
+    "keys": "BINANCE_API_KEY/SECRET required for live. Optional: MORALIS_API_KEY, ETHERSCAN_API_KEY, HELIUS_API_KEY, CRYPTOPANIC_API_KEY, OPENAI_API_KEY"
+  }
+}
