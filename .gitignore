@@ -1,5 +1,8 @@
 .env
 output/alert_state.json
 output/marscoin_binance_flows.json
+output/binance_trail_positions.json
+output/binance_trail_daily_pnl.json
+output/binance_trail_cooldown.json
 *.pyc
 __pycache__/
