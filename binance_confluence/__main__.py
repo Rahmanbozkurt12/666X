@@ -85,6 +85,9 @@ def fetch_liquid_usdt_symbols(client: Client, min_qv: float, limit: int) -> list
             continue
         if any(x in sym for x in ("UP", "DOWN", "BEAR", "BULL")):
             continue
+        # skip non-ascii tickers (meme unicode pairs)
+        if not sym.isascii():
+            continue
         try:
             qv = float(t.get("quoteVolume") or 0)
         except (TypeError, ValueError):
