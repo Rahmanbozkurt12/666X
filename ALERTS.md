@@ -1,4 +1,17 @@
-# CEX Wallet Telegram Alerts
+# CEX Alerts
+
+## 1) GitHub CEX coin scanner (erken listing)
+
+Major CEX GitHub org'larını tarar → listing / new asset sinyali → Telegram.
+
+Detay: [`GITHUB_CEX_SCANNER.md`](GITHUB_CEX_SCANNER.md)
+
+```bash
+python github_cex_scanner.py --once --dry-run --priority high --skip-code-search
+python github_cex_scanner.py --priority high
+```
+
+## 2) CEX Wallet Telegram Alerts
 
 Public labeled CEX/DEX wallets (Binance, BtcTurk, Coinbase, OKX, Paribu, PancakeSwap, Binance Alpha, pump.fun) are polled for token transfers; Telegram gets IN/OUT alerts.
 
