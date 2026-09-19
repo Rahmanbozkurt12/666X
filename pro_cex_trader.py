@@ -46,12 +46,12 @@ try:
     import pro_cex_radar as radar
 except ImportError:
     raise SystemExit(
-        "\n[HATA] pro_cex_radar.py bulunamadı (satır 38).\n"
-        "pro_cex_trader.py ile AYNI klasöre şunları koy:\n"
+        "\n[HATA] pro_cex_radar.py bulunamadı.\n\n"
+        "KOLAY ÇÖZÜM — tek dosya kullan:\n"
+        "  python pro_cex_bot.py --once --dry-run --fast\n\n"
+        "VEYA aynı klasöre koy:\n"
         "  - pro_cex_radar.py\n"
         "  - pro_cex_trader.py\n"
-        "  - config/ (opsiyonel)\n"
-        "Örnek:\n"
         "  cd C:\\Users\\Rahman\\OneDrive\\Desktop\\bot\n"
         "  python pro_cex_trader.py --once --dry-run\n"
     ) from None
