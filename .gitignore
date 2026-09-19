@@ -9,6 +9,8 @@ output/pro_cex_radar_signals.json
 output/pro_cex_radar_state.json
 output/pro_cex_radar_backtest.json
 output/pro_cex_radar_missed.json
+output/pro_cex_positions.json
+output/pro_cex_trades.jsonl
 output/marscoin_binance_flows.json
 *.pyc
 __pycache__/
