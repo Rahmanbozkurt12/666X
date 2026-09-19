@@ -1,0 +1,39 @@
+{
+  "rest_base": "https://data-api.binance.vision",
+  "quote": "USDT",
+  "workers": 20,
+  "poll_seconds": 180,
+  "max_symbols": 0,
+  "min_quote_volume_usdt": 200000,
+  "ohlcv": {
+    "5m": 48,
+    "15m": 96,
+    "1h": 72,
+    "1d": 90
+  },
+  "early_buy": {
+    "max_24h_change_pct": 8.0,
+    "min_24h_change_pct": -25.0,
+    "near_low_lookback_days": 14,
+    "near_low_max_pct": 8.0,
+    "max_rsi_1h": 55.0,
+    "min_rsi_1h": 25.0,
+    "volume_rise_mult_5m": 1.4,
+    "min_score_al": 62,
+    "min_score_izle": 48
+  },
+  "late_reject": {
+    "max_already_up_24h_pct": 15.0,
+    "max_rsi_1h": 70.0,
+    "max_from_14d_low_pct": 25.0
+  },
+  "stable_bases": [
+    "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
+    "RLUSD", "USDE", "USD1", "XUSD"
+  ],
+  "skip_bases": [
+    "WBTC", "WETH", "BTCB", "WBETH", "BETH", "STETH", "WSTETH", "RLUSD", "XAUT", "PAXG"
+  ],
+  "skip_suffixes": ["UP", "DOWN", "BULL", "BEAR"],
+  "skip_tokenized_stocks": true
+}

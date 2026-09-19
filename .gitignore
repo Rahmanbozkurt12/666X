@@ -2,6 +2,8 @@
 output/alert_state.json
 output/cex_5m_alert_state.json
 output/cex_5m_volume_signals.json
+output/binance_dip_buy_state.json
+output/binance_dip_buy_signals.json
 output/marscoin_binance_flows.json
 *.pyc
 __pycache__/
