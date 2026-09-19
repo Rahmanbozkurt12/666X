@@ -65,9 +65,9 @@
     "tp1_sell_pct": 0.50,
     "prefer_uc": true,
     "also_buy_izle": true,
-    "izle_min_score": 55.0,
-    "izle_min_pump": 48.0,
-    "izle_max_24h_pct": 6.5,
+    "izle_min_score": 50.0,
+    "izle_min_pump": 40.0,
+    "izle_max_24h_pct": 8.0,
     "trade_base": "https://api.binance.com",
     "recv_window": 5000
   },

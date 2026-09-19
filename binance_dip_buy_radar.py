@@ -48,15 +48,14 @@ except ImportError:  # pragma: no cover
     ccxt = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
-# BINANCE API KEY — SADECE BURAYA yaz (from __future__ satırının ÜSTÜNE yazma!)
-# Key yaz → LIVE_HARDCODE = True → dosyayı kaydet → çalıştır:
-#   python binance_dip_buy_radar.py --once --trade --live
-# veya AL_SAT_CALISTIR.bat
+# BINANCE API KEY — SADECE BURAYA yaz (from __future__ ÜSTÜNE yazma!)
+# Key doldur → kaydet → çalıştır:  python binance_dip_buy_radar.py --once --trade --live
+# Key doluysa otomatik gerçek alım açılır (--dry-run hariç).
 # ---------------------------------------------------------------------------
-BINANCE_API_KEY_HARDCODE = ""  # örn: "abc123..."
-BINANCE_API_SECRET_HARDCODE = ""  # örn: "xyz789..."
-LIVE_HARDCODE = False  # True yap = gerçek Binance al/sat (paran gider!)
-TRADE_HARDCODE = True  # True = bulunan AL coinleri otomatik al/sat döngüsü
+BINANCE_API_KEY_HARDCODE = ""  # ← buraya API Key
+BINANCE_API_SECRET_HARDCODE = ""  # ← buraya Secret Key
+LIVE_HARDCODE = True  # True = gerçek alım (key dolu olmalı)
+TRADE_HARDCODE = True  # True = AL/İZLE bulununca al/sat
 
 # En az 15 CEX — dip radar Binance derin analiz + diğerlerinde hacim 0→+ onay
 MULTI_CEX_IDS: list[str] = [
@@ -141,9 +140,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "prefer_uc": True,
         # AL yokken güçlü İZLE de alınsın (aksi halde çoğu tur boş kalır)
         "also_buy_izle": True,
-        "izle_min_score": 55.0,
-        "izle_min_pump": 48.0,
-        "izle_max_24h_pct": 6.5,
+        "izle_min_score": 50.0,
+        "izle_min_pump": 40.0,
+        "izle_max_24h_pct": 8.0,
         "trade_base": "https://api.binance.com",
         "recv_window": 5000,
     },
@@ -2090,7 +2089,6 @@ def main() -> int:
     trade_cfg = cfg.setdefault("trade", dict(DEFAULT_CONFIG["trade"]))
     api_key, api_secret = resolve_api_keys()
     keys_ok = bool(api_key and api_secret)
-    # Key / TRADE_HARDCODE / config / --trade → al-sat açık
     want_trade = (
         bool(
             args.trade
@@ -2101,32 +2099,46 @@ def main() -> int:
         and not args.no_trade
     )
     live_env = (env("LIVE") or "0") == "1"
-    want_live = bool(args.live or live_env or LIVE_HARDCODE) and not args.dry_run
+    # Key dolu + trade açık → otomatik LIVE (--dry-run hariç)
+    want_live = (
+        bool(args.live or live_env or LIVE_HARDCODE or (keys_ok and want_trade))
+        and not args.dry_run
+    )
     trade_live = bool(want_trade and want_live)
     account: BinanceAccount | None = None
 
+    print("=" * 60)
     if keys_ok:
         print(f"[keys] API key OK (…{api_key[-4:]})")
     else:
-        print("[keys] API key YOK — BINANCE_API_KEY_HARDCODE doldur")
-
+        print("[keys] API key BOŞ — BINANCE_API_KEY_HARDCODE doldur!")
     print(
         f"[flags] trade={want_trade} live={want_live} "
         f"(LIVE_HARDCODE={LIVE_HARDCODE} TRADE_HARDCODE={TRADE_HARDCODE})"
     )
+    print("=" * 60)
+
+    if want_trade and not keys_ok and not args.dry_run:
+        raise SystemExit(
+            "\n"
+            "╔══════════════════════════════════════════════════════╗\n"
+            "║  ALIM YAPILAMAZ — API KEY BOŞ                        ║\n"
+            "║                                                      ║\n"
+            "║  Dosyada şu satırları DOLDUR:                        ║\n"
+            "║    BINANCE_API_KEY_HARDCODE = \"keyin\"                ║\n"
+            "║    BINANCE_API_SECRET_HARDCODE = \"secretin\"          ║\n"
+            "║    LIVE_HARDCODE = True                              ║\n"
+            "║                                                      ║\n"
+            "║  Sonra: python binance_dip_buy_radar.py --once --trade --live\n"
+            "╚══════════════════════════════════════════════════════╝\n"
+        )
 
     if want_trade:
-        if want_live and not keys_ok:
-            raise SystemExit(
-                "\n[HATA] Gerçek alım için API key gerekli.\n"
-                "  Dosyada BINANCE_API_KEY_HARDCODE + SECRET doldur.\n"
-            )
         if trade_live:
             print("[MODE] ⚠️  LIVE Binance spot — GERÇEK PARA / GERÇEK EMRİ")
         else:
-            print("[MODE] PAPER — Binance'a emir GİTMEZ")
-            print("       Gerçek alım: LIVE_HARDCODE=True  VEYA  --live")
-            print("       Örnek: python binance_dip_buy_radar.py --once --trade --live")
+            print("[MODE] PAPER — Binance hesabında alım GÖRÜNMEZ")
+            print("       --dry-run kapalı mı? Key dolu mu?")
         account = BinanceAccount(cfg, live=trade_live)
         try:
             bal = account.free_usdt()
@@ -2141,12 +2153,14 @@ def main() -> int:
             print(f"[account HATA] bakiye okunamadı: {exc}", file=sys.stderr)
             if trade_live:
                 raise SystemExit(
-                    "API key / IP whitelist / Enable Spot & Margin Trading "
-                    "izinlerini Binance API Management'tan kontrol et"
+                    "\nAPI bağlanamadı. Kontrol et:\n"
+                    "  1) Key/Secret doğru mu?\n"
+                    "  2) Binance → API → Enable Spot & Margin Trading AÇIK mı?\n"
+                    "  3) IP kısıtı varsa PC IP ekle (veya kısıtı kapat)\n"
                 ) from exc
         print(f"[positions] {POS_PATH}")
     else:
-        print("[MODE] sadece radar — trade kapalı (--trade veya TRADE_HARDCODE=True)")
+        print("[MODE] sadece radar — trade kapalı")
 
     token = env("TELEGRAM_BOT_TOKEN")
     chat_id = env("TELEGRAM_CHAT_ID")
