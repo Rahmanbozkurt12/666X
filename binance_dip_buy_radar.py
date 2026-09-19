@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 """
-Binance TÜM USDT spot — dipten erken AL radarı (gelişmiş v2).
+Binance TÜM USDT spot — dipten erken AL radarı (v2.1).
 
-Katmanlar:
-  1) Teknik dip (14g)
-  2) 5m hacim dipten yükseliş
-  3) 0→+ / yeşil mum / higher-low
-  4) RSI toparlanma
-  5) EMA dönüş
-  6) BTC relative strength + BTC rejim filtresi
-  7) Futures funding / OI (varsa)
-  8) Stop / TP risk önerisi
-  9) Geç kalma filtresi (AR +%50 tipi → GEÇ)
+Özellikle aranan setup (AR tipi):
+  • Hacim sessizken 0→+ dönüyor
+  • Fiyat henüz yükselmemiş VEYA sadece +3/+5
+  • Ama uç potansiyeli +50/+70 bandında (pump_score)
 
 Kullanım:
   python3 binance_dip_buy_radar.py --once --dry-run
@@ -45,20 +39,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "min_quote_volume_usdt": 200000,
     "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
     "early_buy": {
-        "max_24h_change_pct": 8.0,
+        "max_24h_change_pct": 6.0,
         "min_24h_change_pct": -25.0,
+        "early_rally_max_pct": 5.0,
         "near_low_lookback_days": 14,
-        "near_low_max_pct": 8.0,
-        "max_rsi_1h": 55.0,
+        "near_low_max_pct": 10.0,
+        "max_rsi_1h": 58.0,
         "min_rsi_1h": 25.0,
-        "volume_rise_mult_5m": 1.4,
-        "min_score_al": 62,
-        "min_score_izle": 48,
+        "volume_rise_mult_5m": 1.35,
+        "min_score_al": 60,
+        "min_score_izle": 46,
+        "min_pump_score_al": 55,
     },
     "late_reject": {
-        "max_already_up_24h_pct": 15.0,
+        "max_already_up_24h_pct": 12.0,
         "max_rsi_1h": 70.0,
-        "max_from_14d_low_pct": 25.0,
+        "max_from_14d_low_pct": 28.0,
+    },
+    "pump_upside": {
+        "enabled": True,
+        "target_low_pct": 40.0,
+        "target_high_pct": 70.0,
+        "min_room_to_30d_high_pct": 25.0,
+        "quiet_vol_bars": 18,
+        "vol_turn_mult": 1.8,
+        "compression_atr_ratio": 0.75,
     },
     "regime": {
         "enabled": True,
@@ -76,6 +81,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stop_buffer_pct": 1.2,
         "tp1_pct": 6.0,
         "tp2_pct": 14.0,
+        "use_pump_tp": True,
     },
     "stable_bases": [
         "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR",
@@ -110,7 +116,7 @@ STATE_PATH = OUTPUT_DIR / "binance_dip_buy_state.json"
 BACKTEST_PATH = OUTPUT_DIR / "binance_dip_buy_backtest.json"
 
 HTTP = requests.Session()
-HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.0"})
+HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.1"})
 
 
 def resolve_config_path(cli_path: str | None = None) -> Path | None:
@@ -163,7 +169,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
         # gömülü defaults ile birleştir (eksik anahtarlar)
         cfg = dict(DEFAULT_CONFIG)
         cfg.update(raw)
-        for k in ("early_buy", "late_reject", "regime", "futures", "risk", "ohlcv"):
+        for k in ("early_buy", "late_reject", "regime", "futures", "risk", "ohlcv", "pump_upside"):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
                 merged.update(raw[k])
@@ -198,6 +204,9 @@ class Analysis:
     tp1: float | None = None
     tp2: float | None = None
     risk_reward: float | None = None
+    pump_score: float = 0.0
+    upside_est_pct: float = 0.0
+    is_uc: bool = False
 
 
 def ema(values: list[float], period: int) -> float | None:
@@ -361,6 +370,185 @@ def analyze_volume_bottom(vols: list[float], mult: float) -> tuple[bool, float]:
         chain and last >= trough * 1.2 and rise >= 1.15
     )
     return ok, rise
+
+
+def volume_zero_to_pos(
+    vols: list[float],
+    *,
+    quiet_bars: int = 18,
+    turn_mult: float = 1.8,
+) -> dict[str, Any]:
+    """Sessiz/düşen hacim → artıya geçiş (AR tipi erken uyanış)."""
+    n = max(8, quiet_bars)
+    if len(vols) < n + 3:
+        return {"ok": False, "quiet": False, "turn": False, "ratio": 0.0}
+    quiet = vols[-(n + 3) : -3]
+    recent = vols[-3:]
+    q_avg = sum(quiet) / len(quiet) if quiet else 0.0
+    r_avg = sum(recent) / len(recent)
+    quiet_ok = q_avg > 0 and max(quiet[-6:]) <= q_avg * 1.35
+    slope_up = recent[-1] > recent[0] and recent[-1] > recent[-2]
+    ratio = (r_avg / q_avg) if q_avg > 0 else 0.0
+    turn = ratio >= turn_mult and slope_up and recent[-1] > q_avg * turn_mult
+    return {
+        "ok": bool(quiet_ok and turn),
+        "quiet": quiet_ok,
+        "turn": turn,
+        "ratio": round(ratio, 2),
+        "q_avg": q_avg,
+        "r_avg": r_avg,
+    }
+
+
+def analyze_pump_upside(
+    *,
+    price: float,
+    chg24: float,
+    c5: dict[str, list[float]],
+    c15: dict[str, list[float]] | None,
+    c1h: dict[str, list[float]],
+    c1d: dict[str, list[float]],
+    from_low_pct: float,
+    vol_ok: bool,
+    vol_rise: float,
+    rsi_1h: float | None,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    +3/+5 erken ralli iken +50/+70'e gidebilecek 'uç' potansiyeli.
+    AR benzeri: sessiz taban + hacim 0→+ + sıkışma + yukarıda boşluk.
+    """
+    pu = cfg.get("pump_upside") or {}
+    if not pu.get("enabled", True):
+        return {"pump_score": 0.0, "upside_est_pct": 0.0, "is_uc": False, "reasons": []}
+
+    early = cfg.get("early_buy") or {}
+    early_max = float(early.get("early_rally_max_pct") or 5.0)
+    score = 0.0
+    reasons: list[str] = []
+
+    vz = volume_zero_to_pos(
+        c5["v"],
+        quiet_bars=int(pu.get("quiet_vol_bars") or 18),
+        turn_mult=float(pu.get("vol_turn_mult") or 1.8),
+    )
+    vz_1h = volume_zero_to_pos(
+        c1h["v"],
+        quiet_bars=min(24, max(10, len(c1h["v"]) - 4)),
+        turn_mult=1.5,
+    )
+    if vz["ok"]:
+        score += 28
+        reasons.append(f"HACIM_0→+×{vz['ratio']:.1f}")
+    elif vz["turn"] and vol_ok:
+        score += 14
+        reasons.append(f"HACIM_DONUS×{vz['ratio']:.1f}")
+    if vz_1h["ok"] or (vz_1h["turn"] and vz_1h["ratio"] >= 1.5):
+        score += 10
+        reasons.append(f"HACIM_1h_0→+×{vz_1h['ratio']:.1f}")
+    if vol_ok and vol_rise >= 2.0:
+        score += 6
+
+    if chg24 <= 1.0:
+        score += 16
+        reasons.append("FIYAT_HENUZ_YATAY")
+    elif chg24 <= early_max:
+        score += 18
+        reasons.append(f"ERKEN_RALLI(+%{chg24:.1f})")
+    elif chg24 <= early_max + 3:
+        score += 8
+        reasons.append(f"ERKEN_SINIR(+%{chg24:.1f})")
+    else:
+        score -= 20
+        reasons.append("FIYAT_COK_GITMIS")
+
+    if from_low_pct <= 8:
+        score += 14
+        reasons.append(f"DIPTE_KALIYOR(%{from_low_pct:.1f})")
+    elif from_low_pct <= 12:
+        score += 8
+        reasons.append(f"DIP_YAKIN(%{from_low_pct:.1f})")
+    elif from_low_pct > 22:
+        score -= 15
+
+    high_30 = max(c1d["h"][-30:]) if len(c1d["h"]) >= 10 else max(c1d["h"])
+    room_pct = ((high_30 / price) - 1.0) * 100.0 if price > 0 else 0.0
+    min_room = float(pu.get("min_room_to_30d_high_pct") or 25.0)
+    if room_pct >= 60:
+        score += 16
+        reasons.append(f"UC_ALANI_30g(+%{room_pct:.0f})")
+    elif room_pct >= min_room:
+        score += 10
+        reasons.append(f"BOSLUK_30g(+%{room_pct:.0f})")
+    elif room_pct < 12:
+        score -= 12
+        reasons.append("TAVANA_YAKIN")
+
+    atr_now = atr(c1h["h"], c1h["l"], c1h["c"], 14)
+    atr_prev = None
+    if len(c1h["c"]) >= 40:
+        atr_prev = atr(c1h["h"][:-14], c1h["l"][:-14], c1h["c"][:-14], 14)
+    if atr_now and atr_prev and atr_prev > 0:
+        ratio = atr_now / atr_prev
+        if ratio >= 1.15:
+            score += 10
+            reasons.append("SIKISMA_KIRILIM")
+        elif ratio >= 1.05:
+            score += 5
+            reasons.append("VOL_GENISLIYOR")
+
+    if len(c1d["h"]) >= 30:
+        r7 = max(c1d["h"][-7:]) - min(c1d["l"][-7:])
+        r30 = max(c1d["h"][-30:]) - min(c1d["l"][-30:])
+        if r30 > 0 and (r7 / r30) <= 0.35 and vol_ok:
+            score += 8
+            reasons.append("TABAN_SIKISMA")
+
+    if c15 and len(c15["l"]) >= 20:
+        if min(c15["l"][-6:]) > min(c15["l"][-18:-6]) * 1.001:
+            score += 6
+            reasons.append("HL_YAPISI")
+    if rsi_1h is not None:
+        if 32 <= rsi_1h <= 55:
+            score += 8
+            reasons.append(f"RSI_UC_PENCERE({rsi_1h:.0f})")
+        elif rsi_1h > 65:
+            score -= 12
+
+    if len(c1d["v"]) >= 10:
+        quiet_days = c1d["v"][-8:-1]
+        today = c1d["v"][-1]
+        qd = sum(quiet_days) / len(quiet_days)
+        if qd > 0 and today >= qd * 1.4 and chg24 <= early_max + 2:
+            score += 8
+            reasons.append("GUNLUK_HACIM_UYANDI")
+
+    score = max(0.0, min(100.0, score))
+    t_lo = float(pu.get("target_low_pct") or 40.0)
+    t_hi = float(pu.get("target_high_pct") or 70.0)
+    upside = t_lo + (t_hi - t_lo) * (score / 100.0)
+    upside = min(max(upside, t_lo * 0.7), t_hi)
+    if room_pct < 20:
+        upside = min(upside, max(15.0, room_pct * 0.9))
+
+    is_uc = (
+        score >= 58
+        and chg24 <= early_max + 1.5
+        and from_low_pct <= 14
+        and (vz["ok"] or (vol_ok and vz["ratio"] >= 1.5) or vz_1h["ok"])
+        and room_pct >= min_room * 0.8
+    )
+    if is_uc:
+        reasons.insert(0, f"UC_POTANSIYEL(~%{upside:.0f})")
+
+    return {
+        "pump_score": round(score, 1),
+        "upside_est_pct": round(upside, 1),
+        "is_uc": is_uc,
+        "reasons": reasons,
+        "room_30d_pct": round(room_pct, 1),
+        "vol_zero_to_pos": vz,
+    }
 
 
 def btc_regime(cfg: dict[str, Any], tickers: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -608,31 +796,80 @@ def analyze_symbol(
     elif qv24 >= 300_000:
         score += 2
 
-    # Risk seviyeleri
+    # 10) UÇ POTANSİYEL (+50/+70 öngörü) — hacim 0→+ & erken ralli
+    pump = analyze_pump_upside(
+        price=price,
+        chg24=chg24,
+        c5=c5,
+        c15=c15,
+        c1h=c1h,
+        c1d=c1d,
+        from_low_pct=from_low_pct,
+        vol_ok=vol_ok,
+        vol_rise=vol_rise,
+        rsi_1h=rsi_1h,
+        cfg=cfg,
+    )
+    pump_score = float(pump["pump_score"])
+    upside_est = float(pump["upside_est_pct"])
+    is_uc = bool(pump["is_uc"])
+    layers["pump_score"] = pump_score
+    layers["upside_est_pct"] = upside_est
+    layers["room_30d_pct"] = pump.get("room_30d_pct")
+    layers["vol_0_to_pos"] = (pump.get("vol_zero_to_pos") or {}).get("ratio")
+    # Ana skora uç katkısı
+    score += min(18.0, pump_score * 0.18)
+    for pr in pump.get("reasons") or []:
+        if pr not in reasons:
+            reasons.append(pr)
+
+    # Risk seviyeleri — UC ise TP2 = tahmini uç
     swing = min(c1h["l"][-12:]) if len(c1h["l"]) >= 12 else min(c1h["l"])
     atr_v = atr(c1h["h"], c1h["l"], c1h["c"], 14)
     stop, tp1, tp2, rr = calc_risk_levels(price, swing, atr_v, cfg)
+    risk_cfg = cfg.get("risk") or {}
+    if risk_cfg.get("use_pump_tp", True) and upside_est >= 25:
+        tp2 = round(price * (1.0 + upside_est / 100.0), 8)
+        risk_amt = price - stop if stop else 0
+        if risk_amt > 0:
+            rr = round((tp1 - price) / risk_amt, 2)
     layers["atr_1h"] = round(atr_v, 8) if atr_v else None
 
     score = max(0.0, min(100.0, score))
-    min_al = float(early.get("min_score_al") or 62)
-    min_izle = float(early.get("min_score_izle") or 48)
+    min_al = float(early.get("min_score_al") or 60)
+    min_izle = float(early.get("min_score_izle") or 46)
+    min_pump = float(early.get("min_pump_score_al") or 55)
+    early_rally_max = float(early.get("early_rally_max_pct") or 5.0)
 
-    if already_late or from_low_pct > float(late.get("max_from_14d_low_pct") or 25):
+    if already_late or from_low_pct > float(late.get("max_from_14d_low_pct") or 28):
         action, phase = ("GEÇ", "rally_olmus") if score >= min_izle else ("GEÇ", "asiri_uzama")
+    elif (
+        score >= min_al
+        and vol_ok
+        and from_low_pct <= near_max * 1.35
+        and chg24 <= float(early.get("max_24h_change_pct") or 6) + 0.5
+        and (is_uc or pump_score >= min_pump * 0.85)
+    ):
+        action, phase = "AL", "uc_erken" if is_uc else "dip_erken"
     elif score >= min_al and vol_ok and from_low_pct <= near_max * 1.25:
         action, phase = "AL", "dip_erken"
-    elif score >= min_izle and (vol_ok or from_low_pct <= near_max):
+    elif is_uc and pump_score >= min_pump and chg24 <= early_rally_max + 1:
+        # klasik skor biraz düşük olsa bile uç setup AL
+        action, phase = "AL", "uc_setup"
+        score = max(score, min_al)
+    elif score >= min_izle and (vol_ok or from_low_pct <= near_max or pump_score >= 50):
         action, phase = "İZLE", "gelisiyor"
     else:
         action, phase = "YOK", "sinyal_yok"
 
     if action == "AL":
-        if not (vol_ok and from_low_pct <= near_max * 1.35):
-            action, phase = "İZLE", "eksik_onay"
-        elif rsi_1h is not None and rsi_1h > 58:
+        if not (vol_ok or (pump.get("vol_zero_to_pos") or {}).get("ok")):
+            action, phase = "İZLE", "eksik_hacim"
+        elif from_low_pct > near_max * 1.5:
+            action, phase = "İZLE", "dip_uzak"
+        elif rsi_1h is not None and rsi_1h > 60:
             action, phase = "İZLE", "rsi_sicak"
-        elif chg24 > float(early.get("max_24h_change_pct") or 8):
+        elif chg24 > float(early.get("max_24h_change_pct") or 6) + 2:
             action, phase = "GEÇ", "24s_kacmis"
         elif regime.get("block_al"):
             action, phase = "İZLE", "btc_rejim_bekle"
@@ -653,6 +890,9 @@ def analyze_symbol(
         tp1=tp1,
         tp2=tp2,
         risk_reward=rr,
+        pump_score=pump_score,
+        upside_est_pct=upside_est,
+        is_uc=is_uc and action == "AL",
     )
 
 
@@ -680,11 +920,13 @@ def telegram_send(token: str, chat_id: str, text: str, dry_run: bool = False) ->
 def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None = None) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     als = [r for r in rows if r.action == "AL"]
+    ucs = [r for r in als if r.is_uc]
     izles = [r for r in rows if r.action == "İZLE"]
     gec = [r for r in rows if r.action == "GEÇ"]
     lines = [
-        f"BINANCE DİP AL RADARI v2 · {now}",
-        f"Tarama: {len(rows)} aday | 🟢AL={len(als)} 🟡İZLE={len(izles)} 🔴GEÇ={len(gec)}",
+        f"BINANCE DİP AL RADARI v2.1 · {now}",
+        f"Tarama: {len(rows)} aday | 🟢AL={len(als)} 🚀UÇ={len(ucs)} "
+        f"🟡İZLE={len(izles)} 🔴GEÇ={len(gec)}",
     ]
     if regime:
         lines.append(
@@ -693,13 +935,25 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
         )
     lines.append("")
 
-    if als:
-        lines.append("═══ 🟢 AL (dipten erken) ═══")
-        for i, r in enumerate(als[:top], 1):
+    if ucs:
+        lines.append("═══ 🚀 UÇ POTANSİYEL (+50/+70 adayı) ═══")
+        for i, r in enumerate(sorted(ucs, key=lambda x: -x.pump_score)[:top], 1):
             lines.append(
-                f"{i:2d}. {r.base:<8} skor={r.score:5.1f}  "
-                f"%{r.change_24h_pct:+.1f}  ${r.price}  "
-                f"SL {r.stop}  TP1 {r.tp1}  RR {r.risk_reward}  "
+                f"{i:2d}. {r.base:<8} uç={r.pump_score:5.1f} →~%{r.upside_est_pct:.0f}  "
+                f"24s%{r.change_24h_pct:+.1f}  ${r.price}  "
+                f"SL {r.stop}  TP2 {r.tp2}  "
+                f"| {', '.join(r.reasons[:5])}"
+            )
+        lines.append("")
+
+    if als:
+        lines.append("═══ 🟢 AL (dipten / erken) ═══")
+        for i, r in enumerate(als[:top], 1):
+            tag = "🚀" if r.is_uc else "  "
+            lines.append(
+                f"{i:2d}.{tag}{r.base:<8} skor={r.score:5.1f} uç={r.pump_score:4.0f}  "
+                f"%{r.change_24h_pct:+.1f}  ~%{r.upside_est_pct:.0f}  "
+                f"SL {r.stop}  TP1 {r.tp1}  "
                 f"| {', '.join(r.reasons[:4])}"
             )
         lines.append("")
@@ -709,10 +963,12 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
 
     if izles:
         lines.append("── 🟡 İZLE ──")
-        for i, r in enumerate(izles[: min(8, top)], 1):
+        for i, r in enumerate(
+            sorted(izles, key=lambda x: (-x.pump_score, -x.score))[: min(8, top)], 1
+        ):
             lines.append(
-                f"{i:2d}. {r.base:<8} skor={r.score:5.1f}  %{r.change_24h_pct:+.1f}  "
-                f"| {', '.join(r.reasons[:4])}"
+                f"{i:2d}. {r.base:<8} skor={r.score:5.1f} uç={r.pump_score:4.0f}  "
+                f"%{r.change_24h_pct:+.1f}  | {', '.join(r.reasons[:4])}"
             )
         lines.append("")
 
@@ -728,24 +984,31 @@ def format_telegram(als: list[Analysis], regime: dict[str, Any] | None = None) -
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     if not als:
         return f"<b>⚪ Binance dip radar</b>\nAL yok.\n<i>{now}</i>"
-    lines = [f"<b>🟢 BINANCE DİP AL v2</b> · {len(als)} coin", f"<i>{now}</i>"]
+    ucs = [r for r in als if r.is_uc]
+    lines = [
+        f"<b>🟢 BINANCE DİP AL v2.1</b> · {len(als)} coin"
+        + (f" · 🚀{len(ucs)} uç" if ucs else ""),
+        f"<i>{now}</i>",
+    ]
     if regime:
         lines.append(
             f"BTC: %{regime.get('btc_change_24h', 0):+.2f} "
             f"({'düşüş rejimi' if regime.get('hostile') else 'OK'})"
         )
     lines.append("")
-    for r in als[:8]:
+    ordered = sorted(als, key=lambda r: (not r.is_uc, -r.pump_score, -r.score))
+    for r in ordered[:8]:
         fr = r.layers.get("funding")
         fr_s = f"{fr:.4%}" if isinstance(fr, float) else "-"
+        head = f"🚀 <b>{r.base}</b>" if r.is_uc else f"<b>{r.base}</b>"
         lines.append(
-            f"<b>{r.base}</b> skor <b>{r.score:.0f}</b> · %{r.change_24h_pct:+.1f}\n"
-            f"Fiyat: <code>{r.price}</code>\n"
+            f"{head} skor {r.score:.0f} · uç {r.pump_score:.0f} → ~%{r.upside_est_pct:.0f}\n"
+            f"24s %{r.change_24h_pct:+.1f} · <code>{r.price}</code>\n"
             f"🛑 SL <code>{r.stop}</code> · "
-            f"🎯 TP1 <code>{r.tp1}</code> · TP2 <code>{r.tp2}</code> · RR {r.risk_reward}\n"
+            f"🎯 TP1 <code>{r.tp1}</code> · TP2 <code>{r.tp2}</code>\n"
             f"Dip+{r.layers.get('from_nd_low_pct')}% · "
-            f"Vol×{r.layers.get('vol_rise_5m')} · RSI {r.layers.get('rsi_1h')} · "
-            f"Fund {fr_s}\n"
+            f"Vol0→+ {r.layers.get('vol_0_to_pos')} · "
+            f"RSI {r.layers.get('rsi_1h')} · Fund {fr_s}\n"
             f"{', '.join(r.reasons[:6])}\n"
         )
     return "\n".join(lines)
@@ -822,7 +1085,15 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
 
     print(f"[4/4] {len(results)} sonuç", flush=True)
     order = {"AL": 0, "İZLE": 1, "GEÇ": 2, "YOK": 3}
-    results.sort(key=lambda r: (order.get(r.action, 9), -r.score, -r.quote_volume_24h))
+    results.sort(
+        key=lambda r: (
+            order.get(r.action, 9),
+            0 if r.is_uc else 1,
+            -r.pump_score,
+            -r.score,
+            -r.quote_volume_24h,
+        )
+    )
     return results, regime
 
 
