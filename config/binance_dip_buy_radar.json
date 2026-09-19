@@ -1,5 +1,6 @@
 {
   "rest_base": "https://data-api.binance.vision",
+  "futures_base": "https://fapi.binance.com",
   "quote": "USDT",
   "workers": 20,
   "poll_seconds": 180,
@@ -26,6 +27,23 @@
     "max_already_up_24h_pct": 15.0,
     "max_rsi_1h": 70.0,
     "max_from_14d_low_pct": 25.0
+  },
+  "regime": {
+    "enabled": true,
+    "btc_dump_pct": -3.0,
+    "block_al_on_btc_dump": true,
+    "soft_penalty": 12
+  },
+  "futures": {
+    "enabled": true,
+    "neg_funding_bonus": 6,
+    "funding_threshold": -0.0001,
+    "oi_rise_bonus": 5
+  },
+  "risk": {
+    "stop_buffer_pct": 1.2,
+    "tp1_pct": 6.0,
+    "tp2_pct": 14.0
   },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
