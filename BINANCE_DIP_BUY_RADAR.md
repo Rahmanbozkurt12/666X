@@ -1,52 +1,40 @@
 # Binance Dip AL Radarı v2.1 — Uç potansiyel + al/sat
 
-**Hedef setup (AR tipi):** Hacim 0→+ geçmiş, fiyat henüz yatay veya sadece **+%3/+%5**, ama **+%50/+%70** uç potansiyeli yüksek.
+**Önemli:** Eski ~1500 satırlık dosya sadece radar. Al/sat için **bu repodaki güncel** `binance_dip_buy_radar.py` (~2200 satır) gerekir.
 
-## Ne tarıyor?
+## 1) API key
 
-| Analiz | Anlam |
-|--------|--------|
-| HACIM_0→+ | Sessiz tabandan hacim artıya döndü |
-| ERKEN_RALLI | 24s ≤ +%5 (kaçmamış) |
-| DIPTE_KALIYOR | 14g dibe hâlâ yakın |
-| UC_ALANI_30g | 30g high’a boşluk var |
-| TABAN_SIKISMA | Sıkışma → kırılım |
-| UC_POTANSIYEL | ~%40–70 tahmin |
+Dosyada `from __future__` **altında**:
 
-## Sinyaller
-
-- **🚀 UÇ** — +50/+70 adayı (öncelikli AL)
-- **🟢 AL** — dipten erken
-- **🟡 İZLE** — gelişiyor
-- **🔴 GEÇ** — zaten yükselmiş
-
-## Radar
-
-```powershell
-cd C:\Users\Rahman\OneDrive\Desktop\bot
-python binance_dip_buy_radar.py --once --dry-run --top 20
+```python
+BINANCE_API_KEY_HARDCODE = "senin_key"
+BINANCE_API_SECRET_HARDCODE = "senin_secret"
+LIVE_HARDCODE = True   # gerçek alım
+TRADE_HARDCODE = True  # AL bulununca al/sat
 ```
 
-## Gerçek / paper al-sat
-
-API key’lerini dosyada **`BINANCE_API_KEY_HARDCODE`** satırına yaz
-(**`from __future__` satırının üstüne yazma** — SyntaxError verir).
+## 2) Çalıştır
 
 ```powershell
 cd C:\Users\Rahman\OneDrive\Desktop\bot
 
-# PAPER (Binance'a emir gitmez)
-python binance_dip_buy_radar.py --once --trade
-
-# GERÇEK ALIM — --live ŞART
+# Gerçek alım
 python binance_dip_buy_radar.py --once --trade --live
+
+# veya çift tık
+.\AL_SAT_CALISTIR.bat
 ```
 
-Kurallar:
-- **AL** + güçlü **İZLE** (skor/uç eşiği üstü)
-- En fazla **10** açık pozisyon · USDT eşit bölünür
-- **SL** tam · **TP1** %50 · **TP2** kalanı
-- Key yazmak yetmez → **`--live`** olmadan gerçek emir yok
+Konsolda mutlaka: `[MODE] ⚠️ LIVE Binance spot`  
+`PAPER` görüyorsan Binance’ta alım olmaz → `LIVE_HARDCODE = True` yap.
 
-Konsolda şunu görmelisin: `[MODE] ⚠️ LIVE Binance spot`
-`[MODE] PAPER` görüyorsan Binance hesabında alım olmaz.
+## Ne alır / satar?
+
+| | |
+|--|--|
+| Alır | **AL** + güçlü **İZLE** (max 10 coin, USDT eşit bölünür) |
+| Satar | **SL** tam · **TP1** %50 · **TP2** kalanı |
+
+Binance API: **Enable Spot & Margin Trading** açık olsun; IP restrict varsa PC IP ekle.
+
+Pozisyon: `output/binance_dip_buy_positions.json`

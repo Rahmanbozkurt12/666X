@@ -58,7 +58,7 @@
     "use_pump_tp": true
   },
   "trade": {
-    "enabled": false,
+    "enabled": true,
     "max_positions": 10,
     "deploy_pct": 0.95,
     "min_order_usdt": 11.0,
