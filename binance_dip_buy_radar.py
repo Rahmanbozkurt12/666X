@@ -41,17 +41,17 @@ from typing import Any
 
 import requests
 
-# ---------------------------------------------------------------------------
-# BINANCE API — buraya kendi key'lerini yaz VEYA .env / ortam değişkeni kullan
-# (LIVE=1 olmadan gerçek emir ATILMAZ; boş bırakırsan env okunur)
-# ---------------------------------------------------------------------------
-BINANCE_API_KEY_HARDCODE = ""  # örn: "abc123..."
-BINANCE_API_SECRET_HARDCODE = ""  # örn: "xyz789..."
-
 try:
     import ccxt
 except ImportError:  # pragma: no cover
     ccxt = None  # type: ignore[assignment]
+
+# ---------------------------------------------------------------------------
+# BINANCE API KEY — SADECE BURAYA yaz (from __future__ satırının ÜSTÜNE yazma!)
+# LIVE=1 olmadan gerçek emir ATILMAZ. Boş bırakırsan env okunur.
+# ---------------------------------------------------------------------------
+BINANCE_API_KEY_HARDCODE = ""  # örn: "abc123..."
+BINANCE_API_SECRET_HARDCODE = ""  # örn: "xyz789..."
 
 # En az 15 CEX — dip radar Binance derin analiz + diğerlerinde hacim 0→+ onay
 MULTI_CEX_IDS: list[str] = [

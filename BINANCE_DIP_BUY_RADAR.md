@@ -29,7 +29,9 @@ python binance_dip_buy_radar.py --once --dry-run --top 20
 
 ## Gerçek / paper al-sat
 
-API key’lerini dosyanın üstündeki `BINANCE_API_KEY_HARDCODE` / `BINANCE_API_SECRET_HARDCODE` alanlarına yaz **veya** ortam değişkeni kullan:
+API key’lerini dosyada **`BINANCE_API_KEY_HARDCODE`** satırına yaz
+(**`from __future__` satırının üstüne yazma** — SyntaxError verir)
+veya ortam değişkeni kullan:
 
 ```powershell
 # Paper (emir atmaz) — max 10 coin, USDT eşit bölünür, SL/TP1/TP2
