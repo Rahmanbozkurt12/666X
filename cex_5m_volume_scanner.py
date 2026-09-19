@@ -34,8 +34,53 @@ from typing import Any
 import ccxt
 import requests
 
-ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = ROOT / "config" / "cex_5m_scanner.json"
+DEFAULT_CONFIG: dict[str, Any] = {
+    "timeframe": "5m",
+    "ohlcv_limit": 36,
+    "max_symbols_per_exchange": 100,
+    "min_quote_volume_usdt": 150000,
+    "workers": 16,
+    "poll_seconds": 300,
+    "buy_min_exchanges": 3,
+    "buy_min_confluence_pct": 50,
+    "volume_rise_mult": 1.45,
+    "near_bottom_pct": 2.5,
+    "quote_priority": ["USDT", "USD", "USDC", "KRW"],
+    "stable_bases": [
+        "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "KRW",
+    ],
+    "exchanges": {
+        "binance": {"enabled": True, "id": "binance"},
+        "coinbase": {"enabled": True, "id": "coinbase"},
+        "upbit": {"enabled": True, "id": "upbit"},
+        "okx": {"enabled": True, "id": "okx"},
+        "bybit": {"enabled": True, "id": "bybit"},
+        "bitget": {"enabled": True, "id": "bitget"},
+        "gate": {"enabled": True, "id": "gate"},
+        "kucoin": {"enabled": True, "id": "kucoin"},
+        "bitmex": {"enabled": False, "id": "bitmex", "note": "opsiyonel"},
+        "robinhood": {"enabled": False, "id": None, "note": "Public API yok"},
+        "coinspace": {"enabled": False, "id": None, "note": "Cüzdan"},
+        "bitxex": {"enabled": False, "id": None, "note": "CCXT yok"},
+    },
+}
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CONFIG_NAME = "cex_5m_scanner.json"
+
+
+def find_project_root() -> Path:
+    here = SCRIPT_DIR
+    for cand in [here, here.parent, Path.cwd(), Path.cwd().parent]:
+        if (cand / "config" / CONFIG_NAME).exists() or (cand / CONFIG_NAME).exists():
+            return cand
+    if here.name.lower() == "output":
+        return here.parent
+    return here
+
+
+ROOT = find_project_root()
+CONFIG_PATH = ROOT / "config" / CONFIG_NAME
 OUTPUT_PATH = ROOT / "output" / "cex_5m_volume_signals.json"
 STATE_PATH = ROOT / "output" / "cex_5m_alert_state.json"
 
@@ -43,6 +88,43 @@ STATE_PATH = ROOT / "output" / "cex_5m_alert_state.json"
 BINANCE_REST = "https://data-api.binance.vision"
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "cex-5m-volume-scanner/1.0"})
+
+
+def resolve_config_path(cli_path: str | None = None) -> Path | None:
+    candidates: list[Path] = []
+    if cli_path:
+        candidates.append(Path(cli_path))
+    candidates.extend(
+        [
+            CONFIG_PATH,
+            ROOT / CONFIG_NAME,
+            SCRIPT_DIR / "config" / CONFIG_NAME,
+            SCRIPT_DIR / CONFIG_NAME,
+            SCRIPT_DIR.parent / "config" / CONFIG_NAME,
+            Path.cwd() / "config" / CONFIG_NAME,
+            Path.cwd() / CONFIG_NAME,
+        ]
+    )
+    seen: set[str] = set()
+    for p in candidates:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.is_file():
+            return p
+    return None
+
+
+def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
+    path = resolve_config_path(cli_path)
+    if path is not None:
+        return load_json(path), str(path)
+    print(
+        f"[uyarı] config/{CONFIG_NAME} bulunamadı → gömülü varsayılan kullanılıyor",
+        file=sys.stderr,
+    )
+    return dict(DEFAULT_CONFIG), "(embedded-default)"
 
 
 @dataclass
@@ -686,14 +768,13 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="Tek tarama")
     parser.add_argument("--dry-run", action="store_true", help="Telegram gönderme")
     parser.add_argument("--top", type=int, default=12, help="Konsolda gösterilecek satır")
-    parser.add_argument("--config", default=str(CONFIG_PATH))
+    parser.add_argument("--config", default=None, help="config JSON yolu (opsiyonel)")
     parser.add_argument("--no-telegram", action="store_true")
     args = parser.parse_args()
 
-    cfg_path = Path(args.config)
-    if not cfg_path.exists():
-        raise SystemExit(f"config yok: {cfg_path}")
-    cfg = load_json(cfg_path)
+    cfg, cfg_src = load_config(args.config)
+    print(f"[config] {cfg_src}")
+    print(f"[output] {OUTPUT_PATH}")
 
     token = env("TELEGRAM_BOT_TOKEN")
     chat_id = env("TELEGRAM_CHAT_ID")
