@@ -1,4 +1,4 @@
-# Binance Dip AL Radarı v2.1 — Uç potansiyel
+# Binance Dip AL Radarı v2.1 — Uç potansiyel + al/sat
 
 **Hedef setup (AR tipi):** Hacim 0→+ geçmiş, fiyat henüz yatay veya sadece **+%3/+%5**, ama **+%50/+%70** uç potansiyeli yüksek.
 
@@ -18,13 +18,39 @@
 - **🚀 UÇ** — +50/+70 adayı (öncelikli AL)
 - **🟢 AL** — dipten erken
 - **🟡 İZLE** — gelişiyor
-- **🔴 GEÇ** — zaten yükselmiş (AR +%46 gibi)
+- **🔴 GEÇ** — zaten yükselmiş
 
-## Çalıştır
+## Radar
 
 ```powershell
 cd C:\Users\Rahman\OneDrive\Desktop\bot
 python binance_dip_buy_radar.py --once --dry-run --top 20
 ```
+
+## Gerçek / paper al-sat
+
+API key’lerini dosyanın üstündeki `BINANCE_API_KEY_HARDCODE` / `BINANCE_API_SECRET_HARDCODE` alanlarına yaz **veya** ortam değişkeni kullan:
+
+```powershell
+# Paper (emir atmaz) — max 10 coin, USDT eşit bölünür, SL/TP1/TP2
+python binance_dip_buy_radar.py --once --trade --dry-run --skip-multi-cex --fast
+
+# Canlı (gerçek para)
+# LIVE=1 + key gerekli
+$env:LIVE="1"
+$env:BINANCE_API_KEY="..."
+$env:BINANCE_API_SECRET="..."
+python binance_dip_buy_radar.py --once --trade
+```
+
+Kurallar:
+- Sadece **AL** (UÇ öncelikli)
+- En fazla **10** açık pozisyon
+- Serbest USDT’yi bu turda alınacak coine eşit böler
+- **SL** tam çıkış · **TP1** %50 sat · **TP2** kalanı
+- Varsayılan **DRY-RUN**; canlı için `LIVE=1`
+
+Pozisyon: `output/binance_dip_buy_positions.json`  
+İşlem log: `output/binance_dip_buy_trades.jsonl`
 
 Config yoksa gömülü varsayılanla çalışır.

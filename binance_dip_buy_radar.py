@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
 """
-Binance TÜM USDT spot — dipten erken AL radarı (v2.1).
+Binance TÜM USDT spot — dipten erken AL radarı (v2.1) + gerçek al/sat.
 
 Özellikle aranan setup (AR tipi):
   • Hacim sessizken 0→+ dönüyor
   • Fiyat henüz yükselmemiş VEYA sadece +3/+5
   • Ama uç potansiyeli +50/+70 bandında (pump_score)
 
+Al/sat kuralları (--trade):
+  • Sadece action=AL (UÇ öncelikli) coinleri alır
+  • En fazla max_positions (varsayılan 10) açık pozisyon
+  • Serbest USDT bakiyeyi bu turda alınacak coine EŞİT böler
+  • Satış: SL tam çıkış · TP1 %50 · TP2 kalanı
+  • Varsayılan DRY-RUN. Canlı: LIVE=1 + API key
+
 Kullanım:
   python3 binance_dip_buy_radar.py --once --dry-run
-  python3 binance_dip_buy_radar.py --once --top 20
+  python3 binance_dip_buy_radar.py --once --trade --dry-run
+  LIVE=1 python3 binance_dip_buy_radar.py --once --trade
   python3 binance_dip_buy_radar.py --backtest --backtest-symbols 40
-  python3 binance_dip_buy_radar.py
+  python3 binance_dip_buy_radar.py --trade
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
+import math
 import os
 import sys
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -28,6 +40,13 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+# ---------------------------------------------------------------------------
+# BINANCE API — buraya kendi key'lerini yaz VEYA .env / ortam değişkeni kullan
+# (LIVE=1 olmadan gerçek emir ATILMAZ; boş bırakırsan env okunur)
+# ---------------------------------------------------------------------------
+BINANCE_API_KEY_HARDCODE = ""  # örn: "abc123..."
+BINANCE_API_SECRET_HARDCODE = ""  # örn: "xyz789..."
 
 try:
     import ccxt
@@ -108,6 +127,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tp2_pct": 14.0,
         "use_pump_tp": True,
     },
+    "trade": {
+        "enabled": False,
+        "max_positions": 10,
+        "deploy_pct": 0.95,
+        "min_order_usdt": 11.0,
+        "tp1_sell_pct": 0.50,
+        "prefer_uc": True,
+        "trade_base": "https://api.binance.com",
+        "recv_window": 5000,
+    },
     "multi_cex": {
         "enabled": True,
         "ids": list(MULTI_CEX_IDS),
@@ -149,6 +178,8 @@ OUTPUT_DIR = ROOT / "output"
 OUTPUT_PATH = OUTPUT_DIR / "binance_dip_buy_signals.json"
 STATE_PATH = OUTPUT_DIR / "binance_dip_buy_state.json"
 BACKTEST_PATH = OUTPUT_DIR / "binance_dip_buy_backtest.json"
+POS_PATH = OUTPUT_DIR / "binance_dip_buy_positions.json"
+TRADE_LOG = OUTPUT_DIR / "binance_dip_buy_trades.jsonl"
 
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.1"})
@@ -204,7 +235,17 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
         # gömülü defaults ile birleştir (eksik anahtarlar)
         cfg = dict(DEFAULT_CONFIG)
         cfg.update(raw)
-        for k in ("early_buy", "late_reject", "regime", "futures", "risk", "ohlcv", "pump_upside", "multi_cex"):
+        for k in (
+            "early_buy",
+            "late_reject",
+            "regime",
+            "futures",
+            "risk",
+            "ohlcv",
+            "pump_upside",
+            "multi_cex",
+            "trade",
+        ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
                 merged.update(raw[k])
@@ -1400,6 +1441,467 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
     return results, regime
 
 
+# ---------------------------------------------------------------------------
+# Binance spot al/sat (signed) — max 10 pozisyon, USDT eşit bölünür
+# ---------------------------------------------------------------------------
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def log_trade(row: dict[str, Any]) -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with TRADE_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def resolve_api_keys() -> tuple[str, str]:
+    """Env öncelikli; yoksa dosyadaki HARDCODE alanları."""
+    key = env("BINANCE_API_KEY") or BINANCE_API_KEY_HARDCODE.strip()
+    secret = env("BINANCE_API_SECRET") or BINANCE_API_SECRET_HARDCODE.strip()
+    return key or "", secret or ""
+
+
+def signed_request(
+    method: str,
+    trade_base: str,
+    path: str,
+    api_key: str,
+    api_secret: str,
+    params: dict[str, Any] | None = None,
+    recv_window: int = 5000,
+) -> Any:
+    params = dict(params or {})
+    params["timestamp"] = int(time.time() * 1000)
+    params["recvWindow"] = recv_window
+    query = urllib.parse.urlencode(params, doseq=True)
+    sig = hmac.new(api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+    url = f"{trade_base}{path}?{query}&signature={sig}"
+    headers = {"X-MBX-APIKEY": api_key}
+    if method == "GET":
+        r = HTTP.get(url, headers=headers, timeout=30)
+    elif method == "POST":
+        r = HTTP.post(url, headers=headers, timeout=30)
+    elif method == "DELETE":
+        r = HTTP.delete(url, headers=headers, timeout=30)
+    else:
+        raise ValueError(method)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Binance {r.status_code}: {r.text[:400]}")
+    return r.json()
+
+
+def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
+    info = get_json(f"{rest_base}/api/v3/exchangeInfo")
+    out: dict[str, dict[str, float]] = {}
+    for s in info.get("symbols", []):
+        sym = s["symbol"]
+        step = min_qty = min_notional = 0.0
+        for f in s.get("filters", []):
+            if f.get("filterType") == "LOT_SIZE":
+                step = float(f["stepSize"])
+                min_qty = float(f["minQty"])
+            elif f.get("filterType") in {"MIN_NOTIONAL", "NOTIONAL"}:
+                min_notional = float(f.get("minNotional") or f.get("notional") or 0)
+        out[sym] = {"stepSize": step, "minQty": min_qty, "minNotional": min_notional}
+    return out
+
+
+def round_step(qty: float, step: float) -> float:
+    if step <= 0:
+        return qty
+    precision = max(0, int(round(-math.log10(step)))) if step < 1 else 0
+    floored = math.floor(qty / step) * step
+    return float(f"{floored:.{precision}f}")
+
+
+def get_spot_price(rest_base: str, symbol: str) -> float:
+    t = get_json(f"{rest_base}/api/v3/ticker/price", {"symbol": symbol})
+    return float(t["price"])
+
+
+class BinanceAccount:
+    def __init__(self, cfg: dict[str, Any], live: bool):
+        trade_cfg = cfg.get("trade") or {}
+        self.cfg = cfg
+        self.live = live
+        self.api_key, self.api_secret = resolve_api_keys()
+        self.trade_base = trade_cfg.get("trade_base") or "https://api.binance.com"
+        self.rest_base = cfg.get("rest_base") or "https://data-api.binance.vision"
+        self.recv = int(trade_cfg.get("recv_window") or 5000)
+        self.filters = load_lot_filters(self.rest_base)
+        self._paper_usdt = float(env("PAPER_USDT") or 1000)
+        self._paper_balances: dict[str, float] = {"USDT": self._paper_usdt}
+
+        if self.live and not (self.api_key and self.api_secret):
+            raise SystemExit(
+                "LIVE=1 için BINANCE_API_KEY + BINANCE_API_SECRET gerekli "
+                "(env veya dosyadaki HARDCODE alanları)"
+            )
+
+    def free_usdt(self) -> float:
+        if not self.live:
+            return float(self._paper_balances.get("USDT", 0))
+        acc = signed_request(
+            "GET",
+            self.trade_base,
+            "/api/v3/account",
+            self.api_key,
+            self.api_secret,
+            recv_window=self.recv,
+        )
+        for b in acc.get("balances", []):
+            if b.get("asset") == "USDT":
+                return float(b.get("free") or 0)
+        return 0.0
+
+    def market_buy_quote(self, symbol: str, quote_usdt: float) -> dict[str, Any]:
+        price = get_spot_price(self.rest_base, symbol)
+        if not self.live:
+            qty = quote_usdt / price if price > 0 else 0
+            base = symbol.replace("USDT", "")
+            self._paper_balances["USDT"] = self._paper_balances.get("USDT", 0) - quote_usdt
+            self._paper_balances[base] = self._paper_balances.get(base, 0) + qty
+            return {
+                "symbol": symbol,
+                "side": "BUY",
+                "status": "FILLED",
+                "price": price,
+                "executedQty": str(qty),
+                "cummulativeQuoteQty": str(quote_usdt),
+                "paper": True,
+            }
+        return signed_request(
+            "POST",
+            self.trade_base,
+            "/api/v3/order",
+            self.api_key,
+            self.api_secret,
+            {
+                "symbol": symbol,
+                "side": "BUY",
+                "type": "MARKET",
+                "quoteOrderQty": f"{quote_usdt:.2f}",
+            },
+            recv_window=self.recv,
+        )
+
+    def market_sell_qty(self, symbol: str, qty: float) -> dict[str, Any]:
+        filt = self.filters.get(symbol) or {}
+        step = float(filt.get("stepSize") or 0)
+        qty = round_step(qty, step) if step else qty
+        if qty <= 0:
+            raise RuntimeError(f"qty=0 {symbol}")
+        price = get_spot_price(self.rest_base, symbol)
+        if not self.live:
+            base = symbol.replace("USDT", "")
+            have = self._paper_balances.get(base, 0)
+            qty = min(qty, have)
+            self._paper_balances[base] = have - qty
+            self._paper_balances["USDT"] = self._paper_balances.get("USDT", 0) + qty * price
+            return {
+                "symbol": symbol,
+                "side": "SELL",
+                "status": "FILLED",
+                "price": price,
+                "executedQty": str(qty),
+                "cummulativeQuoteQty": str(qty * price),
+                "paper": True,
+            }
+        step = float(filt.get("stepSize") or 0.0001)
+        precision = max(0, int(round(-math.log10(step)))) if step < 1 else 0
+        qstr = f"{qty:.{precision}f}"
+        return signed_request(
+            "POST",
+            self.trade_base,
+            "/api/v3/order",
+            self.api_key,
+            self.api_secret,
+            {
+                "symbol": symbol,
+                "side": "SELL",
+                "type": "MARKET",
+                "quantity": qstr,
+            },
+            recv_window=self.recv,
+        )
+
+
+def load_positions() -> dict[str, Any]:
+    if POS_PATH.exists():
+        return load_json(POS_PATH)
+    return {"positions": {}, "updated_at": None}
+
+
+def save_positions(state: dict[str, Any]) -> None:
+    state["updated_at"] = now_iso()
+    save_json(POS_PATH, state)
+
+
+def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
+    """SL / TP1 / TP2 satışları."""
+    notes: list[str] = []
+    positions: dict[str, Any] = state.get("positions") or {}
+    trade_cfg = cfg.get("trade") or {}
+    tp1_pct = float(trade_cfg.get("tp1_sell_pct") or 0.5)
+    rest = account.rest_base
+    closed: list[str] = []
+
+    for base, pos in list(positions.items()):
+        symbol = pos["symbol"]
+        try:
+            price = get_spot_price(rest, symbol)
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"price fail {symbol}: {exc}")
+            continue
+        entry = float(pos["entry"])
+        stop = float(pos["stop"])
+        tp1 = float(pos["tp1"])
+        tp2 = float(pos["tp2"])
+        qty = float(pos["qty"])
+        sold_tp1 = bool(pos.get("sold_tp1"))
+
+        if price <= stop:
+            try:
+                order = account.market_sell_qty(symbol, qty)
+                fill_qty = float(order.get("executedQty") or qty)
+                notes.append(f"🛑 SL SAT {base} @ {price} qty={fill_qty}")
+                log_trade(
+                    {
+                        "ts": now_iso(),
+                        "action": "SELL_SL",
+                        "base": base,
+                        "symbol": symbol,
+                        "price": price,
+                        "qty": fill_qty,
+                        "entry": entry,
+                        "pnl_pct": round((price / entry - 1) * 100, 3),
+                        "live": account.live,
+                        "order": order,
+                    }
+                )
+                closed.append(base)
+            except Exception as exc:  # noqa: BLE001
+                notes.append(f"SL fail {base}: {exc}")
+            continue
+
+        if price >= tp1 and not sold_tp1:
+            sell_qty = qty * tp1_pct
+            try:
+                order = account.market_sell_qty(symbol, sell_qty)
+                fill_qty = float(order.get("executedQty") or sell_qty)
+                pos["qty"] = max(0.0, qty - fill_qty)
+                pos["sold_tp1"] = True
+                notes.append(f"🎯 TP1 SAT %{tp1_pct * 100:.0f} {base} @ {price}")
+                log_trade(
+                    {
+                        "ts": now_iso(),
+                        "action": "SELL_TP1",
+                        "base": base,
+                        "symbol": symbol,
+                        "price": price,
+                        "qty": fill_qty,
+                        "entry": entry,
+                        "pnl_pct": round((price / entry - 1) * 100, 3),
+                        "live": account.live,
+                        "order": order,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                notes.append(f"TP1 fail {base}: {exc}")
+            continue
+
+        if price >= tp2:
+            try:
+                order = account.market_sell_qty(symbol, qty)
+                fill_qty = float(order.get("executedQty") or qty)
+                notes.append(f"🏁 TP2 SAT {base} @ {price} qty={fill_qty}")
+                log_trade(
+                    {
+                        "ts": now_iso(),
+                        "action": "SELL_TP2",
+                        "base": base,
+                        "symbol": symbol,
+                        "price": price,
+                        "qty": fill_qty,
+                        "entry": entry,
+                        "pnl_pct": round((price / entry - 1) * 100, 3),
+                        "live": account.live,
+                        "order": order,
+                    }
+                )
+                closed.append(base)
+            except Exception as exc:  # noqa: BLE001
+                notes.append(f"TP2 fail {base}: {exc}")
+
+    for b in closed:
+        positions.pop(b, None)
+    state["positions"] = positions
+    return notes
+
+
+def manage_entries(
+    account: BinanceAccount,
+    state: dict[str, Any],
+    rows: list[Analysis],
+    cfg: dict[str, Any],
+) -> list[str]:
+    """AL / UÇ sinyallerini al — max 10, bakiyeyi eşit böl."""
+    notes: list[str] = []
+    positions: dict[str, Any] = state.get("positions") or {}
+    trade_cfg = cfg.get("trade") or {}
+    max_pos = int(trade_cfg.get("max_positions") or 10)
+    min_order = float(trade_cfg.get("min_order_usdt") or 11)
+    deploy = float(trade_cfg.get("deploy_pct") or 0.95)
+    prefer_uc = bool(trade_cfg.get("prefer_uc", True))
+
+    slots = max_pos - len(positions)
+    if slots <= 0:
+        notes.append(f"pozisyon dolu ({len(positions)}/{max_pos})")
+        return notes
+
+    cands = [
+        r
+        for r in rows
+        if r.action == "AL" and r.base not in positions and r.stop and r.tp1 and r.tp2
+    ]
+    if prefer_uc:
+        cands.sort(key=lambda r: (0 if r.is_uc else 1, -r.pump_score, -r.score))
+    else:
+        cands.sort(key=lambda r: (-r.pump_score, -r.score))
+    cands = cands[:slots]
+    if not cands:
+        notes.append("yeni AL aday yok")
+        return notes
+
+    free = account.free_usdt()
+    budget = free * deploy
+    per = budget / len(cands)
+    if per < min_order:
+        n = int(budget // min_order)
+        if n <= 0:
+            notes.append(f"USDT yetersiz free={free:.2f} (min {min_order})")
+            return notes
+        cands = cands[:n]
+        per = budget / len(cands)
+
+    notes.append(
+        f"AL planı: {len(cands)} coin × ~{per:.2f} USDT "
+        f"(free={free:.2f}, max={max_pos})"
+    )
+
+    for sig in cands:
+        symbol = sig.symbol
+        filt = account.filters.get(symbol) or {}
+        min_notional = float(filt.get("minNotional") or min_order)
+        quote = max(per, min_notional)
+        if account.free_usdt() < quote:
+            notes.append(f"bakiye bitti, {sig.base} atlandı")
+            break
+        try:
+            order = account.market_buy_quote(symbol, quote)
+            fill_quote = float(order.get("cummulativeQuoteQty") or quote)
+            fill_qty = float(order.get("executedQty") or 0)
+            px = float(order.get("price") or 0)
+            if fill_qty <= 0 and px > 0:
+                fill_qty = fill_quote / px
+            if fill_qty <= 0:
+                px = get_spot_price(account.rest_base, symbol)
+                fill_qty = fill_quote / px
+            entry = fill_quote / fill_qty if fill_qty else get_spot_price(account.rest_base, symbol)
+            positions[sig.base] = {
+                "symbol": symbol,
+                "entry": entry,
+                "qty": fill_qty,
+                "stop": sig.stop,
+                "tp1": sig.tp1,
+                "tp2": sig.tp2,
+                "score": sig.score,
+                "pump_score": sig.pump_score,
+                "is_uc": sig.is_uc,
+                "sold_tp1": False,
+                "opened_at": now_iso(),
+                "reasons": sig.reasons[:8],
+            }
+            tag = "🚀" if sig.is_uc else "🟢"
+            notes.append(
+                f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
+                f"SL {sig.stop} TP1 {sig.tp1} TP2 {sig.tp2}"
+            )
+            log_trade(
+                {
+                    "ts": now_iso(),
+                    "action": "BUY",
+                    "base": sig.base,
+                    "symbol": symbol,
+                    "price": entry,
+                    "qty": fill_qty,
+                    "quote": fill_quote,
+                    "stop": sig.stop,
+                    "tp1": sig.tp1,
+                    "tp2": sig.tp2,
+                    "score": sig.score,
+                    "pump_score": sig.pump_score,
+                    "is_uc": sig.is_uc,
+                    "live": account.live,
+                    "order": {
+                        k: order.get(k)
+                        for k in ("orderId", "status", "paper", "executedQty")
+                        if k in order
+                    },
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"AL fail {sig.base}: {exc}")
+
+    state["positions"] = positions
+    return notes
+
+
+def print_portfolio(account: BinanceAccount, state: dict[str, Any], max_pos: int = 10) -> None:
+    positions = state.get("positions") or {}
+    print(f"\n═══ PORTFÖY ({len(positions)}/{max_pos}) · USDT free={account.free_usdt():.2f} ═══")
+    if not positions:
+        print("  (boş)")
+        return
+    for base, pos in positions.items():
+        try:
+            px = get_spot_price(account.rest_base, pos["symbol"])
+        except Exception:  # noqa: BLE001
+            px = float(pos["entry"])
+        entry = float(pos["entry"])
+        pnl = (px / entry - 1) * 100
+        uc = "🚀" if pos.get("is_uc") else "  "
+        print(
+            f"  {uc}{base:<8} qty={float(pos['qty']):.6g}  entry={entry:.6g}  "
+            f"now={px:.6g}  PnL%{pnl:+.2f}  "
+            f"SL {pos['stop']}  TP1 {pos['tp1']}  TP2 {pos['tp2']}"
+            f"{'  [TP1✓]' if pos.get('sold_tp1') else ''}"
+        )
+
+
+def run_trade_cycle(
+    account: BinanceAccount,
+    rows: list[Analysis],
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Exit kontrolü → AL girişleri → pozisyon kaydı."""
+    state = load_positions()
+    print("\n[exit] açık pozisyonlar kontrol…", flush=True)
+    for note in manage_exits(account, state, cfg):
+        print(" ", note)
+    save_positions(state)
+
+    print("\n[entry] AL / UÇ alımlar…", flush=True)
+    for note in manage_entries(account, state, rows, cfg):
+        print(" ", note)
+    save_positions(state)
+
+    max_pos = int((cfg.get("trade") or {}).get("max_positions") or 10)
+    print_portfolio(account, state, max_pos=max_pos)
+    return state
+
+
 def run_backtest(cfg: dict[str, Any], n_symbols: int = 40, hold_hours: int = 12) -> dict[str, Any]:
     """
     Basit ileriye dönük test: son ~10 günde 1h mumlarda
@@ -1484,9 +1986,9 @@ def run_backtest(cfg: dict[str, Any], n_symbols: int = 40, hold_hours: int = 12)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Binance dipten erken AL radarı v2")
+    parser = argparse.ArgumentParser(description="Binance dipten erken AL radarı v2 + al/sat")
     parser.add_argument("--once", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="Emir atma (paper) / telegram dry")
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument("--top", type=int, default=15)
     parser.add_argument("--config", default=None)
@@ -1496,6 +1998,12 @@ def main() -> int:
     parser.add_argument("--backtest-hold", type=int, default=12)
     parser.add_argument("--skip-multi-cex", action="store_true", help="Sadece Binance (hızlı)")
     parser.add_argument("--fast", action="store_true", help="Her CEX'te az sembol (test)")
+    parser.add_argument(
+        "--trade",
+        action="store_true",
+        help="AL sinyallerinde Binance spot al/sat (varsayılan paper; LIVE=1 ile gerçek)",
+    )
+    parser.add_argument("--no-trade", action="store_true", help="Al/sat kapalı (sadece radar)")
     args = parser.parse_args()
 
     cfg, cfg_src = load_config(args.config)
@@ -1516,11 +2024,28 @@ def main() -> int:
         run_backtest(cfg, n_symbols=args.backtest_symbols, hold_hours=args.backtest_hold)
         return 0
 
+    # --- trade mode ---
+    trade_cfg = cfg.setdefault("trade", dict(DEFAULT_CONFIG["trade"]))
+    want_trade = bool(args.trade or trade_cfg.get("enabled")) and not args.no_trade
+    live_env = (env("LIVE") or "0") == "1"
+    trade_live = bool(want_trade and live_env and not args.dry_run)
+    account: BinanceAccount | None = None
+    if want_trade:
+        if live_env and args.dry_run:
+            print("[info] --dry-run LIVE'ı eziyor → paper trade")
+        if trade_live:
+            print("[MODE] ⚠️  LIVE Binance spot — gerçek para")
+        else:
+            print("[MODE] DRY-RUN / PAPER trade — gerçek emir YOK")
+        account = BinanceAccount(cfg, live=trade_live)
+        print(f"[account] USDT free ≈ {account.free_usdt():.2f}")
+        print(f"[positions] {POS_PATH}")
+
     token = env("TELEGRAM_BOT_TOKEN")
     chat_id = env("TELEGRAM_CHAT_ID")
-    dry = bool(args.dry_run) or args.no_telegram or not (token and chat_id)
-    if dry and not args.dry_run and not args.no_telegram:
-        print("[info] Telegram env yok → dry-run", file=sys.stderr)
+    tg_dry = bool(args.dry_run) or args.no_telegram or not (token and chat_id)
+    if tg_dry and not args.dry_run and not args.no_telegram:
+        print("[info] Telegram env yok → telegram dry-run", file=sys.stderr)
 
     poll = int(cfg.get("poll_seconds") or 180)
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {"alerted": {}}
@@ -1531,10 +2056,22 @@ def main() -> int:
         visible = [r for r in rows if r.action != "YOK"]
         print("\n" + format_report(visible, args.top, regime) + "\n")
 
+        pos_state: dict[str, Any] | None = None
+        if want_trade and account is not None:
+            try:
+                pos_state = run_trade_cycle(account, rows, cfg)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[trade HATA] {exc}", file=sys.stderr)
+
         payload = {
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "elapsed_sec": round(time.time() - t0, 1),
             "regime": regime,
+            "trade": {
+                "enabled": want_trade,
+                "live": trade_live,
+                "open_positions": len((pos_state or {}).get("positions") or {}) if pos_state else None,
+            },
             "counts": {
                 a: sum(1 for r in rows if r.action == a) for a in ("AL", "İZLE", "GEÇ", "YOK")
             },
@@ -1547,7 +2084,7 @@ def main() -> int:
         alert_rows = [r for r in als if r.base in fresh]
         if alert_rows and not args.no_telegram:
             msg = format_telegram(alert_rows, regime)
-            if telegram_send(token or "", chat_id or "", msg, dry_run=dry):
+            if telegram_send(token or "", chat_id or "", msg, dry_run=tg_dry):
                 alerted = state.setdefault("alerted", {})
                 now = datetime.now(timezone.utc).isoformat()
                 for r in alert_rows:

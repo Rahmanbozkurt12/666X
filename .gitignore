@@ -5,6 +5,8 @@ output/cex_5m_volume_signals.json
 output/binance_dip_buy_state.json
 output/binance_dip_buy_signals.json
 output/binance_dip_buy_backtest.json
+output/binance_dip_buy_positions.json
+output/binance_dip_buy_trades.jsonl
 output/pro_cex_radar_signals.json
 output/pro_cex_radar_state.json
 output/pro_cex_radar_backtest.json
