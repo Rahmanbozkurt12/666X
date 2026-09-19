@@ -29,7 +29,7 @@
   },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
-    "RLUSD", "USDE", "USD1", "XUSD"
+    "RLUSD", "USDE", "USD1", "XUSD", "U", "USD0", "USDD"
   ],
   "skip_bases": [
     "WBTC", "WETH", "BTCB", "WBETH", "BETH", "STETH", "WSTETH", "RLUSD", "XAUT", "PAXG"
