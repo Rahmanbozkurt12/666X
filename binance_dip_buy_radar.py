@@ -18,6 +18,7 @@ Kullanım:
   python3 binance_dip_buy_radar.py --once --dry-run
   python3 binance_dip_buy_radar.py --once --trade --dry-run
   LIVE=1 python3 binance_dip_buy_radar.py --once --trade
+  python3 binance_dip_buy_radar.py --once --trade --live
   python3 binance_dip_buy_radar.py --backtest --backtest-symbols 40
   python3 binance_dip_buy_radar.py --trade
 """
@@ -48,7 +49,8 @@ except ImportError:  # pragma: no cover
 
 # ---------------------------------------------------------------------------
 # BINANCE API KEY — SADECE BURAYA yaz (from __future__ satırının ÜSTÜNE yazma!)
-# LIVE=1 olmadan gerçek emir ATILMAZ. Boş bırakırsan env okunur.
+# Gerçek alım için:  python binance_dip_buy_radar.py --trade --live
+# (LIVE=1 env de olur. Key yazıp --live vermezsen Binance'a emir GİTMEZ.)
 # ---------------------------------------------------------------------------
 BINANCE_API_KEY_HARDCODE = ""  # örn: "abc123..."
 BINANCE_API_SECRET_HARDCODE = ""  # örn: "xyz789..."
@@ -134,6 +136,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_order_usdt": 11.0,
         "tp1_sell_pct": 0.50,
         "prefer_uc": True,
+        # AL yokken güçlü İZLE de alınsın (aksi halde çoğu tur boş kalır)
+        "also_buy_izle": True,
+        "izle_min_score": 55.0,
+        "izle_min_pump": 48.0,
+        "izle_max_24h_pct": 6.5,
         "trade_base": "https://api.binance.com",
         "recv_window": 5000,
     },
@@ -1746,7 +1753,7 @@ def manage_entries(
     rows: list[Analysis],
     cfg: dict[str, Any],
 ) -> list[str]:
-    """AL / UÇ sinyallerini al — max 10, bakiyeyi eşit böl."""
+    """AL / UÇ (ve opsiyonel güçlü İZLE) al — max 10, bakiyeyi eşit böl."""
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
@@ -1754,24 +1761,69 @@ def manage_entries(
     min_order = float(trade_cfg.get("min_order_usdt") or 11)
     deploy = float(trade_cfg.get("deploy_pct") or 0.95)
     prefer_uc = bool(trade_cfg.get("prefer_uc", True))
+    also_izle = bool(trade_cfg.get("also_buy_izle", True))
+    izle_min_score = float(trade_cfg.get("izle_min_score") or 55)
+    izle_min_pump = float(trade_cfg.get("izle_min_pump") or 48)
+    izle_max_24h = float(trade_cfg.get("izle_max_24h_pct") or 6.5)
+
+    n_al = sum(1 for r in rows if r.action == "AL")
+    n_izle = sum(1 for r in rows if r.action == "İZLE")
+    notes.append(
+        f"sinyal özeti: AL={n_al} İZLE={n_izle} · "
+        f"mod={'LIVE' if account.live else 'PAPER'} · "
+        f"USDT={account.free_usdt():.2f}"
+    )
 
     slots = max_pos - len(positions)
     if slots <= 0:
         notes.append(f"pozisyon dolu ({len(positions)}/{max_pos})")
         return notes
 
-    cands = [
-        r
-        for r in rows
-        if r.action == "AL" and r.base not in positions and r.stop and r.tp1 and r.tp2
-    ]
+    def is_buyable(r: Analysis) -> bool:
+        if r.base in positions or not (r.stop and r.tp1 and r.tp2):
+            return False
+        if r.action == "AL":
+            return True
+        if not also_izle or r.action != "İZLE":
+            return False
+        return (
+            r.score >= izle_min_score
+            and r.pump_score >= izle_min_pump
+            and r.change_24h_pct <= izle_max_24h
+        )
+
+    cands = [r for r in rows if is_buyable(r)]
     if prefer_uc:
-        cands.sort(key=lambda r: (0 if r.is_uc else 1, -r.pump_score, -r.score))
+        cands.sort(
+            key=lambda r: (
+                0 if r.action == "AL" else 1,
+                0 if r.is_uc else 1,
+                -r.pump_score,
+                -r.score,
+            )
+        )
     else:
         cands.sort(key=lambda r: (-r.pump_score, -r.score))
     cands = cands[:slots]
     if not cands:
-        notes.append("yeni AL aday yok")
+        notes.append(
+            "alım yok — AL sinyali yok"
+            + (
+                f" (İZLE var ama skor/uç eşiğinin altında; "
+                f"min skor {izle_min_score}/uç {izle_min_pump})"
+                if also_izle and n_izle
+                else ""
+            )
+        )
+        near = sorted(
+            [r for r in rows if r.action in {"AL", "İZLE"}],
+            key=lambda r: (-r.pump_score, -r.score),
+        )[:5]
+        for r in near:
+            notes.append(
+                f"  aday değil: {r.base} {r.action} skor={r.score:.0f} "
+                f"uç={r.pump_score:.0f} 24s%{r.change_24h_pct:+.1f}"
+            )
         return notes
 
     free = account.free_usdt()
@@ -1822,11 +1874,13 @@ def manage_entries(
                 "sold_tp1": False,
                 "opened_at": now_iso(),
                 "reasons": sig.reasons[:8],
+                "signal_action": sig.action,
             }
-            tag = "🚀" if sig.is_uc else "🟢"
+            tag = "🚀" if sig.is_uc else ("🟡" if sig.action == "İZLE" else "🟢")
+            live_tag = "" if account.live else " [PAPER]"
             notes.append(
                 f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
-                f"SL {sig.stop} TP1 {sig.tp1} TP2 {sig.tp2}"
+                f"SL {sig.stop} TP1 {sig.tp1} TP2 {sig.tp2}{live_tag}"
             )
             log_trade(
                 {
@@ -2001,7 +2055,12 @@ def main() -> int:
     parser.add_argument(
         "--trade",
         action="store_true",
-        help="AL sinyallerinde Binance spot al/sat (varsayılan paper; LIVE=1 ile gerçek)",
+        help="AL sinyallerinde Binance spot al/sat (varsayılan paper; --live ile gerçek)",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Gerçek Binance emri at (API key gerekir). LIVE=1 ile aynı.",
     )
     parser.add_argument("--no-trade", action="store_true", help="Al/sat kapalı (sadece radar)")
     args = parser.parse_args()
@@ -2026,20 +2085,47 @@ def main() -> int:
 
     # --- trade mode ---
     trade_cfg = cfg.setdefault("trade", dict(DEFAULT_CONFIG["trade"]))
-    want_trade = bool(args.trade or trade_cfg.get("enabled")) and not args.no_trade
+    api_key, api_secret = resolve_api_keys()
+    keys_ok = bool(api_key and api_secret)
+    # Key yazıldıysa --trade demeden de trade aç (aksi halde sadece tarar)
+    want_trade = (
+        bool(args.trade or trade_cfg.get("enabled") or keys_ok) and not args.no_trade
+    )
     live_env = (env("LIVE") or "0") == "1"
-    trade_live = bool(want_trade and live_env and not args.dry_run)
+    want_live = bool(args.live or live_env) and not args.dry_run
+    trade_live = bool(want_trade and want_live)
     account: BinanceAccount | None = None
+
+    if keys_ok:
+        print(f"[keys] API key OK (…{api_key[-4:]})")
+    else:
+        print("[keys] API key YOK — dosyadaki HARDCODE veya env doldur")
+
     if want_trade:
-        if live_env and args.dry_run:
-            print("[info] --dry-run LIVE'ı eziyor → paper trade")
+        if want_live and not keys_ok:
+            raise SystemExit(
+                "\n[HATA] --live / LIVE=1 için API key gerekli.\n"
+                "  BINANCE_API_KEY_HARDCODE alanına yaz VEYA env set et.\n"
+            )
         if trade_live:
-            print("[MODE] ⚠️  LIVE Binance spot — gerçek para")
+            print("[MODE] ⚠️  LIVE Binance spot — GERÇEK PARA / GERÇEK EMRİ")
         else:
-            print("[MODE] DRY-RUN / PAPER trade — gerçek emir YOK")
+            print("[MODE] PAPER — Binance'a emir GİTMEZ (sadece local simülasyon)")
+            print("       Gerçek alım için:  python binance_dip_buy_radar.py --trade --live")
         account = BinanceAccount(cfg, live=trade_live)
-        print(f"[account] USDT free ≈ {account.free_usdt():.2f}")
+        try:
+            bal = account.free_usdt()
+            print(f"[account] USDT free ≈ {bal:.2f}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[account HATA] bakiye okunamadı: {exc}", file=sys.stderr)
+            if trade_live:
+                raise SystemExit(
+                    "API key / IP whitelist / spot izni kontrol et "
+                    "(Binance → API Management)"
+                ) from exc
         print(f"[positions] {POS_PATH}")
+    else:
+        print("[MODE] sadece radar (--trade veya API key ile al/sat açılır)")
 
     token = env("TELEGRAM_BOT_TOKEN")
     chat_id = env("TELEGRAM_CHAT_ID")

@@ -30,29 +30,23 @@ python binance_dip_buy_radar.py --once --dry-run --top 20
 ## Gerçek / paper al-sat
 
 API key’lerini dosyada **`BINANCE_API_KEY_HARDCODE`** satırına yaz
-(**`from __future__` satırının üstüne yazma** — SyntaxError verir)
-veya ortam değişkeni kullan:
+(**`from __future__` satırının üstüne yazma** — SyntaxError verir).
 
 ```powershell
-# Paper (emir atmaz) — max 10 coin, USDT eşit bölünür, SL/TP1/TP2
-python binance_dip_buy_radar.py --once --trade --dry-run --skip-multi-cex --fast
+cd C:\Users\Rahman\OneDrive\Desktop\bot
 
-# Canlı (gerçek para)
-# LIVE=1 + key gerekli
-$env:LIVE="1"
-$env:BINANCE_API_KEY="..."
-$env:BINANCE_API_SECRET="..."
+# PAPER (Binance'a emir gitmez)
 python binance_dip_buy_radar.py --once --trade
+
+# GERÇEK ALIM — --live ŞART
+python binance_dip_buy_radar.py --once --trade --live
 ```
 
 Kurallar:
-- Sadece **AL** (UÇ öncelikli)
-- En fazla **10** açık pozisyon
-- Serbest USDT’yi bu turda alınacak coine eşit böler
-- **SL** tam çıkış · **TP1** %50 sat · **TP2** kalanı
-- Varsayılan **DRY-RUN**; canlı için `LIVE=1`
+- **AL** + güçlü **İZLE** (skor/uç eşiği üstü)
+- En fazla **10** açık pozisyon · USDT eşit bölünür
+- **SL** tam · **TP1** %50 · **TP2** kalanı
+- Key yazmak yetmez → **`--live`** olmadan gerçek emir yok
 
-Pozisyon: `output/binance_dip_buy_positions.json`  
-İşlem log: `output/binance_dip_buy_trades.jsonl`
-
-Config yoksa gömülü varsayılanla çalışır.
+Konsolda şunu görmelisin: `[MODE] ⚠️ LIVE Binance spot`
+`[MODE] PAPER` görüyorsan Binance hesabında alım olmaz.
