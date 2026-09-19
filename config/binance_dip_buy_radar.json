@@ -13,20 +13,31 @@
     "1d": 90
   },
   "early_buy": {
-    "max_24h_change_pct": 8.0,
+    "max_24h_change_pct": 6.0,
     "min_24h_change_pct": -25.0,
+    "early_rally_max_pct": 5.0,
     "near_low_lookback_days": 14,
-    "near_low_max_pct": 8.0,
-    "max_rsi_1h": 55.0,
+    "near_low_max_pct": 10.0,
+    "max_rsi_1h": 58.0,
     "min_rsi_1h": 25.0,
-    "volume_rise_mult_5m": 1.4,
-    "min_score_al": 62,
-    "min_score_izle": 48
+    "volume_rise_mult_5m": 1.35,
+    "min_score_al": 60,
+    "min_score_izle": 46,
+    "min_pump_score_al": 55
   },
   "late_reject": {
-    "max_already_up_24h_pct": 15.0,
+    "max_already_up_24h_pct": 12.0,
     "max_rsi_1h": 70.0,
-    "max_from_14d_low_pct": 25.0
+    "max_from_14d_low_pct": 28.0
+  },
+  "pump_upside": {
+    "enabled": true,
+    "target_low_pct": 40.0,
+    "target_high_pct": 70.0,
+    "min_room_to_30d_high_pct": 25.0,
+    "quiet_vol_bars": 18,
+    "vol_turn_mult": 1.8,
+    "compression_atr_ratio": 0.75
   },
   "regime": {
     "enabled": true,
@@ -43,7 +54,8 @@
   "risk": {
     "stop_buffer_pct": 1.2,
     "tp1_pct": 6.0,
-    "tp2_pct": 14.0
+    "tp2_pct": 14.0,
+    "use_pump_tp": true
   },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",

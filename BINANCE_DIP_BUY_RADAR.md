@@ -1,30 +1,30 @@
-# Binance Dip AL Radarı v2
+# Binance Dip AL Radarı v2.1 — Uç potansiyel
 
-Tüm Binance USDT spot coinlerini tarar; **yükselmeden dipteyken** 🟢 AL verir.
+**Hedef setup (AR tipi):** Hacim 0→+ geçmiş, fiyat henüz yatay veya sadece **+%3/+%5**, ama **+%50/+%70** uç potansiyeli yüksek.
 
-## Yeni (v2)
+## Ne tarıyor?
 
-- **BTC rejim filtresi** — BTC sert düşüyorsa AL engellenir / skor düşer
-- **Futures funding** — negatif funding bonusu (API erişilebilirse)
-- **Stop / TP1 / TP2 / RR** — her AL için risk önerisi
-- **Zengin Telegram** — skor + SL/TP + funding
-- **`--backtest`** — geçmişte sinyal verseydi ne olurdu?
+| Analiz | Anlam |
+|--------|--------|
+| HACIM_0→+ | Sessiz tabandan hacim artıya döndü |
+| ERKEN_RALLI | 24s ≤ +%5 (kaçmamış) |
+| DIPTE_KALIYOR | 14g dibe hâlâ yakın |
+| UC_ALANI_30g | 30g high’a boşluk var |
+| TABAN_SIKISMA | Sıkışma → kırılım |
+| UC_POTANSIYEL | ~%40–70 tahmin |
 
-## Çalıştırma
+## Sinyaller
+
+- **🚀 UÇ** — +50/+70 adayı (öncelikli AL)
+- **🟢 AL** — dipten erken
+- **🟡 İZLE** — gelişiyor
+- **🔴 GEÇ** — zaten yükselmiş (AR +%46 gibi)
+
+## Çalıştır
 
 ```powershell
 cd C:\Users\Rahman\OneDrive\Desktop\bot
 python binance_dip_buy_radar.py --once --dry-run --top 20
-python binance_dip_buy_radar.py --backtest --backtest-symbols 40
-python binance_dip_buy_radar.py
 ```
 
-Config yoksa gömülü varsayılanla çalışır (`output/` içinden de OK).
-
-## Sinyaller
-
-| | |
-|--|--|
-| 🟢 AL | dip + hacim + erken momentum |
-| 🟡 İZLE | gelişiyor / BTC rejim bekle |
-| 🔴 GEÇ | zaten yükselmiş (AR +%50) |
+Config yoksa gömülü varsayılanla çalışır.
