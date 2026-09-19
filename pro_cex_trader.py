@@ -35,7 +35,26 @@ from typing import Any
 
 import requests
 
-import pro_cex_radar as radar
+# Script klasörünü path'e ekle (VS Code / output/ içinden çalışınca)
+_SCRIPT_DIR = Path(__file__).resolve().parent
+for _p in (_SCRIPT_DIR, _SCRIPT_DIR.parent):
+    _s = str(_p)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
+
+try:
+    import pro_cex_radar as radar
+except ImportError:
+    raise SystemExit(
+        "\n[HATA] pro_cex_radar.py bulunamadı (satır 38).\n"
+        "pro_cex_trader.py ile AYNI klasöre şunları koy:\n"
+        "  - pro_cex_radar.py\n"
+        "  - pro_cex_trader.py\n"
+        "  - config/ (opsiyonel)\n"
+        "Örnek:\n"
+        "  cd C:\\Users\\Rahman\\OneDrive\\Desktop\\bot\n"
+        "  python pro_cex_trader.py --once --dry-run\n"
+    ) from None
 
 ROOT = radar.ROOT
 OUTPUT_DIR = radar.OUTPUT_DIR
