@@ -57,6 +57,20 @@
     "tp2_pct": 14.0,
     "use_pump_tp": true
   },
+  "multi_cex": {
+    "enabled": true,
+    "ids": [
+      "binance", "okx", "bybit", "bitget", "gate", "kucoin",
+      "mexc", "htx", "coinbase", "upbit", "kraken", "bingx",
+      "cryptocom", "whitebit", "coinex", "bitstamp"
+    ],
+    "max_symbols_per_exchange": 60,
+    "ohlcv_limit": 30,
+    "workers_per_exchange": 8,
+    "min_confluence_boost": 2,
+    "confluence_score_bonus": 8,
+    "uc_min_cex": 3
+  },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
     "RLUSD", "USDE", "USD1", "XUSD", "U", "USD0", "USDD"

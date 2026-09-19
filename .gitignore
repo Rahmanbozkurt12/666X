@@ -5,6 +5,10 @@ output/cex_5m_volume_signals.json
 output/binance_dip_buy_state.json
 output/binance_dip_buy_signals.json
 output/binance_dip_buy_backtest.json
+output/pro_cex_radar_signals.json
+output/pro_cex_radar_state.json
+output/pro_cex_radar_backtest.json
+output/pro_cex_radar_missed.json
 output/marscoin_binance_flows.json
 *.pyc
 __pycache__/

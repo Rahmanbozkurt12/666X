@@ -29,6 +29,31 @@ from typing import Any
 
 import requests
 
+try:
+    import ccxt
+except ImportError:  # pragma: no cover
+    ccxt = None  # type: ignore[assignment]
+
+# En az 15 CEX — dip radar Binance derin analiz + diğerlerinde hacim 0→+ onay
+MULTI_CEX_IDS: list[str] = [
+    "binance",
+    "okx",
+    "bybit",
+    "bitget",
+    "gate",
+    "kucoin",
+    "mexc",
+    "htx",
+    "coinbase",
+    "upbit",
+    "kraken",
+    "bingx",
+    "cryptocom",
+    "whitebit",
+    "coinex",
+    "bitstamp",
+]
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "rest_base": "https://data-api.binance.vision",
     "futures_base": "https://fapi.binance.com",
@@ -82,6 +107,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tp1_pct": 6.0,
         "tp2_pct": 14.0,
         "use_pump_tp": True,
+    },
+    "multi_cex": {
+        "enabled": True,
+        "ids": list(MULTI_CEX_IDS),
+        "max_symbols_per_exchange": 60,
+        "ohlcv_limit": 30,
+        "workers_per_exchange": 8,
+        "min_confluence_boost": 2,
+        "confluence_score_bonus": 8,
+        "uc_min_cex": 3,
     },
     "stable_bases": [
         "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR",
@@ -169,7 +204,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
         # gömülü defaults ile birleştir (eksik anahtarlar)
         cfg = dict(DEFAULT_CONFIG)
         cfg.update(raw)
-        for k in ("early_buy", "late_reject", "regime", "futures", "risk", "ohlcv", "pump_upside"):
+        for k in ("early_buy", "late_reject", "regime", "futures", "risk", "ohlcv", "pump_upside", "multi_cex"):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
                 merged.update(raw[k])
@@ -933,6 +968,13 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
             f"BTC rejim: %{regime.get('btc_change_24h', 0):+.2f} · "
             f"{'⚠️ DÜŞÜŞ' if regime.get('hostile') else 'OK'}"
         )
+        mc = regime.get("multi_cex") or {}
+        if mc:
+            scanned = mc.get("scanned") or []
+            lines.append(
+                f"CEX tarama: {len(scanned)}/{mc.get('requested', 0)} borsa · "
+                f"{', '.join(scanned)}"
+            )
     lines.append("")
 
     if ucs:
@@ -940,7 +982,7 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
         for i, r in enumerate(sorted(ucs, key=lambda x: -x.pump_score)[:top], 1):
             lines.append(
                 f"{i:2d}. {r.base:<8} uç={r.pump_score:5.1f} →~%{r.upside_est_pct:.0f}  "
-                f"24s%{r.change_24h_pct:+.1f}  ${r.price}  "
+                f"24s%{r.change_24h_pct:+.1f}  CEX×{r.layers.get('cex_count', 0)}  "
                 f"SL {r.stop}  TP2 {r.tp2}  "
                 f"| {', '.join(r.reasons[:5])}"
             )
@@ -1030,14 +1072,274 @@ def should_alert(state: dict[str, Any], bases: list[str], cooldown: int = 1800) 
     return fresh
 
 
+def _ccxt_exchange(ex_id: str) -> Any:
+    assert ccxt is not None
+    klass = getattr(ccxt, ex_id)
+    return klass({"enableRateLimit": True, "timeout": 20000, "options": {"defaultType": "spot"}})
+
+
+def _scan_binance_vision_wake(
+    *, max_symbols: int, ohlcv_limit: int, workers: int
+) -> tuple[str, set[str], str | None]:
+    try:
+        info = get_json(f"{DEFAULT_CONFIG['rest_base']}/api/v3/exchangeInfo")
+        tickers = get_json(f"{DEFAULT_CONFIG['rest_base']}/api/v3/ticker/24hr")
+    except Exception as exc:  # noqa: BLE001
+        return "binance", set(), f"{exc.__class__.__name__}"
+    usdt = {
+        s["symbol"]
+        for s in info.get("symbols", [])
+        if s.get("status") == "TRADING"
+        and s.get("quoteAsset") == "USDT"
+        and s.get("isSpotTradingAllowed", True)
+    }
+    ranked: list[tuple[float, str, str]] = []
+    for t in tickers:
+        sym = t.get("symbol") or ""
+        if sym not in usdt:
+            continue
+        base = _normalize_base(sym.replace("USDT", ""))
+        try:
+            qv = float(t.get("quoteVolume") or 0)
+        except (TypeError, ValueError):
+            qv = 0.0
+        ranked.append((qv, base, sym))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    ranked = ranked[:max_symbols]
+    wakes: set[str] = set()
+
+    def job(item: tuple[float, str, str]) -> str | None:
+        _q, base, market = item
+        try:
+            rows = get_json(
+                f"{DEFAULT_CONFIG['rest_base']}/api/v3/klines",
+                {"symbol": market, "interval": "5m", "limit": ohlcv_limit},
+                timeout=20,
+            )
+            vols = [float(r[5]) for r in rows[:-1]]
+        except Exception:  # noqa: BLE001
+            return None
+        vz = volume_zero_to_pos(vols, quiet_bars=12, turn_mult=1.6)
+        ok, _ = analyze_volume_bottom(vols, 1.35)
+        return base if (vz.get("ok") or ok) else None
+
+    with ThreadPoolExecutor(max_workers=max(2, workers)) as pool:
+        for fut in as_completed([pool.submit(job, row) for row in ranked]):
+            try:
+                b = fut.result()
+            except Exception:  # noqa: BLE001
+                continue
+            if b:
+                wakes.add(b)
+    return "binance", wakes, None
+
+
+def _normalize_base(base: str) -> str:
+    b = (base or "").upper().strip()
+    if b.startswith("1000") and len(b) > 4:
+        b = b[4:]
+    return b
+
+
+def scan_one_cex_volume_wake(
+    ex_id: str,
+    *,
+    max_symbols: int,
+    ohlcv_limit: int,
+    workers: int,
+) -> tuple[str, set[str], str | None]:
+    """Bir CEX'te 5m hacim 0→+ / dipten yükseliş olan base seti."""
+    # Binance geo-block → vision API
+    if ex_id == "binance":
+        return _scan_binance_vision_wake(max_symbols=max_symbols, ohlcv_limit=ohlcv_limit, workers=workers)
+
+    if ccxt is None:
+        return ex_id, set(), "ccxt yok"
+    try:
+        ex = _ccxt_exchange(ex_id)
+        markets = ex.load_markets()
+    except Exception as exc:  # noqa: BLE001
+        return ex_id, set(), f"{exc.__class__.__name__}"
+
+    # USDT/USD pariteleri
+    candidates: list[tuple[float, str, str]] = []
+    for sym, m in markets.items():
+        if not m.get("active", True):
+            continue
+        if m.get("spot") is False or m.get("contract") or m.get("swap"):
+            continue
+        quote = str(m.get("quote") or "").upper()
+        if quote not in {"USDT", "USD", "USDC"}:
+            continue
+        base = _normalize_base(str(m.get("base") or ""))
+        if not base or base in {"USDT", "USDC", "USD"}:
+            continue
+        candidates.append((0.0, base, sym))
+
+    # ticker ile hacme göre sırala
+    try:
+        tickers = ex.fetch_tickers([c[2] for c in candidates[: max_symbols * 3]])
+    except Exception:
+        try:
+            tickers = ex.fetch_tickers()
+        except Exception:  # noqa: BLE001
+            tickers = {}
+
+    ranked: list[tuple[float, str, str]] = []
+    for _qv, base, sym in candidates:
+        t = tickers.get(sym) or {}
+        try:
+            qv = float(t.get("quoteVolume") or t.get("baseVolume") or 0)
+        except (TypeError, ValueError):
+            qv = 0.0
+        ranked.append((qv, base, sym))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    ranked = ranked[:max_symbols]
+
+    wakes: set[str] = set()
+
+    def job(item: tuple[float, str, str]) -> str | None:
+        _q, base, sym = item
+        try:
+            rows = ex.fetch_ohlcv(sym, timeframe="5m", limit=ohlcv_limit)
+        except Exception:  # noqa: BLE001
+            return None
+        if not rows or len(rows) < 12:
+            return None
+        vols = [float(r[5]) for r in rows[:-1]]
+        vz = volume_zero_to_pos(vols, quiet_bars=12, turn_mult=1.6)
+        ok, _rise = analyze_volume_bottom(vols, 1.35)
+        if vz.get("ok") or ok:
+            return base
+        return None
+
+    with ThreadPoolExecutor(max_workers=max(2, workers)) as pool:
+        futs = [pool.submit(job, row) for row in ranked]
+        for fut in as_completed(futs):
+            try:
+                b = fut.result()
+            except Exception:  # noqa: BLE001
+                continue
+            if b:
+                wakes.add(b)
+    return ex_id, wakes, None
+
+
+def scan_multi_cex_confluence(cfg: dict[str, Any]) -> dict[str, Any]:
+    """
+    15+ CEX'te hacim uyanışı tara.
+    Dönüş: { base: [cex,...], scanned: [...], errors: [...] }
+    """
+    mc = cfg.get("multi_cex") or {}
+    if not mc.get("enabled", True):
+        return {"by_base": {}, "scanned": [], "errors": [], "requested": 0}
+    if ccxt is None:
+        print("[multi-cex] ccxt kurulu değil → pip install ccxt", file=sys.stderr)
+        return {"by_base": {}, "scanned": [], "errors": ["ccxt missing"], "requested": 0}
+
+    ids = list(mc.get("ids") or MULTI_CEX_IDS)
+    max_sym = int(mc.get("max_symbols_per_exchange") or 60)
+    limit = int(mc.get("ohlcv_limit") or 30)
+    workers = int(mc.get("workers_per_exchange") or 8)
+
+    print(f"[multi-cex] {len(ids)} borsa taranıyor: {', '.join(ids)}", flush=True)
+    by_base: dict[str, list[str]] = {}
+    scanned: list[str] = []
+    errors: list[str] = []
+
+    # Borsaları paralel değil sırayla (rate limit); her biri kendi pool'unu kullanır
+    for ex_id in ids:
+        t0 = time.time()
+        name, wakes, err = scan_one_cex_volume_wake(
+            ex_id, max_symbols=max_sym, ohlcv_limit=limit, workers=workers
+        )
+        dt = time.time() - t0
+        if err:
+            errors.append(f"{name}: {err}")
+            print(f"  ! {name} atlandı ({err}) {dt:.1f}s", flush=True)
+            continue
+        scanned.append(name)
+        for b in wakes:
+            by_base.setdefault(b, []).append(name)
+        print(f"  → {name}: {len(wakes)} hacim-uyanış ({dt:.1f}s)", flush=True)
+
+    print(
+        f"[multi-cex] başarılı {len(scanned)}/{len(ids)} borsa · "
+        f"{len(by_base)} ortak base adayı",
+        flush=True,
+    )
+    return {
+        "by_base": by_base,
+        "scanned": scanned,
+        "errors": errors,
+        "requested": len(ids),
+    }
+
+
+def apply_cex_confluence(
+    rows: list[Analysis],
+    confluence: dict[str, Any],
+    cfg: dict[str, Any],
+) -> list[Analysis]:
+    """Çoklu CEX onayını skora / UÇ bayrağına yedir."""
+    mc = cfg.get("multi_cex") or {}
+    by_base: dict[str, list[str]] = confluence.get("by_base") or {}
+    min_boost = int(mc.get("min_confluence_boost") or 2)
+    bonus = float(mc.get("confluence_score_bonus") or 8)
+    uc_min = int(mc.get("uc_min_cex") or 3)
+    majors = {"BTC", "ETH", "BNB", "SOL", "XRP"}
+    out: list[Analysis] = []
+    for r in rows:
+        cexes = sorted(set(by_base.get(r.base) or []))
+        n = len(cexes)
+        r.layers["cex_count"] = n
+        r.layers["cex_list"] = cexes
+        if n >= min_boost:
+            r.score = min(100.0, round(r.score + bonus * min(n, 6) / 2, 1))
+            r.pump_score = min(100.0, round(r.pump_score + 5 * min(n, 5), 1))
+            tag = f"CEX×{n}"
+            if tag not in r.reasons:
+                r.reasons.append(tag)
+            # Major'larda çoklu CEX her zaman var — UÇ için altcoin şartı
+            if (
+                n >= uc_min
+                and r.base not in majors
+                and r.action in {"AL", "İZLE"}
+                and r.change_24h_pct <= 6.5
+                and r.pump_score >= 55
+            ):
+                if r.action == "İZLE":
+                    r.action = "AL"
+                    r.phase = "cex_confluence"
+                if r.action == "AL":
+                    r.is_uc = True
+                    r.upside_est_pct = max(r.upside_est_pct, 50.0)
+                    if not any(x.startswith("UC_POTANSIYEL") for x in r.reasons):
+                        r.reasons.insert(0, f"UC_POTANSIYEL(~%{r.upside_est_pct:.0f})")
+                    if "COKLU_CEX_ONAY" not in r.reasons:
+                        r.reasons.append("COKLU_CEX_ONAY")
+        out.append(r)
+    order = {"AL": 0, "İZLE": 1, "GEÇ": 2, "YOK": 3}
+    out.sort(
+        key=lambda r: (
+            order.get(r.action, 9),
+            0 if r.is_uc else 1,
+            -int(r.layers.get("cex_count") or 0),
+            -r.pump_score,
+            -r.score,
+        )
+    )
+    return out
+
+
 def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[str, Any]]:
-    print("[1/4] sembol + ticker…", flush=True)
+    print("[1/5] sembol + ticker…", flush=True)
     symbols = list_usdt_symbols(cfg)
     tickers = fetch_tickers(cfg)
     max_sym = int(cfg.get("max_symbols") or 0)
     min_qv = float(cfg.get("min_quote_volume_usdt") or 0)
 
-    print("[2/4] BTC rejim + funding…", flush=True)
+    print("[2/5] BTC rejim + funding…", flush=True)
     regime = btc_regime(cfg, tickers)
     funding_map = fetch_funding_map(cfg)
     print(
@@ -1046,6 +1348,15 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
         f"funding={len(funding_map)} sembol",
         flush=True,
     )
+
+    print("[3/5] çoklu CEX hacim taraması (15+)…", flush=True)
+    confluence = scan_multi_cex_confluence(cfg)
+    regime["multi_cex"] = {
+        "requested": confluence.get("requested"),
+        "scanned": confluence.get("scanned"),
+        "errors": confluence.get("errors"),
+        "wake_bases": len(confluence.get("by_base") or {}),
+    }
 
     ranked: list[str] = []
     for sym in symbols:
@@ -1063,7 +1374,7 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
     if max_sym > 0:
         ranked = ranked[:max_sym]
 
-    print(f"[3/4] {len(ranked)} coin analiz…", flush=True)
+    print(f"[4/5] Binance derin analiz · {len(ranked)} coin…", flush=True)
     results: list[Analysis] = []
 
     def job(sym: str) -> Analysis | None:
@@ -1083,17 +1394,9 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
             if row:
                 results.append(row)
 
-    print(f"[4/4] {len(results)} sonuç", flush=True)
-    order = {"AL": 0, "İZLE": 1, "GEÇ": 2, "YOK": 3}
-    results.sort(
-        key=lambda r: (
-            order.get(r.action, 9),
-            0 if r.is_uc else 1,
-            -r.pump_score,
-            -r.score,
-            -r.quote_volume_24h,
-        )
-    )
+    print("[5/5] CEX confluence birleştir…", flush=True)
+    results = apply_cex_confluence(results, confluence, cfg)
+    print(f"  → {len(results)} sonuç · CEX OK {len(confluence.get('scanned') or [])}", flush=True)
     return results, regime
 
 
@@ -1191,11 +1494,22 @@ def main() -> int:
     parser.add_argument("--backtest", action="store_true")
     parser.add_argument("--backtest-symbols", type=int, default=40)
     parser.add_argument("--backtest-hold", type=int, default=12)
+    parser.add_argument("--skip-multi-cex", action="store_true", help="Sadece Binance (hızlı)")
+    parser.add_argument("--fast", action="store_true", help="Her CEX'te az sembol (test)")
     args = parser.parse_args()
 
     cfg, cfg_src = load_config(args.config)
+    if args.skip_multi_cex:
+        cfg.setdefault("multi_cex", {})["enabled"] = False
+    if args.fast:
+        cfg.setdefault("multi_cex", {})["max_symbols_per_exchange"] = 25
+        cfg.setdefault("multi_cex", {})["ohlcv_limit"] = 24
     print(f"[config] {cfg_src}")
     print(f"[output] {OUTPUT_PATH}")
+    mc = cfg.get("multi_cex") or {}
+    if mc.get("enabled", True):
+        ids = mc.get("ids") or MULTI_CEX_IDS
+        print(f"[cex] {len(ids)} borsa hedefleniyor")
     workers = int(args.workers or cfg.get("workers") or 16)
 
     if args.backtest:
