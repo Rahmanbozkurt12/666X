@@ -1,0 +1,30 @@
+{
+  "timeframe": "5m",
+  "ohlcv_limit": 36,
+  "max_symbols_per_exchange": 100,
+  "min_quote_volume_usdt": 150000,
+  "workers": 16,
+  "poll_seconds": 300,
+  "buy_min_exchanges": 3,
+  "buy_min_confluence_pct": 50,
+  "volume_rise_mult": 1.45,
+  "near_bottom_pct": 2.5,
+  "quote_priority": ["USDT", "USD", "USDC", "KRW"],
+  "stable_bases": [
+    "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "KRW"
+  ],
+  "exchanges": {
+    "binance": {"enabled": true, "id": "binance"},
+    "coinbase": {"enabled": true, "id": "coinbase"},
+    "upbit": {"enabled": true, "id": "upbit"},
+    "okx": {"enabled": true, "id": "okx"},
+    "bybit": {"enabled": true, "id": "bybit"},
+    "bitget": {"enabled": true, "id": "bitget"},
+    "gate": {"enabled": true, "id": "gate"},
+    "kucoin": {"enabled": true, "id": "kucoin"},
+    "bitmex": {"enabled": false, "id": "bitmex", "note": "Bitxex yerine opsiyonel (vadeli)"},
+    "robinhood": {"enabled": false, "id": null, "note": "Public market API yok"},
+    "coinspace": {"enabled": false, "id": null, "note": "Cüzdan; CEX değil"},
+    "bitxex": {"enabled": false, "id": null, "note": "Public CCXT desteği yok"}
+  }
+}
