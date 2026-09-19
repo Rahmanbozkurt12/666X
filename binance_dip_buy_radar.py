@@ -39,13 +39,107 @@ from typing import Any
 
 import requests
 
-ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = ROOT / "config" / "binance_dip_buy_radar.json"
-OUTPUT_PATH = ROOT / "output" / "binance_dip_buy_signals.json"
-STATE_PATH = ROOT / "output" / "binance_dip_buy_state.json"
+DEFAULT_CONFIG: dict[str, Any] = {
+    "rest_base": "https://data-api.binance.vision",
+    "quote": "USDT",
+    "workers": 20,
+    "poll_seconds": 180,
+    "max_symbols": 0,
+    "min_quote_volume_usdt": 200000,
+    "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
+    "early_buy": {
+        "max_24h_change_pct": 8.0,
+        "min_24h_change_pct": -25.0,
+        "near_low_lookback_days": 14,
+        "near_low_max_pct": 8.0,
+        "max_rsi_1h": 55.0,
+        "min_rsi_1h": 25.0,
+        "volume_rise_mult_5m": 1.4,
+        "min_score_al": 62,
+        "min_score_izle": 48,
+    },
+    "late_reject": {
+        "max_already_up_24h_pct": 15.0,
+        "max_rsi_1h": 70.0,
+        "max_from_14d_low_pct": 25.0,
+    },
+    "stable_bases": [
+        "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR",
+        "USD1", "BFUSD", "RLUSD", "USDE", "XUSD", "U", "USD0", "USDD",
+    ],
+    "skip_bases": [
+        "WBTC", "WETH", "BTCB", "WBETH", "BETH", "STETH", "WSTETH", "RLUSD", "XAUT", "PAXG",
+    ],
+    "skip_suffixes": ["UP", "DOWN", "BULL", "BEAR"],
+    "skip_tokenized_stocks": True,
+}
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CONFIG_NAME = "binance_dip_buy_radar.json"
+
+
+def find_project_root() -> Path:
+    """Script output/ içinde olsa bile üst klasördeki config'i bul."""
+    here = SCRIPT_DIR
+    for cand in [here, here.parent, Path.cwd(), Path.cwd().parent]:
+        if (cand / "config" / CONFIG_NAME).exists():
+            return cand
+        if (cand / CONFIG_NAME).exists():
+            return cand
+    # config yoksa: output/ altındaysak bir üstü proje kökü say
+    if here.name.lower() == "output":
+        return here.parent
+    return here
+
+
+ROOT = find_project_root()
+CONFIG_PATH = ROOT / "config" / CONFIG_NAME
+OUTPUT_DIR = ROOT / "output"
+OUTPUT_PATH = OUTPUT_DIR / "binance_dip_buy_signals.json"
+STATE_PATH = OUTPUT_DIR / "binance_dip_buy_state.json"
 
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/1.0"})
+
+
+def resolve_config_path(cli_path: str | None = None) -> Path | None:
+    """Config dosyasını birkaç olası yerde ara."""
+    candidates: list[Path] = []
+    if cli_path:
+        candidates.append(Path(cli_path))
+    candidates.extend(
+        [
+            CONFIG_PATH,
+            ROOT / CONFIG_NAME,
+            SCRIPT_DIR / "config" / CONFIG_NAME,
+            SCRIPT_DIR / CONFIG_NAME,
+            SCRIPT_DIR.parent / "config" / CONFIG_NAME,
+            Path.cwd() / "config" / CONFIG_NAME,
+            Path.cwd() / CONFIG_NAME,
+        ]
+    )
+    seen: set[str] = set()
+    for p in candidates:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.is_file():
+            return p
+    return None
+
+
+def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
+    path = resolve_config_path(cli_path)
+    if path is not None:
+        return load_json(path), str(path)
+    # Tek .py kopyalanmışsa gömülü varsayılanla çalış
+    print(
+        "[uyarı] config/binance_dip_buy_radar.json bulunamadı → "
+        "gömülü varsayılan ayarlar kullanılıyor",
+        file=sys.stderr,
+    )
+    return dict(DEFAULT_CONFIG), "(embedded-default)"
 
 
 @dataclass
@@ -594,11 +688,13 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument("--top", type=int, default=15)
-    parser.add_argument("--config", default=str(CONFIG_PATH))
+    parser.add_argument("--config", default=None, help="config JSON yolu (opsiyonel)")
     parser.add_argument("--workers", type=int, default=0)
     args = parser.parse_args()
 
-    cfg = load_json(Path(args.config))
+    cfg, cfg_src = load_config(args.config)
+    print(f"[config] {cfg_src}")
+    print(f"[output] {OUTPUT_PATH}")
     workers = int(args.workers or cfg.get("workers") or 16)
     token = env("TELEGRAM_BOT_TOKEN")
     chat_id = env("TELEGRAM_CHAT_ID")

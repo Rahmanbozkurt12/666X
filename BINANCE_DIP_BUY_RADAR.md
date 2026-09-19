@@ -35,4 +35,26 @@ python3 binance_dip_buy_radar.py          # 3 dk loop + Telegram
 Ayar: `config/binance_dip_buy_radar.json`  
 Çıktı: `output/binance_dip_buy_signals.json`
 
-Telegram: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`
+Tek `.py` dosyasını `output/` içine kopyalasanız da çalışır:
+config yoksa **gömülü varsayılan** ayarlar kullanılır.
+
+## Önerilen klasör yapısı (Windows)
+
+```
+bot/
+  binance_dip_buy_radar.py
+  config/
+    binance_dip_buy_radar.json
+  output/          ← sonuçlar buraya yazılır
+```
+
+```powershell
+cd C:\Users\Rahman\OneDrive\Desktop\bot
+python binance_dip_buy_radar.py --once --dry-run
+```
+
+Config yolunu elle vermek için:
+```powershell
+python binance_dip_buy_radar.py --once --config "C:\Users\Rahman\OneDrive\Desktop\bot\config\binance_dip_buy_radar.json"
+```
+
