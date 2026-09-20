@@ -72,7 +72,7 @@
     "recv_window": 60000
   },
   "multi_cex": {
-    "enabled": false,
+    "enabled": true,
     "ids": [
       "binance", "okx", "bybit", "bitget", "gate", "kucoin",
       "mexc", "htx", "coinbase", "upbit", "kraken", "bingx",
