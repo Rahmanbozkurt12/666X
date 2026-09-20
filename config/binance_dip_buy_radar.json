@@ -3,9 +3,9 @@
   "futures_base": "https://fapi.binance.com",
   "quote": "USDT",
   "workers": 20,
-  "poll_seconds": 120,
+  "poll_seconds": 90,
   "max_symbols": 0,
-  "min_quote_volume_usdt": 200000,
+  "min_quote_volume_usdt": 500000,
   "ohlcv": {
     "5m": 48,
     "15m": 96,
@@ -13,22 +13,22 @@
     "1d": 90
   },
   "early_buy": {
-    "max_24h_change_pct": 6.0,
+    "max_24h_change_pct": 5.0,
     "min_24h_change_pct": -25.0,
-    "early_rally_max_pct": 5.0,
+    "early_rally_max_pct": 4.0,
     "near_low_lookback_days": 14,
-    "near_low_max_pct": 10.0,
-    "max_rsi_1h": 58.0,
+    "near_low_max_pct": 8.0,
+    "max_rsi_1h": 55.0,
     "min_rsi_1h": 25.0,
     "volume_rise_mult_5m": 1.35,
-    "min_score_al": 60,
-    "min_score_izle": 46,
-    "min_pump_score_al": 55
+    "min_score_al": 62,
+    "min_score_izle": 50,
+    "min_pump_score_al": 58
   },
   "late_reject": {
-    "max_already_up_24h_pct": 12.0,
-    "max_rsi_1h": 70.0,
-    "max_from_14d_low_pct": 28.0
+    "max_already_up_24h_pct": 10.0,
+    "max_rsi_1h": 68.0,
+    "max_from_14d_low_pct": 25.0
   },
   "pump_upside": {
     "enabled": true,
@@ -41,9 +41,12 @@
   },
   "regime": {
     "enabled": true,
-    "btc_dump_pct": -3.0,
+    "btc_dump_pct": -2.0,
     "block_al_on_btc_dump": true,
-    "soft_penalty": 12
+    "hard_block_on_btc_dump": true,
+    "soft_penalty": 15,
+    "btc_support_min_pct": -1.0,
+    "require_btc_above_ema": true
   },
   "futures": {
     "enabled": true,
@@ -57,26 +60,73 @@
     "tp2_pct": 14.0,
     "use_pump_tp": true
   },
+  "winrate": {
+    "enabled": true,
+    "min_edge_score": 78.0,
+    "min_score": 70.0,
+    "min_pump_score": 68.0,
+    "require_uc": true,
+    "strong_al_fallback": true,
+    "strong_al_min_score": 75.0,
+    "strong_al_min_pump": 75.0,
+    "require_cex_min": 3,
+    "max_spread_pct": 0.12,
+    "max_from_low_pct": 8.0,
+    "max_24h_change_pct": 3.5,
+    "min_24h_change_pct": -12.0,
+    "rsi_min": 32.0,
+    "rsi_max": 52.0,
+    "require_vol_turn": true,
+    "require_btc_supportive": true,
+    "min_quote_volume_usdt": 1000000,
+    "confirm_cycles": 2,
+    "max_buy_per_cycle": 2,
+    "max_per_sector": 1,
+    "max_positions": 5,
+    "deploy_pct": 0.85,
+    "partial_tp_frac": 0.55,
+    "breakeven_after_pct": 0.40,
+    "hard_stop_pct": 0.45,
+    "quick_tp_pct": 0.95,
+    "min_net_tp_pct": 0.50,
+    "peak_trail_pct": 0.32,
+    "peak_trail_tight_pct": 0.20,
+    "trail_tighten_after_pct": 0.70,
+    "time_stop_minutes": 18
+  },
   "trade": {
     "enabled": true,
-    "max_positions": 10,
-    "deploy_pct": 0.95,
+    "max_positions": 5,
+    "deploy_pct": 0.85,
     "min_order_usdt": 12.0,
     "tp1_sell_pct": 1.0,
     "prefer_uc": true,
-    "also_buy_izle": true,
-    "izle_min_score": 58.0,
-    "izle_min_pump": 50.0,
-    "izle_max_24h_pct": 5.0,
+    "also_buy_izle": false,
+    "require_uc": true,
+    "require_cex_min": 3,
+    "izle_min_score": 65.0,
+    "izle_min_pump": 55.0,
+    "izle_max_24h_pct": 4.0,
     "trade_base": "https://api.binance.com",
     "recv_window": 60000,
     "fee_rate_pct": 0.10,
+    "bnb_fee_discount": true,
     "fee_buffer_pct": 0.20,
-    "hard_stop_pct": 0.50,
-    "peak_trail_pct": 0.50,
-    "quick_tp_pct": 1.20,
+    "hard_stop_pct": 0.45,
+    "peak_trail_pct": 0.32,
+    "peak_trail_tight_pct": 0.20,
+    "trail_tighten_after_pct": 0.70,
+    "quick_tp_pct": 0.95,
     "min_net_tp_pct": 0.50,
-    "max_buy_per_cycle": 5
+    "time_stop_minutes": 18,
+    "time_stop_min_pnl_pct": 0.0,
+    "max_buy_per_cycle": 2,
+    "max_per_sector": 1,
+    "use_limit_orders": true,
+    "limit_wait_sec": 3.0,
+    "spread_tp_boost": true,
+    "partial_tp_frac": 0.55,
+    "breakeven_after_pct": 0.40
   },
   "multi_cex": {
     "enabled": true,
@@ -94,7 +144,7 @@
   },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
-    "RLUSD", "USDE", "USD1", "XUSD", "U", "USD0", "USDD"
+    "RLUSD", "USDE", "XUSD", "U", "USD0", "USDD"
   ],
   "skip_bases": [
     "WBTC", "WETH", "BTCB", "WBETH", "BETH", "STETH", "WSTETH", "RLUSD", "XAUT", "PAXG"

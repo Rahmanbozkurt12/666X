@@ -111,6 +111,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "block_al_on_btc_dump": True,
         "hard_block_on_btc_dump": True,  # dump tek başına AL kapar (EMA beklemez)
         "soft_penalty": 15,
+        "btc_support_min_pct": -1.0,  # winrate: BTC bu altına düşerse yeni AL yok
+        "require_btc_above_ema": True,
     },
     "futures": {
         "enabled": True,
@@ -124,16 +126,51 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tp2_pct": 14.0,
         "use_pump_tp": True,
     },
+    # Yüksek winrate paketi: az işlem, yüksek isabet (hedef ~%70–85; %90 garantisi yok)
+    "winrate": {
+        "enabled": True,
+        "min_edge_score": 78.0,
+        "min_score": 70.0,
+        "min_pump_score": 68.0,
+        "require_uc": True,
+        "strong_al_fallback": True,  # UÇ yoksa score≥75 & pump≥75
+        "strong_al_min_score": 75.0,
+        "strong_al_min_pump": 75.0,
+        "require_cex_min": 3,
+        "max_spread_pct": 0.12,
+        "max_from_low_pct": 8.0,
+        "max_24h_change_pct": 3.5,
+        "min_24h_change_pct": -12.0,
+        "rsi_min": 32.0,
+        "rsi_max": 52.0,
+        "require_vol_turn": True,
+        "require_btc_supportive": True,
+        "min_quote_volume_usdt": 1000000,
+        "confirm_cycles": 2,  # 2 tur üst üste AL → al
+        "max_buy_per_cycle": 2,
+        "max_per_sector": 1,
+        "max_positions": 5,
+        "deploy_pct": 0.85,
+        "partial_tp_frac": 0.55,  # ilk TP'de %55 sat
+        "breakeven_after_pct": 0.40,  # +%0.40 sonrası stop → maliyet+fee
+        "hard_stop_pct": 0.45,
+        "quick_tp_pct": 0.95,
+        "min_net_tp_pct": 0.50,
+        "peak_trail_pct": 0.32,
+        "peak_trail_tight_pct": 0.20,
+        "trail_tighten_after_pct": 0.70,
+        "time_stop_minutes": 18,
+    },
     "trade": {
         "enabled": True,
-        "max_positions": 10,
-        "deploy_pct": 0.95,
+        "max_positions": 5,  # winrate: daha az slot
+        "deploy_pct": 0.85,
         "min_order_usdt": 12.0,
         "tp1_sell_pct": 1.0,
         "prefer_uc": True,
         "also_buy_izle": False,  # sadece kaliteli AL
         "require_uc": True,  # UÇ şart
-        "require_cex_min": 2,  # en az N CEX onay (0=kapalı; multi-cex kapalıysa esneklik)
+        "require_cex_min": 3,  # winrate: en az 3 CEX
         "izle_min_score": 65.0,
         "izle_min_pump": 55.0,
         "izle_max_24h_pct": 4.0,
@@ -141,20 +178,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "recv_window": 60000,
         "fee_rate_pct": 0.10,
         "bnb_fee_discount": True,  # BNB varsa fee ~%25 indirim
-        "fee_buffer_pct": 0.25,
-        "hard_stop_pct": 0.50,
-        "peak_trail_pct": 0.50,
-        "peak_trail_tight_pct": 0.30,  # kâr büyüyünce sıkı trail
-        "trail_tighten_after_pct": 1.0,  # peak kâr ≥1% olunca tight trail
-        "quick_tp_pct": 1.20,
-        "min_net_tp_pct": 0.55,
-        "time_stop_minutes": 30,  # 30 dk kâr yoksa çık
+        "fee_buffer_pct": 0.20,
+        "hard_stop_pct": 0.45,
+        "peak_trail_pct": 0.32,
+        "peak_trail_tight_pct": 0.20,  # kâr büyüyünce sıkı trail
+        "trail_tighten_after_pct": 0.70,  # peak kâr ≥0.7% olunca tight trail
+        "quick_tp_pct": 0.95,  # daha yakın TP → daha yüksek isabet
+        "min_net_tp_pct": 0.50,
+        "time_stop_minutes": 18,  # hızlı çık
         "time_stop_min_pnl_pct": 0.0,  # zaman stop'ta min brüt (0=fee üstü veya küçük zarar)
-        "max_buy_per_cycle": 3,
-        "max_per_sector": 2,  # korelasyon: aynı sektör max 2
+        "max_buy_per_cycle": 2,
+        "max_per_sector": 1,  # korelasyon: aynı sektör max 1
         "use_limit_orders": True,  # maker dene → dolmazsa market
         "limit_wait_sec": 3.0,
         "spread_tp_boost": True,  # geniş spread → daha yüksek TP eşiği
+        "partial_tp_frac": 0.55,
+        "breakeven_after_pct": 0.40,
     },
     "multi_cex": {
         "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
@@ -265,6 +304,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "pump_upside",
             "multi_cex",
             "trade",
+            "winrate",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -648,8 +688,9 @@ def analyze_pump_upside(
 
 
 def btc_regime(cfg: dict[str, Any], tickers: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """BTC dump ise AL'yi yumuşat / engelle."""
+    """BTC dump ise AL'yi yumuşat / engelle; winrate için supportive bayrağı."""
     reg = cfg.get("regime") or {}
+    wr = cfg.get("winrate") or {}
     btc = tickers.get("BTCUSDT") or {}
     try:
         chg = float(btc.get("priceChangePercent") or 0)
@@ -660,25 +701,190 @@ def btc_regime(cfg: dict[str, Any], tickers: dict[str, dict[str, Any]]) -> dict[
     # EMA teyidi
     d1h = fetch_ohlcv(cfg, "BTCUSDT", "1h", 48)
     below_ema = False
+    btc_micro_green = False
     if d1h:
         c = closed_slice(d1h)
         e25 = ema(c["c"], 25)
         if e25 and c["c"][-1] < e25:
             below_ema = True
+        if len(c["c"]) >= 3:
+            btc_micro_green = c["c"][-1] >= c["c"][-3]
     hard = bool(reg.get("hard_block_on_btc_dump", True))
     soft_hostile = is_dump and below_ema
     hostile = bool(reg.get("enabled", True)) and soft_hostile
     block_al = bool(reg.get("enabled", True)) and bool(reg.get("block_al_on_btc_dump", True)) and (
         (hard and is_dump) or ((not hard) and soft_hostile)
     )
+    support_min = float(reg.get("btc_support_min_pct") or wr.get("btc_support_min_pct") or -1.0)
+    need_ema = bool(reg.get("require_btc_above_ema", True)) or bool(wr.get("require_btc_supportive", True))
+    supportive = (not is_dump) and chg >= support_min and (not need_ema or not below_ema or chg >= 0.5)
+    # Not: winrate "supportive" sadece manage_entries'te AL kapar;
+    # dump hard-block (block_al) radar AL üretimini de engeller.
     return {
         "btc_change_24h": chg,
         "btc_dump": is_dump,
         "btc_below_ema25": below_ema,
+        "btc_micro_green": btc_micro_green,
+        "supportive": supportive,
         "hostile": hostile,
         "block_al": block_al,
         "penalty": float(reg.get("soft_penalty") or 12),
     }
+
+
+def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> float:
+    """Winrate için birleşik edge skoru (0–100). Yüksek = daha yüksek isabet ihtimali."""
+    regime = regime or {}
+    layers = r.layers or {}
+    score = 0.0
+    # çekirdek skorlar
+    score += min(28.0, float(r.score) * 0.28)
+    score += min(28.0, float(r.pump_score) * 0.28)
+    if r.is_uc:
+        score += 10.0
+    cex_n = int(layers.get("cex_count") or 0)
+    score += min(15.0, cex_n * 4.0)
+    from_low = float(layers.get("from_nd_low_pct") or 99)
+    if from_low <= 5:
+        score += 8
+    elif from_low <= 8:
+        score += 5
+    elif from_low > 12:
+        score -= 8
+    chg = float(r.change_24h_pct or 0)
+    if -3 <= chg <= 2.5:
+        score += 8
+    elif chg > 5:
+        score -= 10
+    rsi_1h = layers.get("rsi_1h")
+    if isinstance(rsi_1h, (int, float)):
+        if 35 <= float(rsi_1h) <= 50:
+            score += 8
+        elif float(rsi_1h) > 58:
+            score -= 10
+    vol0 = layers.get("vol_0_to_pos")
+    if isinstance(vol0, (int, float)) and float(vol0) >= 1.5:
+        score += 6
+    if layers.get("higher_low"):
+        score += 4
+    if regime.get("supportive"):
+        score += 6
+    elif regime.get("hostile") or regime.get("block_al"):
+        score -= 20
+    qv = float(r.quote_volume_24h or 0)
+    if qv >= 2_000_000:
+        score += 5
+    elif qv >= 1_000_000:
+        score += 3
+    elif qv < 400_000:
+        score -= 8
+    return max(0.0, min(100.0, round(score, 1)))
+
+
+def apply_winrate_trade_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
+    """winrate.* değerlerini trade.* üzerine yedir (yakın TP, sıkı trail, az slot)."""
+    wr = cfg.get("winrate") or {}
+    if not wr.get("enabled", True):
+        return cfg
+    trade = dict(cfg.get("trade") or {})
+    mapping = (
+        "max_positions",
+        "deploy_pct",
+        "max_buy_per_cycle",
+        "max_per_sector",
+        "hard_stop_pct",
+        "quick_tp_pct",
+        "min_net_tp_pct",
+        "peak_trail_pct",
+        "peak_trail_tight_pct",
+        "trail_tighten_after_pct",
+        "time_stop_minutes",
+        "partial_tp_frac",
+        "breakeven_after_pct",
+        "require_cex_min",
+    )
+    for k in mapping:
+        if k in wr:
+            trade[k] = wr[k]
+    if "require_uc" in wr:
+        trade["require_uc"] = wr["require_uc"]
+    cfg["trade"] = trade
+    return cfg
+
+
+def passes_winrate_gates(
+    r: Analysis,
+    *,
+    cfg: dict[str, Any],
+    regime: dict[str, Any],
+    spread_pct: float | None = None,
+) -> tuple[bool, str, float]:
+    """Sıkı winrate filtresi. (ok, reason, edge)."""
+    wr = cfg.get("winrate") or {}
+    if not wr.get("enabled", True):
+        edge = compute_edge_score(r, regime)
+        r.layers["edge_score"] = edge
+        return True, "winrate_off", edge
+
+    edge = compute_edge_score(r, regime)
+    r.layers["edge_score"] = edge
+    layers = r.layers or {}
+
+    if edge < float(wr.get("min_edge_score") or 78):
+        return False, f"edge<{wr.get('min_edge_score')} ({edge})", edge
+    if float(r.score) < float(wr.get("min_score") or 70):
+        return False, f"score<{wr.get('min_score')}", edge
+    if float(r.pump_score) < float(wr.get("min_pump_score") or 68):
+        return False, f"pump<{wr.get('min_pump_score')}", edge
+
+    require_uc = bool(wr.get("require_uc", True))
+    if require_uc and not r.is_uc:
+        ok_fb = bool(wr.get("strong_al_fallback", True)) and r.action == "AL" and (
+            float(r.score) >= float(wr.get("strong_al_min_score") or 75)
+            and float(r.pump_score) >= float(wr.get("strong_al_min_pump") or 75)
+        )
+        if not ok_fb:
+            return False, "UÇ_yok", edge
+
+    cex_need = int(wr.get("require_cex_min") or 3)
+    cex_n = int(layers.get("cex_count") or 0)
+    mc_on = bool((cfg.get("multi_cex") or {}).get("enabled", True))
+    if mc_on and cex_need > 0 and cex_n < cex_need:
+        return False, f"CEX×{cex_n}<{cex_need}", edge
+
+    from_low = float(layers.get("from_nd_low_pct") or 99)
+    if from_low > float(wr.get("max_from_low_pct") or 8):
+        return False, f"dip_uzak%{from_low:.1f}", edge
+
+    chg = float(r.change_24h_pct or 0)
+    if chg > float(wr.get("max_24h_change_pct") or 3.5):
+        return False, f"24s_kacmis%{chg:+.1f}", edge
+    if chg < float(wr.get("min_24h_change_pct") or -12):
+        return False, f"24s_cok_dusuk%{chg:+.1f}", edge
+
+    rsi_1h = layers.get("rsi_1h")
+    if isinstance(rsi_1h, (int, float)):
+        if float(rsi_1h) < float(wr.get("rsi_min") or 32) or float(rsi_1h) > float(wr.get("rsi_max") or 52):
+            return False, f"rsi_disi({rsi_1h})", edge
+
+    if wr.get("require_vol_turn", True):
+        vol0 = layers.get("vol_0_to_pos")
+        vol_rise = float(layers.get("vol_rise_5m") or 0)
+        ok_vol = (isinstance(vol0, (int, float)) and float(vol0) >= 1.45) or vol_rise >= 1.5
+        if not ok_vol:
+            return False, "hacim_donus_yok", edge
+
+    min_qv = float(wr.get("min_quote_volume_usdt") or 1_000_000)
+    if float(r.quote_volume_24h or 0) < min_qv:
+        return False, f"liq<{min_qv:.0f}", edge
+
+    if wr.get("require_btc_supportive", True) and not regime.get("supportive"):
+        return False, "btc_destek_yok", edge
+
+    if spread_pct is not None and spread_pct > float(wr.get("max_spread_pct") or 0.12):
+        return False, f"spread%{spread_pct:.2f}", edge
+
+    return True, "OK", edge
 
 
 def calc_risk_levels(
@@ -1032,7 +1238,7 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
     if regime:
         lines.append(
             f"BTC rejim: %{regime.get('btc_change_24h', 0):+.2f} · "
-            f"{'⚠️ DÜŞÜŞ' if regime.get('hostile') else 'OK'}"
+            f"{'⚠️ DÜŞÜŞ' if regime.get('hostile') else ('✅ DESTEK' if regime.get('supportive') else 'OK')}"
         )
         mc = regime.get("multi_cex") or {}
         if mc:
@@ -2006,32 +2212,45 @@ def build_daily_pnl_report(trade_cfg: dict[str, Any] | None = None) -> dict[str,
 
 def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
     """
-    1) Entry -%0.5 hard stop
-    2) Dinamik trail (kâr büyüdükçe sıkılaşır)
-    3) +TP (komisyon+spread üstü)
-    4) Zaman stop (~30 dk)
+    1) Entry hard stop
+    2) Breakeven stop (ilk kâr sonrası)
+    3) Kısmi TP → kalanı trail
+    4) Dinamik trail / full TP
+    5) Zaman stop
     """
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
+    wr = cfg.get("winrate") or {}
     hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
     time_stop_m = float(trade_cfg.get("time_stop_minutes") or 30)
+    partial_frac = float(trade_cfg.get("partial_tp_frac") or wr.get("partial_tp_frac") or 0.55)
+    be_after = float(trade_cfg.get("breakeven_after_pct") or wr.get("breakeven_after_pct") or 0.40)
     bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
     min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
+    fee_side = float(trade_cfg.get("fee_rate_pct") or 0.10) * (0.75 if bnb_ok else 1.0)
     rest = account.rest_base
     closed: list[str] = []
     now = datetime.now(timezone.utc)
 
-    def do_sell(base: str, pos: dict[str, Any], price: float, reason: str, action: str) -> bool:
+    def do_sell(
+        base: str,
+        pos: dict[str, Any],
+        price: float,
+        reason: str,
+        action: str,
+        *,
+        frac: float = 1.0,
+    ) -> bool:
         symbol = pos["symbol"]
-        qty = float(pos["qty"])
+        qty = float(pos["qty"]) * max(0.0, min(1.0, frac))
         entry = float(pos["entry"])
         try:
             if account.live:
                 free = account.free_asset(base)
                 if free > 0:
-                    qty = min(qty, free)
+                    qty = min(qty, free if frac >= 0.999 else free * frac)
             if qty <= 0:
                 notes.append(f"⚠ {base} bakiye 0 → silindi ({reason})")
                 closed.append(base)
@@ -2039,7 +2258,7 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             order = account.market_sell_qty(symbol, qty)
             fill_qty = float(order.get("executedQty") or qty)
             pnl = (price / entry - 1) * 100 if entry else 0
-            notes.append(f"{reason} {base} @ {price} PnL%{pnl:+.2f}")
+            notes.append(f"{reason} {base} qty≈{fill_qty:.6g} @ {price} PnL%{pnl:+.2f}")
             log_trade(
                 {
                     "ts": now_iso(),
@@ -2051,11 +2270,21 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                     "entry": entry,
                     "peak": pos.get("peak"),
                     "pnl_pct": round(pnl, 3),
+                    "frac": frac,
                     "live": account.live,
                     "order": order,
                 }
             )
-            closed.append(base)
+            if frac >= 0.999:
+                closed.append(base)
+            else:
+                pos["qty"] = max(0.0, float(pos["qty"]) - fill_qty)
+                pos["sold_tp1"] = True
+                # kalanı breakeven'a çek
+                pos["stop"] = round(entry * (1.0 + fee_side / 100.0), 10)
+                pos["breakeven"] = True
+                if pos["qty"] <= 0:
+                    closed.append(base)
             return True
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
@@ -2092,7 +2321,19 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             sp = 0.0
         tp_need = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
 
-        if pnl_pct <= -hard_stop:
+        # dinamik stop: hard veya breakeven
+        dyn_stop = -hard_stop
+        if pos.get("breakeven") or peak_gain >= be_after:
+            be_lvl = entry * (1.0 + fee_side / 100.0)
+            if price <= be_lvl and peak_gain >= be_after:
+                do_sell(base, pos, price, f"🔒 BE stop (+%{peak_gain:.2f} zirve)", "SELL_BE")
+                continue
+            if not pos.get("breakeven") and peak_gain >= be_after:
+                pos["breakeven"] = True
+                pos["stop"] = round(be_lvl, 10)
+                notes.append(f"🔒 {base} stop → breakeven (+%{peak_gain:.2f})")
+
+        if pnl_pct <= dyn_stop:
             do_sell(base, pos, price, f"🛑 STOP%-{hard_stop}", "SELL_STOP")
             continue
 
@@ -2103,6 +2344,18 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                 price,
                 f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
                 "SELL_TRAIL",
+            )
+            continue
+
+        # kısmi TP (winrate): ilk isabet → %55 sat, kalanı trail
+        if (not pos.get("sold_tp1")) and pnl_pct >= tp_need and 0 < partial_frac < 0.999:
+            do_sell(
+                base,
+                pos,
+                price,
+                f"🎯 TP1 kısmi%{partial_frac*100:.0f} +%{pnl_pct:.2f}",
+                "SELL_TP1",
+                frac=partial_frac,
             )
             continue
 
@@ -2136,10 +2389,11 @@ def manage_entries(
     cfg: dict[str, Any],
     regime: dict[str, Any] | None = None,
 ) -> list[str]:
-    """UÇ + CEX onay + sektör çeşitliliği + bakiyeye göre slot + eşit bölüşüm."""
+    """Winrate kapıları: edge skoru + CEX + BTC destek + 2-tur onay + sektör çeşitliliği."""
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
+    wr = cfg.get("winrate") or {}
     regime = regime or {}
     min_order = float(trade_cfg.get("min_order_usdt") or 12)
     deploy = float(trade_cfg.get("deploy_pct") or 0.95)
@@ -2152,9 +2406,14 @@ def manage_entries(
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
     use_limit = bool(trade_cfg.get("use_limit_orders", True))
     limit_wait = float(trade_cfg.get("limit_wait_sec") or 3.0)
+    confirm_need = int(wr.get("confirm_cycles") or 1) if wr.get("enabled", True) else 1
+    watch: dict[str, Any] = state.setdefault("winrate_watch", {})
 
     if regime.get("block_al"):
         notes.append("⛔ BTC dump — yeni AL kapalı (hard block)")
+        return notes
+    if wr.get("enabled", True) and wr.get("require_btc_supportive", True) and not regime.get("supportive"):
+        notes.append("⛔ BTC destek yok (EMA/soft) — winrate AL kapalı")
         return notes
 
     free = account.free_usdt()
@@ -2163,6 +2422,8 @@ def manage_entries(
         notes.append("💎 BNB fee indirimi aktif (~%25)")
     min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
     max_pos = max_positions_for_balance(free, trade_cfg)
+    wr_max = int(wr.get("max_positions") or max_pos) if wr.get("enabled", True) else max_pos
+    max_pos = min(max_pos, wr_max)
     # multi-cex kapalıysa CEX şartını gevşet
     mc_on = bool((cfg.get("multi_cex") or {}).get("enabled", True))
     cex_need = require_cex if mc_on else 0
@@ -2174,8 +2435,15 @@ def manage_entries(
     notes.append(
         f"sinyal: AL={sum(1 for r in rows if r.action=='AL')} · "
         f"USDT={free:.2f} · slot_max={max_pos} · "
-        f"UÇ_zorunlu={require_uc} CEX≥{cex_need} · fee≥%{min_gross:.2f}"
+        f"UÇ_zorunlu={require_uc} CEX≥{cex_need} · fee≥%{min_gross:.2f} · "
+        f"winrate={'ON' if wr.get('enabled', True) else 'OFF'} confirm≥{confirm_need}"
     )
+    if regime:
+        notes.append(
+            f"BTC: %{float(regime.get('btc_change_24h') or 0):+.2f} "
+            f"destek={'EVET' if regime.get('supportive') else 'HAYIR'} "
+            f"EMA25={'altı' if regime.get('btc_below_ema25') else 'üstü'}"
+        )
 
     slots = max_pos - len(positions)
     if slots <= 0:
@@ -2186,6 +2454,12 @@ def manage_entries(
     for b in positions:
         s = coin_sector(b)
         sector_count[s] = sector_count.get(s, 0) + 1
+
+    # onay sayaçlarını güncelle
+    alive_bases = {r.base for r in rows if r.action == "AL"}
+    for b in list(watch.keys()):
+        if b not in alive_bases:
+            watch.pop(b, None)
 
     def is_buyable(r: Analysis) -> bool:
         if r.base in positions or not r.price:
@@ -2201,14 +2475,42 @@ def manage_entries(
         sec = coin_sector(r.base)
         if sector_count.get(sec, 0) >= max_sector:
             return False
-        if require_uc and not r.is_uc:
-            # yedek: çok güçlü AL (UÇ yoksa tamamen boş kalmasın)
-            if not (r.action == "AL" and r.pump_score >= 70 and r.score >= 72):
-                return False
+        # spread + winrate kapıları
+        try:
+            sp = account.spread_pct(r.symbol)
+        except Exception:  # noqa: BLE001
+            sp = None
+        ok, why, edge = passes_winrate_gates(r, cfg=cfg, regime=regime, spread_pct=sp)
+        r.layers["edge_score"] = edge
+        r.layers["winrate_gate"] = why
+        if not ok:
+            return False
+        if not wr.get("enabled", True):
+            # klasik UÇ fallback
+            if require_uc and not r.is_uc:
+                if not (r.action == "AL" and r.pump_score >= 70 and r.score >= 72):
+                    return False
+        # 2-tur onay
+        w = watch.get(r.base) or {"cycles": 0}
+        w["cycles"] = int(w.get("cycles") or 0) + 1
+        w["edge"] = edge
+        w["last"] = now_iso()
+        watch[r.base] = w
+        if w["cycles"] < confirm_need:
+            r.layers["winrate_gate"] = f"onay {w['cycles']}/{confirm_need}"
+            return False
         return True
 
     cands = [r for r in rows if is_buyable(r)]
-    cands.sort(key=lambda r: (0 if r.is_uc else 1, -int((r.layers or {}).get("cex_count") or 0), -r.pump_score, -r.score))
+    cands.sort(
+        key=lambda r: (
+            -float((r.layers or {}).get("edge_score") or 0),
+            0 if r.is_uc else 1,
+            -int((r.layers or {}).get("cex_count") or 0),
+            -r.pump_score,
+            -r.score,
+        )
+    )
     # sektör çeşitliliği seçerken de uygula
     picked: list[Analysis] = []
     trial_sec = dict(sector_count)
@@ -2223,16 +2525,29 @@ def manage_entries(
     cands = picked
 
     if not cands:
-        notes.append("alım yok — UÇ+CEX+sektör filtresinden geçen aday yok")
+        notes.append("alım yok — winrate/edge/onay filtresinden geçen aday yok")
         near = sorted(
             [r for r in rows if r.action == "AL"],
-            key=lambda r: (-int((r.layers or {}).get("cex_count") or 0), -r.pump_score),
-        )[:6]
+            key=lambda r: (
+                -float((r.layers or {}).get("edge_score") or compute_edge_score(r, regime)),
+                -int((r.layers or {}).get("cex_count") or 0),
+                -r.pump_score,
+            ),
+        )[:8]
         for r in near:
+            if "edge_score" not in (r.layers or {}):
+                ok, why, edge = passes_winrate_gates(r, cfg=cfg, regime=regime)
+            else:
+                why = (r.layers or {}).get("winrate_gate") or "?"
+                edge = (r.layers or {}).get("edge_score")
+            wcyc = (watch.get(r.base) or {}).get("cycles", 0)
             notes.append(
-                f"  elendi: {r.base} UÇ={r.is_uc} CEX×{(r.layers or {}).get('cex_count', 0)} "
-                f"uç={r.pump_score:.0f} sektör={coin_sector(r.base)}"
+                f"  elendi: {r.base} edge={edge} UÇ={r.is_uc} "
+                f"CEX×{(r.layers or {}).get('cex_count', 0)} "
+                f"uç={r.pump_score:.0f} onay={wcyc}/{confirm_need} "
+                f"neden={why} sektör={coin_sector(r.base)}"
             )
+        state["winrate_watch"] = watch
         return notes
 
     budget = free * deploy
@@ -2259,6 +2574,11 @@ def manage_entries(
             break
         try:
             sp = account.spread_pct(symbol)
+            # alım anında spread tekrar kontrol
+            max_sp = float(wr.get("max_spread_pct") or 0.12) if wr.get("enabled", True) else 9.0
+            if sp > max_sp:
+                notes.append(f"spread%{sp:.2f} > %{max_sp:.2f} → {sig.base} iptal")
+                continue
             tp_need = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
             order = account.smart_buy_quote(
                 symbol, quote, use_limit=use_limit, wait_sec=limit_wait
@@ -2275,6 +2595,7 @@ def manage_entries(
             stop = round(entry * (1.0 - hard_stop / 100.0), 10)
             tp1 = round(entry * (1.0 + tp_need / 100.0), 10)
             tp2 = round(entry * (1.0 + tp_need * 1.6 / 100.0), 10)
+            edge = float((sig.layers or {}).get("edge_score") or compute_edge_score(sig, regime))
             positions[sig.base] = {
                 "symbol": symbol,
                 "entry": entry,
@@ -2285,20 +2606,23 @@ def manage_entries(
                 "tp2": tp2,
                 "score": sig.score,
                 "pump_score": sig.pump_score,
+                "edge_score": edge,
                 "is_uc": sig.is_uc,
                 "cex_count": int((sig.layers or {}).get("cex_count") or 0),
                 "sector": coin_sector(sig.base),
                 "spread_pct": round(sp, 3),
                 "sold_tp1": False,
+                "breakeven": False,
                 "opened_at": now_iso(),
                 "reasons": sig.reasons[:8],
                 "signal_action": sig.action,
             }
             sector_count[coin_sector(sig.base)] = sector_count.get(coin_sector(sig.base), 0) + 1
+            watch.pop(sig.base, None)
             tag = "🚀" if sig.is_uc else "🟢"
             notes.append(
                 f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
-                f"CEX×{positions[sig.base]['cex_count']} "
+                f"edge={edge:.0f} CEX×{positions[sig.base]['cex_count']} "
                 f"sektör={positions[sig.base]['sector']} "
                 f"SL%-{hard_stop} TP%+{tp_need:.2f}"
             )
@@ -2315,6 +2639,7 @@ def manage_entries(
                     "tp1": tp1,
                     "score": sig.score,
                     "pump_score": sig.pump_score,
+                    "edge_score": edge,
                     "is_uc": sig.is_uc,
                     "cex_count": positions[sig.base]["cex_count"],
                     "live": account.live,
@@ -2324,6 +2649,7 @@ def manage_entries(
             notes.append(f"AL fail {sig.base}: {exc}")
 
     state["positions"] = positions
+    state["winrate_watch"] = watch
     return notes
 
 
@@ -2342,10 +2668,12 @@ def print_portfolio(account: BinanceAccount, state: dict[str, Any], max_pos: int
         peak = float(pos.get("peak") or entry)
         pnl = (px / entry - 1) * 100
         uc = "🚀" if pos.get("is_uc") else "  "
+        edge = pos.get("edge_score", "-")
+        be = "BE" if pos.get("breakeven") else "  "
         print(
             f"  {uc}{base:<8} qty={float(pos['qty']):.6g}  entry={entry:.6g}  "
             f"now={px:.6g} peak={peak:.6g} PnL%{pnl:+.2f}  "
-            f"sektör={pos.get('sector', '?')} CEX×{pos.get('cex_count', 0)}"
+            f"edge={edge} {be} sektör={pos.get('sector', '?')} CEX×{pos.get('cex_count', 0)}"
         )
 
 
@@ -2494,6 +2822,7 @@ def main() -> int:
     args = parser.parse_args()
 
     cfg, cfg_src = load_config(args.config)
+    cfg = apply_winrate_trade_overrides(cfg)
     if args.skip_multi_cex:
         cfg.setdefault("multi_cex", {})["enabled"] = False
     if args.fast:
@@ -2501,6 +2830,13 @@ def main() -> int:
         cfg.setdefault("multi_cex", {})["ohlcv_limit"] = 24
     print(f"[config] {cfg_src}")
     print(f"[output] {OUTPUT_PATH}")
+    wr = cfg.get("winrate") or {}
+    if wr.get("enabled", True):
+        print(
+            f"[winrate] ON · edge≥{wr.get('min_edge_score')} · CEX≥{wr.get('require_cex_min')} · "
+            f"confirm≥{wr.get('confirm_cycles')} · TP~%{wr.get('quick_tp_pct')} · "
+            f"hedef isabet ~%70–85 (piyasa bağlı)"
+        )
     mc = cfg.get("multi_cex") or {}
     if mc.get("enabled", True):
         ids = mc.get("ids") or MULTI_CEX_IDS
