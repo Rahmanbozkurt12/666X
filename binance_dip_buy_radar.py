@@ -8,9 +8,10 @@ Binance Dip AL Radar + GERÇEK al/sat (tek dosya).
 
 Kurallar (SCALP / hızlı kâr):
   • 16 CEX hacim + Binance derin analiz
+  • DefiLlama zincir para akışı + DexScreener hot token / DEX hacim
   • Hedef: ~30 dk içinde net ≈+%2 kâr
   • Entry -%1 → STOP sat | Zirveden -%1 → TRAIL sat | +%2 → TP sat
-  • Büyük koşu devam ederse trail ile zirveye yakın çıkar
+  • Tarama ~180s (ban/rate-limit koruması)
 """
 
 from __future__ import annotations
@@ -73,8 +74,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "rest_base": "https://data-api.binance.vision",
     "futures_base": "https://fapi.binance.com",
     "quote": "USDT",
-    "workers": 20,
-    "poll_seconds": 90,  # stop/trail için sık bak (~1.5 dk)
+    "workers": 14,  # ban koruması: biraz daha yumuşak
+    "poll_seconds": 180,  # 3 dk — rate-limit / IP ban riskini düşür
     "max_symbols": 0,
     "min_quote_volume_usdt": 400000,  # ince coin / kayma koruması
     "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
@@ -84,17 +85,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "early_rally_max_pct": 4.0,
         "near_low_lookback_days": 14,
         "near_low_max_pct": 10.0,
-        "max_rsi_1h": 55.0,
-        "min_rsi_1h": 25.0,
-        "volume_rise_mult_5m": 1.35,
-        "min_score_al": 62,
-        "min_score_izle": 50,
-        "min_pump_score_al": 58,
+        "max_rsi_1h": 58.0,
+        "min_rsi_1h": 22.0,
+        "volume_rise_mult_5m": 1.25,
+        "min_score_al": 55,
+        "min_score_izle": 45,
+        "min_pump_score_al": 50,
     },
     "late_reject": {
-        "max_already_up_24h_pct": 10.0,
-        "max_rsi_1h": 68.0,
-        "max_from_14d_low_pct": 25.0,
+        "max_already_up_24h_pct": 12.0,
+        "max_rsi_1h": 72.0,
+        "max_from_14d_low_pct": 28.0,
     },
     "pump_upside": {
         "enabled": True,
@@ -129,23 +130,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # SCALP: hızlı al-sat · hedef +%2 · stop -%1 · zirve trail -%1 · ~30 dk
     "winrate": {
         "enabled": True,
-        "min_edge_score": 62.0,
-        "min_score": 62.0,
-        "min_pump_score": 55.0,
+        "min_edge_score": 55.0,
+        "min_score": 55.0,
+        "min_pump_score": 48.0,
         "require_uc": False,  # scalp: UÇ şart değil
         "strong_al_fallback": True,
-        "strong_al_min_score": 65.0,
-        "strong_al_min_pump": 55.0,
-        "require_cex_min": 1,  # en az 1 CEX uyanış
-        "max_spread_pct": 0.20,
-        "max_from_low_pct": 14.0,
-        "max_24h_change_pct": 5.0,
-        "min_24h_change_pct": -15.0,
-        "rsi_min": 28.0,
-        "rsi_max": 58.0,
-        "require_vol_turn": True,
+        "strong_al_min_score": 60.0,
+        "strong_al_min_pump": 50.0,
+        "require_cex_min": 0,  # zincir/DEX onayı CEX yerine geçebilir
+        "max_spread_pct": 0.25,
+        "max_from_low_pct": 18.0,
+        "max_24h_change_pct": 6.0,
+        "min_24h_change_pct": -18.0,
+        "rsi_min": 22.0,
+        "rsi_max": 62.0,
+        "require_vol_turn": False,  # scalp: hacim şartı gevşek (DEX akış yeter)
         "require_btc_supportive": True,
-        "min_quote_volume_usdt": 500000,
+        "min_quote_volume_usdt": 400000,
         "confirm_cycles": 1,  # tek tur yeter
         "max_buy_per_cycle": 2,
         "max_per_sector": 1,
@@ -178,10 +179,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "prefer_uc": False,
         "also_buy_izle": False,
         "require_uc": False,
-        "require_cex_min": 1,
-        "izle_min_score": 60.0,
-        "izle_min_pump": 50.0,
-        "izle_max_24h_pct": 5.0,
+        "require_cex_min": 0,
+        "izle_min_score": 55.0,
+        "izle_min_pump": 45.0,
+        "izle_max_24h_pct": 6.0,
         "trade_base": "https://api.binance.com",
         "recv_window": 60000,
         "fee_rate_pct": 0.10,
@@ -214,12 +215,46 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "multi_cex": {
         "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
         "ids": list(MULTI_CEX_IDS),
-        "max_symbols_per_exchange": 60,
-        "ohlcv_limit": 30,
-        "workers_per_exchange": 8,
+        "max_symbols_per_exchange": 40,  # ban koruması
+        "ohlcv_limit": 24,
+        "workers_per_exchange": 4,
+        "pause_between_exchanges_sec": 0.6,
         "min_confluence_boost": 2,
         "confluence_score_bonus": 8,
         "uc_min_cex": 3,
+    },
+    # Zincir para akışı (DefiLlama) + DEX hot token (DexScreener) — public, key yok
+    "chain_flow": {
+        "enabled": True,
+        "llama_base": "https://api.llama.fi",
+        "dexscreener_base": "https://api.dexscreener.com",
+        "chains": [
+            "Ethereum",
+            "Solana",
+            "BSC",
+            "Base",
+            "Arbitrum",
+            "Avalanche",
+            "Polygon",
+            "Sui",
+            "Tron",
+            "OP Mainnet",
+        ],
+        "request_pause_sec": 0.35,
+        "hot_token_limit": 24,
+        "candidate_dex_check": 20,
+        "min_dex_vol_h1_usd": 25000,
+        "min_dex_vol_h24_usd": 150000,
+        "dex_surge_buys_h1": 40,
+        "score_bonus_hot": 12,
+        "score_bonus_dex_surge": 10,
+        "score_bonus_chain_inflow": 6,
+        "pump_bonus_hot": 8,
+        "edge_bonus_hot": 8,
+        "edge_bonus_dex_surge": 6,
+        "relax_cex_if_chain_ok": True,
+        "promote_izle_if_hot": True,
+        "inflow_change_1d_min": 3.0,  # zincir DEX hacmi +%3 = inflow
     },
     "stable_bases": [
         "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR",
@@ -257,7 +292,7 @@ TRADE_LOG = OUTPUT_DIR / "binance_dip_buy_trades.jsonl"
 PNL_PATH = OUTPUT_DIR / "binance_dip_buy_pnl_daily.json"
 
 HTTP = requests.Session()
-HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.1"})
+HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.2"})
 
 
 def resolve_config_path(cli_path: str | None = None) -> Path | None:
@@ -321,6 +356,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "multi_cex",
             "trade",
             "winrate",
+            "chain_flow",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -491,7 +527,7 @@ def is_tokenized_stock(base: str) -> bool:
 
 
 def list_usdt_symbols(cfg: dict[str, Any]) -> list[str]:
-    info = get_json_failover("/api/v3/exchangeInfo", prefer=cfg.get("rest_base"))
+    info = get_json(f"{cfg['rest_base']}/api/v3/exchangeInfo")
     quote = cfg.get("quote") or "USDT"
     stables = {s.upper() for s in (cfg.get("stable_bases") or [])}
     skip_bases = {s.upper() for s in (cfg.get("skip_bases") or [])}
@@ -518,16 +554,15 @@ def list_usdt_symbols(cfg: dict[str, Any]) -> list[str]:
 
 
 def fetch_tickers(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows = get_json_failover("/api/v3/ticker/24hr", prefer=cfg.get("rest_base"))
+    rows = get_json(f"{cfg['rest_base']}/api/v3/ticker/24hr")
     return {r["symbol"]: r for r in rows if "symbol" in r}
 
 
 def fetch_ohlcv(cfg: dict[str, Any], symbol: str, interval: str, limit: int) -> dict[str, list[float]] | None:
     try:
-        rows = get_json_failover(
-            "/api/v3/klines",
+        rows = get_json(
+            f"{cfg['rest_base']}/api/v3/klines",
             {"symbol": symbol, "interval": interval, "limit": limit},
-            prefer=cfg.get("rest_base"),
             timeout=25,
         )
         if not isinstance(rows, list) or len(rows) < 10:
@@ -849,10 +884,23 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
         score += 6
     if layers.get("higher_low"):
         score += 4
+    # zincir / DEX para akışı
+    if layers.get("dex_hot"):
+        score += 8.0
+    if layers.get("dex_surge"):
+        score += 6.0
+    if layers.get("chain_inflow"):
+        score += 4.0
     if regime.get("supportive"):
         score += 6
     elif regime.get("hostile") or regime.get("block_al"):
         score -= 20
+    # global DEX risk-on
+    cf = regime.get("chain_flow") or {}
+    if cf.get("risk_on"):
+        score += 3
+    elif cf.get("risk_off"):
+        score -= 4
     qv = float(r.quote_volume_24h or 0)
     if qv >= 2_000_000:
         score += 5
@@ -939,11 +987,26 @@ def passes_winrate_gates(
     cex_need = int(wr.get("require_cex_min") or 3)
     cex_n = int(layers.get("cex_count") or 0)
     mc_on = bool((cfg.get("multi_cex") or {}).get("enabled", True))
+    cf_cfg = cfg.get("chain_flow") or {}
+    chain_ok = bool(
+        layers.get("dex_hot")
+        or layers.get("dex_surge")
+        or layers.get("chain_inflow")
+    )
+    if (
+        cf_cfg.get("enabled", True)
+        and cf_cfg.get("relax_cex_if_chain_ok", True)
+        and chain_ok
+    ):
+        cex_need = 0
     if mc_on and cex_need > 0 and cex_n < cex_need:
         return False, f"CEX×{cex_n}<{cex_need}", edge
 
     from_low = float(layers.get("from_nd_low_pct") or 99)
-    if from_low > float(wr.get("max_from_low_pct") or 8):
+    max_low = float(wr.get("max_from_low_pct") or 8)
+    if chain_ok:
+        max_low = max_low + 4.0
+    if from_low > max_low:
         return False, f"dip_uzak%{from_low:.1f}", edge
 
     chg = float(r.change_24h_pct or 0)
@@ -954,10 +1017,15 @@ def passes_winrate_gates(
 
     rsi_1h = layers.get("rsi_1h")
     if isinstance(rsi_1h, (int, float)):
-        if float(rsi_1h) < float(wr.get("rsi_min") or 32) or float(rsi_1h) > float(wr.get("rsi_max") or 52):
+        rsi_lo = float(wr.get("rsi_min") or 32)
+        rsi_hi = float(wr.get("rsi_max") or 52)
+        if chain_ok:
+            rsi_hi = min(70.0, rsi_hi + 4.0)
+            rsi_lo = max(18.0, rsi_lo - 3.0)
+        if float(rsi_1h) < rsi_lo or float(rsi_1h) > rsi_hi:
             return False, f"rsi_disi({rsi_1h})", edge
 
-    if wr.get("require_vol_turn", True):
+    if wr.get("require_vol_turn", True) and not chain_ok:
         vol0 = layers.get("vol_0_to_pos")
         vol_rise = float(layers.get("vol_rise_5m") or 0)
         ok_vol = (isinstance(vol0, (int, float)) and float(vol0) >= 1.45) or vol_rise >= 1.5
@@ -1337,6 +1405,25 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
                 f"CEX tarama: {len(scanned)}/{mc.get('requested', 0)} borsa · "
                 f"{', '.join(scanned)}"
             )
+        ch = regime.get("chain_flow") or {}
+        if ch.get("enabled"):
+            mode = (
+                "RISK-ON"
+                if ch.get("risk_on")
+                else ("RISK-OFF" if ch.get("risk_off") else "nötr")
+            )
+            lines.append(
+                f"Zincir/DEX: {mode} · inflow×{ch.get('inflow_count', 0)} · "
+                f"ortΔ1g {ch.get('avg_change_1d_pct')}% · "
+                f"hot={ch.get('hot_count', 0)} · DEX eşleşen={ch.get('dex_matched', 0)}"
+            )
+            tops = ch.get("top_chains") or []
+            if tops:
+                bits = [
+                    f"{t.get('chain')} {float(t.get('change_1d_pct') or 0):+.0f}%"
+                    for t in tops[:5]
+                ]
+                lines.append("  " + " · ".join(bits))
     lines.append("")
 
     if ucs:
@@ -1624,6 +1711,9 @@ def scan_multi_cex_confluence(cfg: dict[str, Any]) -> dict[str, Any]:
         for b in wakes:
             by_base.setdefault(b, []).append(name)
         print(f"  → {name}: {len(wakes)} hacim-uyanış ({dt:.1f}s)", flush=True)
+        pause = float(mc.get("pause_between_exchanges_sec") or 0.5)
+        if pause > 0:
+            time.sleep(pause)
 
     print(
         f"[multi-cex] başarılı {len(scanned)}/{len(ids)} borsa · "
@@ -1694,16 +1784,411 @@ def apply_cex_confluence(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Zincir para akışı (DefiLlama) + DEX hot / surge (DexScreener)
+# ---------------------------------------------------------------------------
+
+# Binance base → ana zincir (para akışı eşlemesi)
+BASE_CHAIN_HINTS: dict[str, str] = {
+    "ETH": "Ethereum",
+    "WETH": "Ethereum",
+    "BNB": "BSC",
+    "SOL": "Solana",
+    "AVAX": "Avalanche",
+    "MATIC": "Polygon",
+    "POL": "Polygon",
+    "ARB": "Arbitrum",
+    "OP": "OP Mainnet",
+    "SUI": "Sui",
+    "NEAR": "Near",
+    "TRX": "Tron",
+    "FTM": "Fantom",
+    "TON": "TON",
+    "APT": "Aptos",
+    "SEI": "Sei",
+    "INJ": "Injective",
+    "TIA": "Celestia",
+    "ATOM": "Cosmos",
+    "DOT": "Polkadot",
+    "ADA": "Cardano",
+    "XRP": "XRPL",
+    "LTC": "Bitcoin",
+    "BCH": "Bitcoin",
+    "DOGE": "Dogecoin",
+}
+
+
+def _cf_pause(cfg: dict[str, Any]) -> None:
+    pause = float((cfg.get("chain_flow") or {}).get("request_pause_sec") or 0.35)
+    if pause > 0:
+        time.sleep(pause)
+
+
+def fetch_llama_chain_dex_flows(cfg: dict[str, Any]) -> dict[str, Any]:
+    """DefiLlama: büyük zincirlerde DEX 24s hacim + 1g değişim (para akışı)."""
+    cf = cfg.get("chain_flow") or {}
+    base = str(cf.get("llama_base") or "https://api.llama.fi").rstrip("/")
+    chains = list(cf.get("chains") or [])
+    inflow_min = float(cf.get("inflow_change_1d_min") or 3.0)
+    out_chains: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for chain in chains:
+        try:
+            data = get_json(
+                f"{base}/overview/dexs/{chain}",
+                params={
+                    "excludeTotalDataChart": "true",
+                    "excludeTotalDataChartBreakdown": "true",
+                },
+                timeout=25,
+            )
+            vol24 = float(data.get("total24h") or 0)
+            chg = data.get("change_1d")
+            try:
+                chg_f = float(chg) if chg is not None else 0.0
+            except (TypeError, ValueError):
+                chg_f = 0.0
+            row = {
+                "chain": chain,
+                "vol24h": round(vol24, 0),
+                "change_1d_pct": round(chg_f, 2),
+                "inflow": chg_f >= inflow_min,
+            }
+            out_chains.append(row)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{chain}:{exc.__class__.__name__}")
+        _cf_pause(cfg)
+
+    out_chains.sort(key=lambda x: -float(x.get("vol24h") or 0))
+    inflow_n = sum(1 for c in out_chains if c.get("inflow"))
+    avg_chg = (
+        sum(float(c.get("change_1d_pct") or 0) for c in out_chains) / len(out_chains)
+        if out_chains
+        else 0.0
+    )
+    return {
+        "chains": out_chains,
+        "inflow_count": inflow_n,
+        "avg_change_1d_pct": round(avg_chg, 2),
+        "risk_on": inflow_n >= 3 or avg_chg >= 5.0,
+        "risk_off": avg_chg <= -20.0 and inflow_n == 0,
+        "errors": errors,
+        "by_name": {c["chain"]: c for c in out_chains},
+    }
+
+
+def fetch_dex_hot_tokens(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """DexScreener boost listesi → sembol çözümle (Binance base eşlemesi için)."""
+    cf = cfg.get("chain_flow") or {}
+    ds = str(cf.get("dexscreener_base") or "https://api.dexscreener.com").rstrip("/")
+    limit = int(cf.get("hot_token_limit") or 24)
+    hot: dict[str, dict[str, Any]] = {}
+    try:
+        boosts = get_json(f"{ds}/token-boosts/top/v1", timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[chain] dex boost hata: {exc.__class__.__name__}", file=sys.stderr)
+        return hot
+    if not isinstance(boosts, list):
+        return hot
+
+    from collections import defaultdict
+
+    by_chain: dict[str, list[str]] = defaultdict(list)
+    seen: set[tuple[str, str]] = set()
+    for b in boosts:
+        chain = str(b.get("chainId") or "")
+        addr = str(b.get("tokenAddress") or "")
+        if not chain or not addr or (chain, addr) in seen:
+            continue
+        seen.add((chain, addr))
+        by_chain[chain].append(addr)
+        if sum(len(v) for v in by_chain.values()) >= limit:
+            break
+
+    for chain, addrs in by_chain.items():
+        for i in range(0, len(addrs), 6):
+            batch = addrs[i : i + 6]
+            try:
+                data = get_json(
+                    f"{ds}/latest/dex/tokens/{','.join(batch)}",
+                    timeout=20,
+                )
+            except Exception:  # noqa: BLE001
+                _cf_pause(cfg)
+                continue
+            pairs = data.get("pairs") if isinstance(data, dict) else None
+            if not isinstance(pairs, list):
+                _cf_pause(cfg)
+                continue
+            best: dict[str, dict[str, Any]] = {}
+            for p in pairs:
+                bt = p.get("baseToken") or {}
+                sym = str(bt.get("symbol") or "").upper().replace(" ", "")
+                if not sym or len(sym) > 15:
+                    continue
+                vol = float((p.get("volume") or {}).get("h24") or 0)
+                prev = best.get(sym)
+                if prev and float(prev.get("vol24") or 0) >= vol:
+                    continue
+                best[sym] = {
+                    "symbol": sym,
+                    "chain": chain,
+                    "vol24": vol,
+                    "vol1h": float((p.get("volume") or {}).get("h1") or 0),
+                    "chg1h": (p.get("priceChange") or {}).get("h1"),
+                    "liq": float((p.get("liquidity") or {}).get("usd") or 0),
+                    "boost": True,
+                }
+            for sym, info in best.items():
+                cur = hot.get(sym)
+                if not cur or float(info.get("vol24") or 0) > float(cur.get("vol24") or 0):
+                    hot[sym] = info
+            _cf_pause(cfg)
+    return hot
+
+
+def fetch_dex_pair_for_symbol(symbol: str, cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """DexScreener search: Binance base için en likit DEX pair + 1s hacim."""
+    cf = cfg.get("chain_flow") or {}
+    ds = str(cf.get("dexscreener_base") or "https://api.dexscreener.com").rstrip("/")
+    q = symbol.upper().strip()
+    try:
+        data = get_json(f"{ds}/latest/dex/search", params={"q": q}, timeout=20)
+    except Exception:  # noqa: BLE001
+        return None
+    pairs = data.get("pairs") if isinstance(data, dict) else None
+    if not isinstance(pairs, list):
+        return None
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for p in pairs:
+        bt = p.get("baseToken") or {}
+        sym = str(bt.get("symbol") or "").upper().replace(" ", "")
+        if sym != q:
+            continue
+        vol24 = float((p.get("volume") or {}).get("h24") or 0)
+        liq = float((p.get("liquidity") or {}).get("usd") or 0)
+        if vol24 < 1000 and liq < 5000:
+            continue
+        scored.append((vol24, p))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    p = scored[0][1]
+    tx1 = (p.get("txns") or {}).get("h1") or {}
+    return {
+        "chain": p.get("chainId"),
+        "dex": p.get("dexId"),
+        "vol24": float((p.get("volume") or {}).get("h24") or 0),
+        "vol1h": float((p.get("volume") or {}).get("h1") or 0),
+        "vol5m": float((p.get("volume") or {}).get("m5") or 0),
+        "chg1h": (p.get("priceChange") or {}).get("h1"),
+        "chg5m": (p.get("priceChange") or {}).get("m5"),
+        "buys1h": int(tx1.get("buys") or 0),
+        "sells1h": int(tx1.get("sells") or 0),
+        "liq": float((p.get("liquidity") or {}).get("usd") or 0),
+    }
+
+
+def scan_chain_money_flow(
+    cfg: dict[str, Any],
+    rows: list[Analysis] | None = None,
+) -> dict[str, Any]:
+    """
+    1) DefiLlama zincir DEX hacim akışı
+    2) DexScreener hot/boost token
+    3) (opsiyonel) aday coinlerde DEX surge kontrolü
+    """
+    cf = cfg.get("chain_flow") or {}
+    if not cf.get("enabled", True):
+        return {"enabled": False, "hot_tokens": {}, "dex_by_base": {}, "llama": {}}
+
+    print("[chain] DefiLlama zincir DEX para akışı…", flush=True)
+    llama = fetch_llama_chain_dex_flows(cfg)
+    print(
+        f"  → {len(llama.get('chains') or [])} zincir · "
+        f"inflow={llama.get('inflow_count')} · "
+        f"ortΔ1g={llama.get('avg_change_1d_pct')}% · "
+        f"{'RISK-ON' if llama.get('risk_on') else ('RISK-OFF' if llama.get('risk_off') else 'nötr')}",
+        flush=True,
+    )
+    for c in (llama.get("chains") or [])[:6]:
+        tag = "↑" if c.get("inflow") else "·"
+        print(
+            f"    {tag} {c['chain']:<12} "
+            f"${float(c.get('vol24h') or 0)/1e6:.0f}M  "
+            f"Δ1g {float(c.get('change_1d_pct') or 0):+.1f}%",
+            flush=True,
+        )
+
+    print("[chain] DexScreener hot token…", flush=True)
+    hot = fetch_dex_hot_tokens(cfg)
+    print(f"  → {len(hot)} hot sembol", flush=True)
+
+    dex_by_base: dict[str, dict[str, Any]] = {}
+    n_check = int(cf.get("candidate_dex_check") or 20)
+    if rows and n_check > 0:
+        cands = [
+            r
+            for r in rows
+            if r.action in {"AL", "İZLE"}
+            or float(r.pump_score or 0) >= 45
+            or float(r.score or 0) >= 50
+        ]
+        cands.sort(
+            key=lambda r: (
+                0 if r.action == "AL" else 1 if r.action == "İZLE" else 2,
+                -float(r.pump_score or 0),
+                -float(r.score or 0),
+            )
+        )
+        # hot eşleşenleri her zaman kontrol et
+        hot_bases = {r.base for r in rows if r.base in hot}
+        picked: list[Analysis] = []
+        seen_b: set[str] = set()
+        for r in cands:
+            if r.base in seen_b:
+                continue
+            seen_b.add(r.base)
+            picked.append(r)
+            if len(picked) >= n_check:
+                break
+        for b in hot_bases:
+            if b not in seen_b:
+                for r in rows:
+                    if r.base == b:
+                        picked.append(r)
+                        seen_b.add(b)
+                        break
+        print(f"[chain] DEX surge kontrol · {len(picked)} aday…", flush=True)
+        min_h1 = float(cf.get("min_dex_vol_h1_usd") or 25000)
+        min_h24 = float(cf.get("min_dex_vol_h24_usd") or 150000)
+        min_buys = int(cf.get("dex_surge_buys_h1") or 40)
+        for r in picked:
+            info = fetch_dex_pair_for_symbol(r.base, cfg)
+            _cf_pause(cfg)
+            if not info:
+                continue
+            surge = (
+                float(info.get("vol1h") or 0) >= min_h1
+                and float(info.get("vol24") or 0) >= min_h24
+                and int(info.get("buys1h") or 0) >= min_buys
+            )
+            info["surge"] = surge
+            info["hot"] = r.base in hot
+            dex_by_base[r.base] = info
+
+    return {
+        "enabled": True,
+        "llama": llama,
+        "hot_tokens": hot,
+        "dex_by_base": dex_by_base,
+        "risk_on": bool(llama.get("risk_on")),
+        "risk_off": bool(llama.get("risk_off")),
+        "inflow_count": int(llama.get("inflow_count") or 0),
+        "avg_change_1d_pct": llama.get("avg_change_1d_pct"),
+        "hot_count": len(hot),
+        "dex_matched": len(dex_by_base),
+    }
+
+
+def apply_chain_flow(
+    rows: list[Analysis],
+    flow: dict[str, Any],
+    cfg: dict[str, Any],
+) -> list[Analysis]:
+    """Zincir/DEX sinyallerini skora + AL yükseltmeye yedir."""
+    cf = cfg.get("chain_flow") or {}
+    if not cf.get("enabled", True) or not flow.get("enabled", True):
+        return rows
+
+    hot: dict[str, dict[str, Any]] = flow.get("hot_tokens") or {}
+    dex_by: dict[str, dict[str, Any]] = flow.get("dex_by_base") or {}
+    llama = flow.get("llama") or {}
+    by_chain: dict[str, Any] = llama.get("by_name") or {}
+    bonus_hot = float(cf.get("score_bonus_hot") or 12)
+    bonus_surge = float(cf.get("score_bonus_dex_surge") or 10)
+    bonus_in = float(cf.get("score_bonus_chain_inflow") or 6)
+    pump_hot = float(cf.get("pump_bonus_hot") or 8)
+    promote = bool(cf.get("promote_izle_if_hot", True))
+
+    out: list[Analysis] = []
+    for r in rows:
+        is_hot = r.base in hot
+        dex = dex_by.get(r.base) or {}
+        surge = bool(dex.get("surge"))
+        hint = BASE_CHAIN_HINTS.get(r.base)
+        chain_row = by_chain.get(hint) if hint else None
+        inflow = bool(chain_row and chain_row.get("inflow"))
+
+        r.layers["dex_hot"] = is_hot
+        r.layers["dex_surge"] = surge
+        r.layers["chain_inflow"] = inflow
+        if hint:
+            r.layers["chain_hint"] = hint
+        if dex:
+            r.layers["dex_vol_1h"] = dex.get("vol1h")
+            r.layers["dex_buys_1h"] = dex.get("buys1h")
+            r.layers["dex_chain"] = dex.get("chain")
+        if is_hot:
+            r.score = min(100.0, round(r.score + bonus_hot, 1))
+            r.pump_score = min(100.0, round(r.pump_score + pump_hot, 1))
+            if "DEX_HOT" not in r.reasons:
+                r.reasons.append("DEX_HOT")
+        if surge:
+            r.score = min(100.0, round(r.score + bonus_surge, 1))
+            r.pump_score = min(100.0, round(r.pump_score + 6, 1))
+            if "DEX_SURGE" not in r.reasons:
+                r.reasons.append("DEX_SURGE")
+        if inflow:
+            r.score = min(100.0, round(r.score + bonus_in, 1))
+            tag = f"CHAIN_IN_{hint}" if hint else "CHAIN_IN"
+            if tag not in r.reasons:
+                r.reasons.append(tag)
+
+        if promote and r.action == "İZLE" and (is_hot or surge) and r.change_24h_pct <= 8.0:
+            r.action = "AL"
+            r.phase = "chain_dex"
+            if "CHAIN_AL" not in r.reasons:
+                r.reasons.insert(0, "CHAIN_AL")
+
+        # hot+surge altcoin → UÇ bayrağı
+        if (
+            (is_hot or surge)
+            and r.action == "AL"
+            and r.base not in {"BTC", "ETH", "BNB", "SOL", "XRP"}
+            and r.pump_score >= 52
+            and r.change_24h_pct <= 7.0
+        ):
+            r.is_uc = True
+            r.upside_est_pct = max(float(r.upside_est_pct or 0), 45.0)
+            if not any(x.startswith("UC_POTANSIYEL") for x in r.reasons):
+                r.reasons.insert(0, f"UC_POTANSIYEL(~%{r.upside_est_pct:.0f})")
+
+        out.append(r)
+
+    order = {"AL": 0, "İZLE": 1, "GEÇ": 2, "YOK": 3}
+    out.sort(
+        key=lambda r: (
+            order.get(r.action, 9),
+            0 if r.is_uc else 1,
+            0 if r.layers.get("dex_hot") else 1,
+            0 if r.layers.get("dex_surge") else 1,
+            -int(r.layers.get("cex_count") or 0),
+            -r.pump_score,
+            -r.score,
+        )
+    )
+    return out
+
+
 def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[str, Any]]:
-    # 418/ban olursa çalışan public host'a geç
-    cfg["rest_base"] = pick_working_rest_base(cfg.get("rest_base"))
-    print("[1/5] sembol + ticker…", flush=True)
+    print("[1/6] sembol + ticker…", flush=True)
     symbols = list_usdt_symbols(cfg)
     tickers = fetch_tickers(cfg)
     max_sym = int(cfg.get("max_symbols") or 0)
     min_qv = float(cfg.get("min_quote_volume_usdt") or 0)
 
-    print("[2/5] BTC rejim + funding…", flush=True)
+    print("[2/6] BTC rejim + funding…", flush=True)
     regime = btc_regime(cfg, tickers)
     funding_map = fetch_funding_map(cfg)
     print(
@@ -1713,7 +2198,7 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
         flush=True,
     )
 
-    print("[3/5] çoklu CEX hacim taraması (15+)…", flush=True)
+    print("[3/6] çoklu CEX hacim taraması (15+)…", flush=True)
     confluence = scan_multi_cex_confluence(cfg)
     regime["multi_cex"] = {
         "requested": confluence.get("requested"),
@@ -1738,7 +2223,7 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
     if max_sym > 0:
         ranked = ranked[:max_sym]
 
-    print(f"[4/5] Binance derin analiz · {len(ranked)} coin…", flush=True)
+    print(f"[4/6] Binance derin analiz · {len(ranked)} coin…", flush=True)
     results: list[Analysis] = []
 
     def job(sym: str) -> Analysis | None:
@@ -1758,9 +2243,28 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
             if row:
                 results.append(row)
 
-    print("[5/5] CEX confluence birleştir…", flush=True)
+    print("[5/6] CEX confluence birleştir…", flush=True)
     results = apply_cex_confluence(results, confluence, cfg)
-    print(f"  → {len(results)} sonuç · CEX OK {len(confluence.get('scanned') or [])}", flush=True)
+
+    print("[6/6] zincir/DEX para akışı…", flush=True)
+    flow = scan_chain_money_flow(cfg, results)
+    results = apply_chain_flow(results, flow, cfg)
+    regime["chain_flow"] = {
+        "enabled": flow.get("enabled"),
+        "risk_on": flow.get("risk_on"),
+        "risk_off": flow.get("risk_off"),
+        "inflow_count": flow.get("inflow_count"),
+        "avg_change_1d_pct": flow.get("avg_change_1d_pct"),
+        "hot_count": flow.get("hot_count"),
+        "dex_matched": flow.get("dex_matched"),
+        "top_chains": (flow.get("llama") or {}).get("chains", [])[:8],
+        "hot_sample": list((flow.get("hot_tokens") or {}).keys())[:12],
+    }
+    print(
+        f"  → {len(results)} sonuç · CEX OK {len(confluence.get('scanned') or [])} · "
+        f"DEX hot={flow.get('hot_count')} surge={sum(1 for r in results if r.layers.get('dex_surge'))}",
+        flush=True,
+    )
     return results, regime
 
 
@@ -2015,9 +2519,7 @@ class BinanceAccount:
 
     def book_ticker(self, symbol: str) -> tuple[float, float]:
         try:
-            t = get_json_failover(
-                "/api/v3/ticker/bookTicker", {"symbol": symbol}, prefer=self.rest_base
-            )
+            t = get_json(f"{self.rest_base}/api/v3/ticker/bookTicker", {"symbol": symbol})
             return float(t["bidPrice"]), float(t["askPrice"])
         except Exception:  # noqa: BLE001
             px = get_spot_price(self.rest_base, symbol)
@@ -2681,7 +3183,16 @@ def manage_entries(
             return False
         cex_n = int((r.layers or {}).get("cex_count") or 0)
         if cex_need > 0 and cex_n < cex_need:
-            return False
+            chain_ok = bool(
+                (r.layers or {}).get("dex_hot")
+                or (r.layers or {}).get("dex_surge")
+                or (r.layers or {}).get("chain_inflow")
+            )
+            if not (
+                chain_ok
+                and (cfg.get("chain_flow") or {}).get("relax_cex_if_chain_ok", True)
+            ):
+                return False
         qv = float(r.quote_volume_24h or 0)
         if qv < float(cfg.get("min_quote_volume_usdt") or 0):
             return False
@@ -2718,6 +3229,8 @@ def manage_entries(
     cands.sort(
         key=lambda r: (
             -float((r.layers or {}).get("edge_score") or 0),
+            0 if (r.layers or {}).get("dex_hot") else 1,
+            0 if (r.layers or {}).get("dex_surge") else 1,
             0 if r.is_uc else 1,
             -int((r.layers or {}).get("cex_count") or 0),
             -r.pump_score,
@@ -2757,6 +3270,9 @@ def manage_entries(
             notes.append(
                 f"  elendi: {r.base} edge={edge} UÇ={r.is_uc} "
                 f"CEX×{(r.layers or {}).get('cex_count', 0)} "
+                f"DEX={'H' if (r.layers or {}).get('dex_hot') else '-'}"
+                f"{'S' if (r.layers or {}).get('dex_surge') else '-'}"
+                f"{'C' if (r.layers or {}).get('chain_inflow') else '-'} "
                 f"uç={r.pump_score:.0f} onay={wcyc}/{confirm_need} "
                 f"neden={why} sektör={coin_sector(r.base)}"
             )
@@ -3059,12 +3575,19 @@ def main() -> int:
             f"[scalp] ON · TP≥%{wr.get('quick_tp_pct')} · STOP%-{wr.get('hard_stop_pct')} · "
             f"TRAIL%-{wr.get('peak_trail_pct')} · edge≥{wr.get('min_edge_score')} · "
             f"CEX≥{wr.get('require_cex_min')} · confirm≥{wr.get('confirm_cycles')} · "
-            f"time≤{wr.get('time_stop_minutes')}dk"
+            f"time≤{wr.get('time_stop_minutes')}dk · poll={cfg.get('poll_seconds')}s"
+        )
+    cf = cfg.get("chain_flow") or {}
+    if cf.get("enabled", True):
+        print(
+            f"[chain] DefiLlama+DexScreener AÇIK · "
+            f"{len(cf.get('chains') or [])} zincir · "
+            f"DEX aday kontrol≤{cf.get('candidate_dex_check')}"
         )
     mc = cfg.get("multi_cex") or {}
     if mc.get("enabled", True):
         ids = mc.get("ids") or MULTI_CEX_IDS
-        print(f"[cex] {len(ids)} borsa hedefleniyor")
+        print(f"[cex] {len(ids)} borsa · pause={mc.get('pause_between_exchanges_sec', 0)}s (ban koruması)")
     workers = int(args.workers or cfg.get("workers") or 16)
 
     if args.backtest:
