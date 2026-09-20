@@ -4,13 +4,13 @@ Binance Dip AL Radar + GERÇEK al/sat (tek dosya).
 
 1) Aşağıdaki API KEY / SECRET satırlarını doldur
 2) Kaydet
-3) Çalıştır:
-     python allbinancee.py --once
-   veya sürekli:
-     python allbinancee.py
+3) Çalıştır:  python allbinancee.py --once
 
-Bulduğu AL / güçlü İZLE coinleri Binance spot'ta alır (max 10).
-Satış: SL tam · TP1 %50 · TP2 kalanı.
+Kurallar:
+  • 16 büyük CEX hacim taraması + Binance derin analiz
+  • Onaylanan coinlere USDT EŞİT bölünür (max 10 / turda max 5)
+  • Komisyon koruması: net kâr eşiği altında TP yok
+  • Entry -%0.5 → STOP sat | Zirveden -%0.5 → TRAIL sat | +%1.2 → TP sat
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "futures_base": "https://fapi.binance.com",
     "quote": "USDT",
     "workers": 20,
-    "poll_seconds": 180,
+    "poll_seconds": 120,  # sık kontrol: -0.5% stop / zirve trail için
     "max_symbols": 0,
     "min_quote_volume_usdt": 200000,
     "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
@@ -127,16 +127,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "max_positions": 10,
         "deploy_pct": 0.95,
-        "min_order_usdt": 11.0,
-        "tp1_sell_pct": 0.50,
+        "min_order_usdt": 12.0,  # komisyon + min notional payı
+        "tp1_sell_pct": 1.0,  # kârda tam çık (parça satma → ekstra komisyon yok)
         "prefer_uc": True,
-        # AL yokken güçlü İZLE de alınsın (aksi halde çoğu tur boş kalır)
         "also_buy_izle": True,
-        "izle_min_score": 50.0,
-        "izle_min_pump": 40.0,
-        "izle_max_24h_pct": 8.0,
+        "izle_min_score": 58.0,
+        "izle_min_pump": 50.0,
+        "izle_max_24h_pct": 5.0,
         "trade_base": "https://api.binance.com",
         "recv_window": 60000,
+        # --- komisyon + zarar koruması / hızlı kâr ---
+        "fee_rate_pct": 0.10,  # taraf başı ~%0.1
+        "fee_buffer_pct": 0.20,  # ekstra pay
+        "hard_stop_pct": 0.50,  # entry'den -%0.5 → SAT
+        "peak_trail_pct": 0.50,  # zirveden -%0.5 → SAT (kâr kilitle)
+        "quick_tp_pct": 1.20,  # +%1.2 hedef (komisyon üstü, ~yarım saat scalp)
+        "min_net_tp_pct": 0.50,  # net kâr < bu ise TP ile satma (komisyona ezilme)
+        "max_buy_per_cycle": 5,  # tur başına az coin → daha kaliteli
     },
     "multi_cex": {
         "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
@@ -1642,6 +1649,23 @@ class BinanceAccount:
                 return float(b.get("free") or 0)
         return 0.0
 
+    def free_asset(self, asset: str) -> float:
+        asset = (asset or "").upper()
+        if not self.live:
+            return float(self._paper_balances.get(asset, 0))
+        acc = signed_request(
+            "GET",
+            self.trade_base,
+            "/api/v3/account",
+            self.api_key,
+            self.api_secret,
+            recv_window=self.recv,
+        )
+        for b in acc.get("balances", []):
+            if b.get("asset") == asset:
+                return float(b.get("free") or 0)
+        return 0.0
+
     def market_buy_quote(self, symbol: str, quote_usdt: float) -> dict[str, Any]:
         price = get_spot_price(self.rest_base, symbol)
         if not self.live:
@@ -1725,14 +1749,80 @@ def save_positions(state: dict[str, Any]) -> None:
     save_json(POS_PATH, state)
 
 
+def round_trip_fee_pct(trade_cfg: dict[str, Any]) -> float:
+    """Alış+satış komisyonu % (tek taraf × 2)."""
+    side = float(trade_cfg.get("fee_rate_pct") or 0.10)
+    return side * 2.0
+
+
+def min_profit_after_fees_pct(trade_cfg: dict[str, Any]) -> float:
+    """Komisyona ezilmemek için minimum brüt kâr eşiği."""
+    buf = float(trade_cfg.get("fee_buffer_pct") or 0.20)
+    floor = float(trade_cfg.get("min_net_tp_pct") or 0.50)
+    return max(floor, round_trip_fee_pct(trade_cfg) + buf)
+
+
 def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
-    """SL / TP1 / TP2 satışları."""
+    """
+    Kazanç odaklı çıkış:
+      1) Entry'den -%0.5 → hard stop (zararı kes)
+      2) Zirveden -%0.5 → trailing sat (düşüş başlayınca kârı kilitle)
+      3) +quick_tp ve komisyon üstü net kâr → TP sat
+    Sahte pozisyon (-2010) otomatik temizlenir.
+    """
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
-    tp1_pct = float(trade_cfg.get("tp1_sell_pct") or 0.5)
+    hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
+    peak_trail = float(trade_cfg.get("peak_trail_pct") or 0.50)
+    quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
+    min_gross = min_profit_after_fees_pct(trade_cfg)
     rest = account.rest_base
     closed: list[str] = []
+
+    def do_sell(base: str, pos: dict[str, Any], price: float, reason: str, action: str) -> bool:
+        symbol = pos["symbol"]
+        qty = float(pos["qty"])
+        entry = float(pos["entry"])
+        try:
+            # canlıda eldeki gerçek bakiyeyi kullan (fazla satma / -2010)
+            if account.live:
+                free = account.free_asset(base) if hasattr(account, "free_asset") else qty
+                if free > 0:
+                    qty = min(qty, free)
+            if qty <= 0:
+                notes.append(f"⚠ {base} bakiye 0 → pozisyon silindi ({reason})")
+                closed.append(base)
+                return True
+            order = account.market_sell_qty(symbol, qty)
+            fill_qty = float(order.get("executedQty") or qty)
+            pnl = (price / entry - 1) * 100 if entry else 0
+            notes.append(f"{reason} {base} @ {price} PnL%{pnl:+.2f} qty={fill_qty}")
+            log_trade(
+                {
+                    "ts": now_iso(),
+                    "action": action,
+                    "base": base,
+                    "symbol": symbol,
+                    "price": price,
+                    "qty": fill_qty,
+                    "entry": entry,
+                    "peak": pos.get("peak"),
+                    "pnl_pct": round(pnl, 3),
+                    "live": account.live,
+                    "order": order,
+                }
+            )
+            closed.append(base)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)
+            notes.append(f"{action} fail {base}: {exc}")
+            if "-2010" in err or "insufficient" in err.lower():
+                notes.append(f"⚠ {base} hesapta yok → hayalet pozisyon silindi")
+                closed.append(base)
+                return True
+            return False
 
     for base, pos in list(positions.items()):
         symbol = pos["symbol"]
@@ -1742,84 +1832,30 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             notes.append(f"price fail {symbol}: {exc}")
             continue
         entry = float(pos["entry"])
-        stop = float(pos["stop"])
-        tp1 = float(pos["tp1"])
-        tp2 = float(pos["tp2"])
-        qty = float(pos["qty"])
-        sold_tp1 = bool(pos.get("sold_tp1"))
+        if entry <= 0 or price <= 0:
+            continue
+        peak = float(pos.get("peak") or entry)
+        if price > peak:
+            peak = price
+            pos["peak"] = peak
+        pnl_pct = (price / entry - 1.0) * 100.0
+        from_peak_pct = (price / peak - 1.0) * 100.0 if peak > 0 else 0.0
 
-        if price <= stop:
-            try:
-                order = account.market_sell_qty(symbol, qty)
-                fill_qty = float(order.get("executedQty") or qty)
-                notes.append(f"🛑 SL SAT {base} @ {price} qty={fill_qty}")
-                log_trade(
-                    {
-                        "ts": now_iso(),
-                        "action": "SELL_SL",
-                        "base": base,
-                        "symbol": symbol,
-                        "price": price,
-                        "qty": fill_qty,
-                        "entry": entry,
-                        "pnl_pct": round((price / entry - 1) * 100, 3),
-                        "live": account.live,
-                        "order": order,
-                    }
-                )
-                closed.append(base)
-            except Exception as exc:  # noqa: BLE001
-                notes.append(f"SL fail {base}: {exc}")
+        # 1) Hard stop: entry -0.5%
+        if pnl_pct <= -hard_stop:
+            do_sell(base, pos, price, f"🛑 STOP%-{hard_stop}", "SELL_STOP")
             continue
 
-        if price >= tp1 and not sold_tp1:
-            sell_qty = qty * tp1_pct
-            try:
-                order = account.market_sell_qty(symbol, sell_qty)
-                fill_qty = float(order.get("executedQty") or sell_qty)
-                pos["qty"] = max(0.0, qty - fill_qty)
-                pos["sold_tp1"] = True
-                notes.append(f"🎯 TP1 SAT %{tp1_pct * 100:.0f} {base} @ {price}")
-                log_trade(
-                    {
-                        "ts": now_iso(),
-                        "action": "SELL_TP1",
-                        "base": base,
-                        "symbol": symbol,
-                        "price": price,
-                        "qty": fill_qty,
-                        "entry": entry,
-                        "pnl_pct": round((price / entry - 1) * 100, 3),
-                        "live": account.live,
-                        "order": order,
-                    }
-                )
-            except Exception as exc:  # noqa: BLE001
-                notes.append(f"TP1 fail {base}: {exc}")
+        # 2) Zirveden düşüş: peak -0.5% ve zirve en az komisyon+buffer üstü olmuşsa
+        peak_gain = (peak / entry - 1.0) * 100.0
+        if peak_gain >= min_gross and from_peak_pct <= -peak_trail:
+            do_sell(base, pos, price, f"📉 TRAIL zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}", "SELL_TRAIL")
             continue
 
-        if price >= tp2:
-            try:
-                order = account.market_sell_qty(symbol, qty)
-                fill_qty = float(order.get("executedQty") or qty)
-                notes.append(f"🏁 TP2 SAT {base} @ {price} qty={fill_qty}")
-                log_trade(
-                    {
-                        "ts": now_iso(),
-                        "action": "SELL_TP2",
-                        "base": base,
-                        "symbol": symbol,
-                        "price": price,
-                        "qty": fill_qty,
-                        "entry": entry,
-                        "pnl_pct": round((price / entry - 1) * 100, 3),
-                        "live": account.live,
-                        "order": order,
-                    }
-                )
-                closed.append(base)
-            except Exception as exc:  # noqa: BLE001
-                notes.append(f"TP2 fail {base}: {exc}")
+        # 3) Hızlı TP: +quick_tp ve net komisyon üstü
+        if pnl_pct >= max(quick_tp, min_gross):
+            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f}", "SELL_TP")
+            continue
 
     for b in closed:
         positions.pop(b, None)
@@ -1833,25 +1869,30 @@ def manage_entries(
     rows: list[Analysis],
     cfg: dict[str, Any],
 ) -> list[str]:
-    """AL / UÇ (ve opsiyonel güçlü İZLE) al — max 10, bakiyeyi eşit böl."""
+    """AL / UÇ (güçlü İZLE) — bakiyeyi eşit böl, komisyon eşiğinin altında emir atma."""
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
     max_pos = int(trade_cfg.get("max_positions") or 10)
-    min_order = float(trade_cfg.get("min_order_usdt") or 11)
+    min_order = float(trade_cfg.get("min_order_usdt") or 12)
     deploy = float(trade_cfg.get("deploy_pct") or 0.95)
     prefer_uc = bool(trade_cfg.get("prefer_uc", True))
     also_izle = bool(trade_cfg.get("also_buy_izle", True))
-    izle_min_score = float(trade_cfg.get("izle_min_score") or 55)
-    izle_min_pump = float(trade_cfg.get("izle_min_pump") or 48)
-    izle_max_24h = float(trade_cfg.get("izle_max_24h_pct") or 6.5)
+    izle_min_score = float(trade_cfg.get("izle_min_score") or 58)
+    izle_min_pump = float(trade_cfg.get("izle_min_pump") or 50)
+    izle_max_24h = float(trade_cfg.get("izle_max_24h_pct") or 5.0)
+    max_buy = int(trade_cfg.get("max_buy_per_cycle") or 5)
+    hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
+    quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
+    min_gross = min_profit_after_fees_pct(trade_cfg)
 
     n_al = sum(1 for r in rows if r.action == "AL")
     n_izle = sum(1 for r in rows if r.action == "İZLE")
     notes.append(
         f"sinyal özeti: AL={n_al} İZLE={n_izle} · "
         f"mod={'LIVE' if account.live else 'PAPER'} · "
-        f"USDT={account.free_usdt():.2f}"
+        f"USDT={account.free_usdt():.2f} · "
+        f"fee-koruma≥%{min_gross:.2f} stop%-{hard_stop} trail%-{trade_cfg.get('peak_trail_pct', 0.5)}"
     )
 
     slots = max_pos - len(positions)
@@ -1860,7 +1901,7 @@ def manage_entries(
         return notes
 
     def is_buyable(r: Analysis) -> bool:
-        if r.base in positions or not (r.stop and r.tp1 and r.tp2):
+        if r.base in positions or not r.price:
             return False
         if r.action == "AL":
             return True
@@ -1876,25 +1917,17 @@ def manage_entries(
     if prefer_uc:
         cands.sort(
             key=lambda r: (
-                0 if r.action == "AL" else 1,
                 0 if r.is_uc else 1,
+                0 if r.action == "AL" else 1,
                 -r.pump_score,
                 -r.score,
             )
         )
     else:
         cands.sort(key=lambda r: (-r.pump_score, -r.score))
-    cands = cands[:slots]
+    cands = cands[: min(slots, max_buy)]
     if not cands:
-        notes.append(
-            "alım yok — AL sinyali yok"
-            + (
-                f" (İZLE var ama skor/uç eşiğinin altında; "
-                f"min skor {izle_min_score}/uç {izle_min_pump})"
-                if also_izle and n_izle
-                else ""
-            )
-        )
+        notes.append("alım yok — kaliteli AL/İZLE adayı yok")
         near = sorted(
             [r for r in rows if r.action in {"AL", "İZLE"}],
             key=lambda r: (-r.pump_score, -r.score),
@@ -1908,18 +1941,21 @@ def manage_entries(
 
     free = account.free_usdt()
     budget = free * deploy
+    # komisyon payı: her emirde biraz reserve
+    fee_reserve = budget * (float(trade_cfg.get("fee_rate_pct") or 0.10) / 100.0) * 2
+    budget = max(0.0, budget - fee_reserve)
     per = budget / len(cands)
     if per < min_order:
         n = int(budget // min_order)
         if n <= 0:
-            notes.append(f"USDT yetersiz free={free:.2f} (min {min_order})")
+            notes.append(f"USDT yetersiz free={free:.2f} (min {min_order}, komisyon payı ayrıldı)")
             return notes
         cands = cands[:n]
         per = budget / len(cands)
 
     notes.append(
-        f"AL planı: {len(cands)} coin × ~{per:.2f} USDT "
-        f"(free={free:.2f}, max={max_pos})"
+        f"AL planı: {len(cands)} coin × ~{per:.2f} USDT EŞİT "
+        f"(free={free:.2f}, max={max_pos}, komisyon-korumalı)"
     )
 
     for sig in cands:
@@ -1941,13 +1977,18 @@ def manage_entries(
                 px = get_spot_price(account.rest_base, symbol)
                 fill_qty = fill_quote / px
             entry = fill_quote / fill_qty if fill_qty else get_spot_price(account.rest_base, symbol)
+            # sıkı risk: -0.5% stop, +quick_tp hedef (sinyal SL/TP yerine)
+            stop = round(entry * (1.0 - hard_stop / 100.0), 10)
+            tp1 = round(entry * (1.0 + max(quick_tp, min_gross) / 100.0), 10)
+            tp2 = round(entry * (1.0 + max(quick_tp, min_gross) * 1.8 / 100.0), 10)
             positions[sig.base] = {
                 "symbol": symbol,
                 "entry": entry,
+                "peak": entry,
                 "qty": fill_qty,
-                "stop": sig.stop,
-                "tp1": sig.tp1,
-                "tp2": sig.tp2,
+                "stop": stop,
+                "tp1": tp1,
+                "tp2": tp2,
                 "score": sig.score,
                 "pump_score": sig.pump_score,
                 "is_uc": sig.is_uc,
@@ -1960,7 +2001,7 @@ def manage_entries(
             live_tag = "" if account.live else " [PAPER]"
             notes.append(
                 f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
-                f"SL {sig.stop} TP1 {sig.tp1} TP2 {sig.tp2}{live_tag}"
+                f"SL%-{hard_stop} TP%+{max(quick_tp, min_gross):.2f}{live_tag}"
             )
             log_trade(
                 {
@@ -1971,9 +2012,9 @@ def manage_entries(
                     "price": entry,
                     "qty": fill_qty,
                     "quote": fill_quote,
-                    "stop": sig.stop,
-                    "tp1": sig.tp1,
-                    "tp2": sig.tp2,
+                    "stop": stop,
+                    "tp1": tp1,
+                    "tp2": tp2,
                     "score": sig.score,
                     "pump_score": sig.pump_score,
                     "is_uc": sig.is_uc,
