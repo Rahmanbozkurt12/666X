@@ -6,11 +6,11 @@ Binance Dip AL Radar + GERÇEK al/sat (tek dosya).
 2) Kaydet
 3) Çalıştır:  python allbinancee.py --once
 
-Kurallar:
-  • 16 büyük CEX hacim taraması + Binance derin analiz
-  • Onaylanan coinlere USDT EŞİT bölünür (max 10 / turda max 5)
-  • Komisyon koruması: net kâr eşiği altında TP yok
-  • Entry -%0.5 → STOP sat | Zirveden -%0.5 → TRAIL sat | +%1.2 → TP sat
+Kurallar (SCALP / hızlı kâr):
+  • 16 CEX hacim + Binance derin analiz
+  • Hedef: ~30 dk içinde net ≈+%2 kâr
+  • Entry -%1 → STOP sat | Zirveden -%1 → TRAIL sat | +%2 → TP sat
+  • Büyük koşu devam ederse trail ile zirveye yakın çıkar
 """
 
 from __future__ import annotations
@@ -74,9 +74,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "futures_base": "https://fapi.binance.com",
     "quote": "USDT",
     "workers": 20,
-    "poll_seconds": 120,  # sık kontrol: -0.5% stop / zirve trail için
+    "poll_seconds": 90,  # stop/trail için sık bak (~1.5 dk)
     "max_symbols": 0,
-    "min_quote_volume_usdt": 500000,  # ince coin / kayma koruması
+    "min_quote_volume_usdt": 400000,  # ince coin / kayma koruması
     "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
     "early_buy": {
         "max_24h_change_pct": 5.0,
@@ -126,88 +126,90 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tp2_pct": 14.0,
         "use_pump_tp": True,
     },
-    # Yüksek winrate paketi: az işlem, yüksek isabet (hedef ~%70–85; %90 garantisi yok)
+    # SCALP: hızlı al-sat · hedef +%2 · stop -%1 · zirve trail -%1 · ~30 dk
     "winrate": {
         "enabled": True,
-        "min_edge_score": 78.0,
-        "min_score": 70.0,
-        "min_pump_score": 68.0,
-        "require_uc": True,
-        "strong_al_fallback": True,  # UÇ yoksa score≥75 & pump≥75
-        "strong_al_min_score": 75.0,
-        "strong_al_min_pump": 75.0,
-        "require_cex_min": 3,
-        "max_spread_pct": 0.12,
-        "max_from_low_pct": 8.0,
-        "max_24h_change_pct": 3.5,
-        "min_24h_change_pct": -12.0,
-        "rsi_min": 32.0,
-        "rsi_max": 52.0,
+        "min_edge_score": 62.0,
+        "min_score": 62.0,
+        "min_pump_score": 55.0,
+        "require_uc": False,  # scalp: UÇ şart değil
+        "strong_al_fallback": True,
+        "strong_al_min_score": 65.0,
+        "strong_al_min_pump": 55.0,
+        "require_cex_min": 1,  # en az 1 CEX uyanış
+        "max_spread_pct": 0.20,
+        "max_from_low_pct": 14.0,
+        "max_24h_change_pct": 5.0,
+        "min_24h_change_pct": -15.0,
+        "rsi_min": 28.0,
+        "rsi_max": 58.0,
         "require_vol_turn": True,
         "require_btc_supportive": True,
-        "min_quote_volume_usdt": 1000000,
-        "confirm_cycles": 2,  # 2 tur üst üste AL → al
+        "min_quote_volume_usdt": 500000,
+        "confirm_cycles": 1,  # tek tur yeter
         "max_buy_per_cycle": 2,
         "max_per_sector": 1,
-        "max_positions": 5,
-        "deploy_pct": 0.85,
-        "partial_tp_frac": 0.40,  # %40 banka, %60 runner → büyük koşuya kalsın
-        "breakeven_after_pct": 0.40,  # +%0.40 sonrası stop → maliyet+fee
-        "hard_stop_pct": 0.45,
-        "max_loss_pct": 1.20,  # -%1.2 üstü zarar → zorla sat (kaçırma)
-        "quick_tp_pct": 0.95,  # sadece kısmi banka eşiği (full çıkış değil)
-        "min_net_tp_pct": 0.50,
-        "keep_runner": True,  # büyük koşu için kalanı tut
-        "runner_trail_pct": 5.0,  # runner: zirveden -%5
-        "runner_trail_tight_pct": 2.5,  # büyük kâr sonrası
-        "runner_tighten_after_pct": 12.0,  # peak ≥%12 → sıkı trail
-        "runner_tp_pct": 40.0,  # runner full TP (~uç)
-        "runner_time_stop_minutes": 480,  # runner'a uzun süre (8s)
-        "peak_trail_pct": 0.32,  # banka öncesi (runner yokken)
-        "peak_trail_tight_pct": 0.20,
-        "trail_tighten_after_pct": 0.70,
-        "time_stop_minutes": 18,  # sadece banka öncesi / runner yok
+        "max_positions": 3,
+        "deploy_pct": 0.90,
+        "partial_tp_frac": 1.0,  # scalp: tamamını sat (runner yok)
+        "breakeven_after_pct": 0.60,
+        "hard_stop_pct": 1.0,  # entry -%1 → sat
+        "max_loss_pct": 1.0,
+        "quick_tp_pct": 2.0,  # +%2 TP
+        "min_net_tp_pct": 1.80,
+        "keep_runner": False,
+        "runner_trail_pct": 1.0,
+        "runner_trail_tight_pct": 1.0,
+        "runner_tighten_after_pct": 3.0,
+        "runner_tp_pct": 8.0,
+        "runner_time_stop_minutes": 45,
+        "peak_trail_pct": 1.0,  # zirveden -%1
+        "peak_trail_tight_pct": 1.0,
+        "trail_tighten_after_pct": 2.0,
+        "trail_activate_pct": 0.50,  # +%0.5 olduktan sonra trail açık
+        "time_stop_minutes": 30,  # 30 dk'da iş bitmezse çık
     },
     "trade": {
         "enabled": True,
-        "max_positions": 5,  # winrate: daha az slot
-        "deploy_pct": 0.85,
+        "max_positions": 3,
+        "deploy_pct": 0.90,
         "min_order_usdt": 12.0,
         "tp1_sell_pct": 1.0,
-        "prefer_uc": True,
-        "also_buy_izle": False,  # sadece kaliteli AL
-        "require_uc": True,  # UÇ şart
-        "require_cex_min": 3,  # winrate: en az 3 CEX
-        "izle_min_score": 65.0,
-        "izle_min_pump": 55.0,
-        "izle_max_24h_pct": 4.0,
+        "prefer_uc": False,
+        "also_buy_izle": False,
+        "require_uc": False,
+        "require_cex_min": 1,
+        "izle_min_score": 60.0,
+        "izle_min_pump": 50.0,
+        "izle_max_24h_pct": 5.0,
         "trade_base": "https://api.binance.com",
         "recv_window": 60000,
         "fee_rate_pct": 0.10,
-        "bnb_fee_discount": True,  # BNB varsa fee ~%25 indirim
-        "fee_buffer_pct": 0.20,
-        "hard_stop_pct": 0.45,
-        "max_loss_pct": 1.20,
-        "peak_trail_pct": 0.32,
-        "peak_trail_tight_pct": 0.20,
-        "trail_tighten_after_pct": 0.70,
-        "quick_tp_pct": 0.95,  # banka eşiği
-        "min_net_tp_pct": 0.50,
-        "time_stop_minutes": 18,
+        "bnb_fee_discount": True,
+        "fee_buffer_pct": 0.15,
+        "hard_stop_pct": 1.0,
+        "max_loss_pct": 1.0,
+        "peak_trail_pct": 1.0,
+        "peak_trail_tight_pct": 1.0,
+        "trail_tighten_after_pct": 2.0,
+        "trail_activate_pct": 0.50,
+        "quick_tp_pct": 2.0,
+        "min_net_tp_pct": 1.80,
+        "time_stop_minutes": 30,
         "time_stop_min_pnl_pct": 0.0,
         "max_buy_per_cycle": 2,
         "max_per_sector": 1,
         "use_limit_orders": True,
-        "limit_wait_sec": 3.0,
+        "limit_wait_sec": 2.0,
         "spread_tp_boost": True,
-        "partial_tp_frac": 0.40,
-        "breakeven_after_pct": 0.40,
-        "keep_runner": True,
-        "runner_trail_pct": 5.0,
-        "runner_trail_tight_pct": 2.5,
-        "runner_tighten_after_pct": 12.0,
-        "runner_tp_pct": 40.0,
-        "runner_time_stop_minutes": 480,
+        "partial_tp_frac": 1.0,
+        "breakeven_after_pct": 0.60,
+        "keep_runner": False,
+        "runner_trail_pct": 1.0,
+        "runner_trail_tight_pct": 1.0,
+        "runner_tighten_after_pct": 3.0,
+        "runner_tp_pct": 8.0,
+        "runner_time_stop_minutes": 45,
     },
     "multi_cex": {
         "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
@@ -823,6 +825,7 @@ def apply_winrate_trade_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
         "runner_tighten_after_pct",
         "runner_tp_pct",
         "runner_time_stop_minutes",
+        "trail_activate_pct",
     )
     for k in mapping:
         if k in wr:
@@ -2261,10 +2264,13 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
     time_stop_m = float(trade_cfg.get("time_stop_minutes") or 30)
     partial_frac = float(trade_cfg.get("partial_tp_frac") or wr.get("partial_tp_frac") or 0.40)
     be_after = float(trade_cfg.get("breakeven_after_pct") or wr.get("breakeven_after_pct") or 0.40)
-    keep_runner = bool(trade_cfg.get("keep_runner", wr.get("keep_runner", True)))
-    runner_tp = float(trade_cfg.get("runner_tp_pct") or wr.get("runner_tp_pct") or 40.0)
+    keep_runner = bool(trade_cfg.get("keep_runner", wr.get("keep_runner", False)))
+    runner_tp = float(trade_cfg.get("runner_tp_pct") or wr.get("runner_tp_pct") or 8.0)
     runner_time_m = float(
-        trade_cfg.get("runner_time_stop_minutes") or wr.get("runner_time_stop_minutes") or 480
+        trade_cfg.get("runner_time_stop_minutes") or wr.get("runner_time_stop_minutes") or 45
+    )
+    trail_activate = float(
+        trade_cfg.get("trail_activate_pct") or wr.get("trail_activate_pct") or 0.50
     )
     bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
     min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
@@ -2452,20 +2458,26 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                     continue
             continue
 
-        # ========== 4) banka öncesi (runner yok) ==========
-        if not keep_runner:
-            if peak_gain >= min_gross and from_peak_pct <= -trail:
-                do_sell(
-                    base,
-                    pos,
-                    price,
-                    f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
-                    "SELL_TRAIL",
-                    force_all=True,
-                )
-                continue
+        # ========== 4) SCALP: trail zirve-%1 + TP +%2 (runner kapalı) ==========
+        # kâr ≥ trail_activate olduktan sonra zirveden -trail sat
+        if (not keep_runner) and peak_gain >= trail_activate and from_peak_pct <= -trail:
+            do_sell(
+                base,
+                pos,
+                price,
+                f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
+                "SELL_TRAIL",
+                force_all=True,
+            )
+            continue
 
-        if (not pos.get("sold_tp1")) and pnl_pct >= tp_bank and 0 < partial_frac < 0.999 and keep_runner:
+        # TP1: keep_runner ise kısmi; scalp'te partial=1 → full TP aşağıda
+        if (
+            (not pos.get("sold_tp1"))
+            and pnl_pct >= tp_bank
+            and 0 < partial_frac < 0.999
+            and keep_runner
+        ):
             do_sell(
                 base,
                 pos,
@@ -2476,8 +2488,15 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             )
             continue
 
-        if (not keep_runner) and pnl_pct >= tp_bank:
-            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f} (≥{tp_bank:.2f})", "SELL_TP", force_all=True)
+        if pnl_pct >= tp_bank:
+            do_sell(
+                base,
+                pos,
+                price,
+                f"🎯 TP%+{pnl_pct:.2f} (≥{tp_bank:.2f})",
+                "SELL_TP",
+                force_all=True,
+            )
             continue
 
         opened = pos.get("opened_at")
@@ -2487,9 +2506,15 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             except ValueError:
                 age_m = 0.0
             if age_m >= time_stop_m:
-                if pnl_pct >= min_gross or (-hard_stop < pnl_pct <= 0.15):
+                # 30 dk doldu: küçük kâr varsa al, yoksa zarar büyütmeden çık
+                if pnl_pct >= min_gross or (-hard_stop < pnl_pct):
                     do_sell(
-                        base, pos, price, f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}", "SELL_TIME", force_all=True
+                        base,
+                        pos,
+                        price,
+                        f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}",
+                        "SELL_TIME",
+                        force_all=True,
                     )
                     continue
 
