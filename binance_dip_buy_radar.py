@@ -1467,6 +1467,13 @@ def log_trade(row: dict[str, Any]) -> None:
 def clean_api_credential(raw: str) -> str:
     """Boşluk / tırnak / gizli karakter temizle (Windows yapıştırma hataları)."""
     s = (raw or "").strip()
+    # akıllı tırnaklar
+    s = (
+        s.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
     if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
         s = s[1:-1].strip()
     for ch in (" ", "\t", "\r", "\n", "\u200b", "\u200c", "\u200d", "\ufeff"):
@@ -1475,9 +1482,25 @@ def clean_api_credential(raw: str) -> str:
 
 
 def resolve_api_keys() -> tuple[str, str]:
-    """Env öncelikli; yoksa dosyadaki HARDCODE alanları."""
-    key = clean_api_credential(env("BINANCE_API_KEY") or BINANCE_API_KEY_HARDCODE or "")
-    secret = clean_api_credential(env("BINANCE_API_SECRET") or BINANCE_API_SECRET_HARDCODE or "")
+    """
+    Dosyadaki HARDCODE doluysa ONU kullan.
+    (Windows/VS Code'da eski ENV secret kalırsa -1022 verir.)
+    """
+    hard_key = clean_api_credential(BINANCE_API_KEY_HARDCODE or "")
+    hard_sec = clean_api_credential(BINANCE_API_SECRET_HARDCODE or "")
+    env_key = clean_api_credential(env("BINANCE_API_KEY") or "")
+    env_sec = clean_api_credential(env("BINANCE_API_SECRET") or "")
+
+    if hard_key and hard_sec:
+        print("[keys] kaynak=DOSYA (HARDCODE)")
+        return hard_key, hard_sec
+    if env_key and env_sec:
+        print("[keys] kaynak=ENV (ortam değişkeni)")
+        return env_key, env_sec
+    # karışık doluysa birleştir
+    key = hard_key or env_key
+    secret = hard_sec or env_sec
+    print("[keys] kaynak=KARISIK/EKSIK")
     return key, secret
 
 
