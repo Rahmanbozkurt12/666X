@@ -1,40 +1,37 @@
-# Binance Dip AL Radarı v2.1 — Uç potansiyel + al/sat
+# Tek dosya: gerçek Binance al/sat
 
-**Önemli:** Eski ~1500 satırlık dosya sadece radar. Al/sat için **bu repodaki güncel** `binance_dip_buy_radar.py` (~2200 satır) gerekir.
+## 1) İndir
+https://raw.githubusercontent.com/Rahmanbozkurt12/666X/cursor/cex-5m-volume-bottom-d7b1/allbinancee.py
 
-## 1) API key
+veya `KODU_INDIR.bat`
 
-Dosyada `from __future__` **altında**:
+## 2) Key doldur (dosyanın üstü)
 
 ```python
-BINANCE_API_KEY_HARDCODE = "senin_key"
-BINANCE_API_SECRET_HARDCODE = "senin_secret"
-LIVE_HARDCODE = True   # gerçek alım
-TRADE_HARDCODE = True  # AL bulununca al/sat
+BINANCE_API_KEY_HARDCODE = "senin_api_key"
+BINANCE_API_SECRET_HARDCODE = "senin_secret_key"
+LIVE_HARDCODE = True
+TRADE_HARDCODE = True
 ```
 
-## 2) Çalıştır
+`BURAYA_API_KEY` yazısını silip kendi key’ini yaz.
+
+## 3) Çalıştır
 
 ```powershell
 cd C:\Users\Rahman\OneDrive\Desktop\bot
-
-# Gerçek alım
-python binance_dip_buy_radar.py --once --trade --live
-
-# veya çift tık
-.\AL_SAT_CALISTIR.bat
+python allbinancee.py --once
 ```
 
-Konsolda mutlaka: `[MODE] ⚠️ LIVE Binance spot`  
-`PAPER` görüyorsan Binance’ta alım olmaz → `LIVE_HARDCODE = True` yap.
+veya `output` klasöründeyse:
 
-## Ne alır / satar?
+```powershell
+python c:\Users\Rahman\OneDrive\Desktop\bot\output\allbinancee.py --once
+```
 
-| | |
-|--|--|
-| Alır | **AL** + güçlü **İZLE** (max 10 coin, USDT eşit bölünür) |
-| Satar | **SL** tam · **TP1** %50 · **TP2** kalanı |
+Konsolda görmelisin:
+- `[keys] kaynak=DOSYA`
+- `[MODE] ⚠️ LIVE`
+- `[account] USDT free ≈ ...`
 
-Binance API: **Enable Spot & Margin Trading** açık olsun; IP restrict varsa PC IP ekle.
-
-Pozisyon: `output/binance_dip_buy_positions.json`
+`-1022` = Secret yanlış. Yeni secret kopyala.
