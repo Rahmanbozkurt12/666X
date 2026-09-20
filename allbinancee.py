@@ -49,24 +49,24 @@ LIVE_HARDCODE = True
 TRADE_HARDCODE = True
 # =============================================================================
 
-# En az 15 CEX — dip radar Binance derin analiz + diğerlerinde hacim 0→+ onay
+# En büyük 16 CEX — Binance derin analiz + diğerlerinde 5m hacim 0→+ onay
 MULTI_CEX_IDS: list[str] = [
-    "binance",
-    "okx",
-    "bybit",
-    "bitget",
-    "gate",
-    "kucoin",
-    "mexc",
-    "htx",
-    "coinbase",
-    "upbit",
-    "kraken",
-    "bingx",
-    "cryptocom",
-    "whitebit",
-    "coinex",
-    "bitstamp",
+    "binance",   # 1
+    "okx",       # 2
+    "bybit",     # 3
+    "bitget",    # 4
+    "gate",      # 5  (Gate.io)
+    "kucoin",    # 6
+    "mexc",      # 7
+    "htx",       # 8  (eski Huobi)
+    "coinbase",  # 9
+    "upbit",     # 10
+    "kraken",    # 11
+    "bingx",     # 12
+    "cryptocom", # 13
+    "whitebit",  # 14
+    "coinex",    # 15
+    "bitstamp",  # 16
 ]
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -139,7 +139,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "recv_window": 60000,
     },
     "multi_cex": {
-        "enabled": False,  # True = 15 CEX (yavaş). False = sadece Binance (hızlı al/sat)
+        "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
         "ids": list(MULTI_CEX_IDS),
         "max_symbols_per_exchange": 60,
         "ohlcv_limit": 30,
