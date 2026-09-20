@@ -76,25 +76,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workers": 20,
     "poll_seconds": 120,  # sık kontrol: -0.5% stop / zirve trail için
     "max_symbols": 0,
-    "min_quote_volume_usdt": 200000,
+    "min_quote_volume_usdt": 500000,  # ince coin / kayma koruması
     "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
     "early_buy": {
-        "max_24h_change_pct": 6.0,
+        "max_24h_change_pct": 5.0,
         "min_24h_change_pct": -25.0,
-        "early_rally_max_pct": 5.0,
+        "early_rally_max_pct": 4.0,
         "near_low_lookback_days": 14,
         "near_low_max_pct": 10.0,
-        "max_rsi_1h": 58.0,
+        "max_rsi_1h": 55.0,
         "min_rsi_1h": 25.0,
         "volume_rise_mult_5m": 1.35,
-        "min_score_al": 60,
-        "min_score_izle": 46,
-        "min_pump_score_al": 55,
+        "min_score_al": 62,
+        "min_score_izle": 50,
+        "min_pump_score_al": 58,
     },
     "late_reject": {
-        "max_already_up_24h_pct": 12.0,
-        "max_rsi_1h": 70.0,
-        "max_from_14d_low_pct": 28.0,
+        "max_already_up_24h_pct": 10.0,
+        "max_rsi_1h": 68.0,
+        "max_from_14d_low_pct": 25.0,
     },
     "pump_upside": {
         "enabled": True,
@@ -107,9 +107,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "regime": {
         "enabled": True,
-        "btc_dump_pct": -3.0,
+        "btc_dump_pct": -2.0,
         "block_al_on_btc_dump": True,
-        "soft_penalty": 12,
+        "hard_block_on_btc_dump": True,  # dump tek başına AL kapar (EMA beklemez)
+        "soft_penalty": 15,
     },
     "futures": {
         "enabled": True,
@@ -127,23 +128,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "max_positions": 10,
         "deploy_pct": 0.95,
-        "min_order_usdt": 12.0,  # komisyon + min notional payı
-        "tp1_sell_pct": 1.0,  # kârda tam çık (parça satma → ekstra komisyon yok)
+        "min_order_usdt": 12.0,
+        "tp1_sell_pct": 1.0,
         "prefer_uc": True,
-        "also_buy_izle": True,
-        "izle_min_score": 58.0,
-        "izle_min_pump": 50.0,
-        "izle_max_24h_pct": 5.0,
+        "also_buy_izle": False,  # sadece kaliteli AL
+        "require_uc": True,  # UÇ şart
+        "require_cex_min": 2,  # en az N CEX onay (0=kapalı; multi-cex kapalıysa esneklik)
+        "izle_min_score": 65.0,
+        "izle_min_pump": 55.0,
+        "izle_max_24h_pct": 4.0,
         "trade_base": "https://api.binance.com",
         "recv_window": 60000,
-        # --- komisyon + zarar koruması / hızlı kâr ---
-        "fee_rate_pct": 0.10,  # taraf başı ~%0.1
-        "fee_buffer_pct": 0.20,  # ekstra pay
-        "hard_stop_pct": 0.50,  # entry'den -%0.5 → SAT
-        "peak_trail_pct": 0.50,  # zirveden -%0.5 → SAT (kâr kilitle)
-        "quick_tp_pct": 1.20,  # +%1.2 hedef (komisyon üstü, ~yarım saat scalp)
-        "min_net_tp_pct": 0.50,  # net kâr < bu ise TP ile satma (komisyona ezilme)
-        "max_buy_per_cycle": 5,  # tur başına az coin → daha kaliteli
+        "fee_rate_pct": 0.10,
+        "bnb_fee_discount": True,  # BNB varsa fee ~%25 indirim
+        "fee_buffer_pct": 0.25,
+        "hard_stop_pct": 0.50,
+        "peak_trail_pct": 0.50,
+        "peak_trail_tight_pct": 0.30,  # kâr büyüyünce sıkı trail
+        "trail_tighten_after_pct": 1.0,  # peak kâr ≥1% olunca tight trail
+        "quick_tp_pct": 1.20,
+        "min_net_tp_pct": 0.55,
+        "time_stop_minutes": 30,  # 30 dk kâr yoksa çık
+        "time_stop_min_pnl_pct": 0.0,  # zaman stop'ta min brüt (0=fee üstü veya küçük zarar)
+        "max_buy_per_cycle": 3,
+        "max_per_sector": 2,  # korelasyon: aynı sektör max 2
+        "use_limit_orders": True,  # maker dene → dolmazsa market
+        "limit_wait_sec": 3.0,
+        "spread_tp_boost": True,  # geniş spread → daha yüksek TP eşiği
     },
     "multi_cex": {
         "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
@@ -188,6 +199,7 @@ STATE_PATH = OUTPUT_DIR / "binance_dip_buy_state.json"
 BACKTEST_PATH = OUTPUT_DIR / "binance_dip_buy_backtest.json"
 POS_PATH = OUTPUT_DIR / "binance_dip_buy_positions.json"
 TRADE_LOG = OUTPUT_DIR / "binance_dip_buy_trades.jsonl"
+PNL_PATH = OUTPUT_DIR / "binance_dip_buy_pnl_daily.json"
 
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.1"})
@@ -653,13 +665,18 @@ def btc_regime(cfg: dict[str, Any], tickers: dict[str, dict[str, Any]]) -> dict[
         e25 = ema(c["c"], 25)
         if e25 and c["c"][-1] < e25:
             below_ema = True
-    hostile = bool(reg.get("enabled", True)) and is_dump and below_ema
+    hard = bool(reg.get("hard_block_on_btc_dump", True))
+    soft_hostile = is_dump and below_ema
+    hostile = bool(reg.get("enabled", True)) and soft_hostile
+    block_al = bool(reg.get("enabled", True)) and bool(reg.get("block_al_on_btc_dump", True)) and (
+        (hard and is_dump) or ((not hard) and soft_hostile)
+    )
     return {
         "btc_change_24h": chg,
         "btc_dump": is_dump,
         "btc_below_ema25": below_ema,
         "hostile": hostile,
-        "block_al": hostile and bool(reg.get("block_al_on_btc_dump", True)),
+        "block_al": block_al,
         "penalty": float(reg.get("soft_penalty") or 12),
     }
 
@@ -1697,6 +1714,120 @@ class BinanceAccount:
             recv_window=self.recv,
         )
 
+    def book_ticker(self, symbol: str) -> tuple[float, float]:
+        try:
+            t = get_json(f"{self.rest_base}/api/v3/ticker/bookTicker", {"symbol": symbol})
+            return float(t["bidPrice"]), float(t["askPrice"])
+        except Exception:  # noqa: BLE001
+            px = get_spot_price(self.rest_base, symbol)
+            return px, px
+
+    def spread_pct(self, symbol: str) -> float:
+        bid, ask = self.book_ticker(symbol)
+        if bid <= 0 or ask <= 0:
+            return 0.2
+        return max(0.0, (ask / bid - 1.0) * 100.0)
+
+    def smart_buy_quote(self, symbol: str, quote_usdt: float, *, use_limit: bool, wait_sec: float) -> dict[str, Any]:
+        """Önce maker limit dene; dolmazsa market (komisyon/kayma azaltma)."""
+        if not use_limit or not self.live:
+            return self.market_buy_quote(symbol, quote_usdt)
+        bid, ask = self.book_ticker(symbol)
+        px = bid if bid > 0 else ask
+        if px <= 0:
+            return self.market_buy_quote(symbol, quote_usdt)
+        qty = quote_usdt / px
+        filt = self.filters.get(symbol) or {}
+        step = float(filt.get("stepSize") or 0)
+        qty = round_step(qty, step) if step else qty
+        if qty <= 0:
+            return self.market_buy_quote(symbol, quote_usdt)
+        precision = max(0, int(round(-math.log10(step)))) if 0 < step < 1 else 0
+        qstr = f"{qty:.{precision}f}"
+        p_prec = max(0, len(str(bid).split(".")[-1]) if "." in str(bid) else 4)
+        pstr = f"{px:.{min(8, p_prec)}f}"
+        try:
+            order = signed_request(
+                "POST",
+                self.trade_base,
+                "/api/v3/order",
+                self.api_key,
+                self.api_secret,
+                {
+                    "symbol": symbol,
+                    "side": "BUY",
+                    "type": "LIMIT",
+                    "timeInForce": "GTC",
+                    "quantity": qstr,
+                    "price": pstr,
+                },
+                recv_window=self.recv,
+            )
+            oid = order.get("orderId")
+            time.sleep(max(0.5, wait_sec))
+            if oid:
+                st = signed_request(
+                    "GET",
+                    self.trade_base,
+                    "/api/v3/order",
+                    self.api_key,
+                    self.api_secret,
+                    {"symbol": symbol, "orderId": oid},
+                    recv_window=self.recv,
+                )
+                status = str(st.get("status") or "")
+                filled = float(st.get("executedQty") or 0)
+                if status == "FILLED" or filled > 0:
+                    # kalanı iptal
+                    if status != "FILLED":
+                        try:
+                            signed_request(
+                                "DELETE",
+                                self.trade_base,
+                                "/api/v3/order",
+                                self.api_key,
+                                self.api_secret,
+                                {"symbol": symbol, "orderId": oid},
+                                recv_window=self.recv,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    quote_filled = float(st.get("cummulativeQuoteQty") or filled * px)
+                    if status == "FILLED":
+                        return st
+                    # kısmi → kalan market
+                    remain_quote = max(0.0, quote_usdt - quote_filled)
+                    if remain_quote >= 11:
+                        mkt = self.market_buy_quote(symbol, remain_quote)
+                        return {
+                            "symbol": symbol,
+                            "side": "BUY",
+                            "status": "FILLED",
+                            "executedQty": str(filled + float(mkt.get("executedQty") or 0)),
+                            "cummulativeQuoteQty": str(
+                                quote_filled + float(mkt.get("cummulativeQuoteQty") or 0)
+                            ),
+                            "price": px,
+                            "limit_partial": True,
+                        }
+                    return st
+                # hiç dolmadı → iptal + market
+                try:
+                    signed_request(
+                        "DELETE",
+                        self.trade_base,
+                        "/api/v3/order",
+                        self.api_key,
+                        self.api_secret,
+                        {"symbol": symbol, "orderId": oid},
+                        recv_window=self.recv,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        return self.market_buy_quote(symbol, quote_usdt)
+
     def market_sell_qty(self, symbol: str, qty: float) -> dict[str, Any]:
         filt = self.filters.get(symbol) or {}
         step = float(filt.get("stepSize") or 0)
@@ -1749,55 +1880,166 @@ def save_positions(state: dict[str, Any]) -> None:
     save_json(POS_PATH, state)
 
 
-def round_trip_fee_pct(trade_cfg: dict[str, Any]) -> float:
-    """Alış+satış komisyonu % (tek taraf × 2)."""
+def round_trip_fee_pct(trade_cfg: dict[str, Any], *, bnb_discount: bool = False) -> float:
     side = float(trade_cfg.get("fee_rate_pct") or 0.10)
+    if bnb_discount:
+        side *= 0.75  # ~%25 BNB indirimi
     return side * 2.0
 
 
-def min_profit_after_fees_pct(trade_cfg: dict[str, Any]) -> float:
-    """Komisyona ezilmemek için minimum brüt kâr eşiği."""
-    buf = float(trade_cfg.get("fee_buffer_pct") or 0.20)
-    floor = float(trade_cfg.get("min_net_tp_pct") or 0.50)
-    return max(floor, round_trip_fee_pct(trade_cfg) + buf)
+def min_profit_after_fees_pct(
+    trade_cfg: dict[str, Any],
+    *,
+    bnb_discount: bool = False,
+    spread_pct: float = 0.0,
+) -> float:
+    buf = float(trade_cfg.get("fee_buffer_pct") or 0.25)
+    floor = float(trade_cfg.get("min_net_tp_pct") or 0.55)
+    need = round_trip_fee_pct(trade_cfg, bnb_discount=bnb_discount) + buf
+    if trade_cfg.get("spread_tp_boost", True) and spread_pct > 0:
+        need += min(0.8, spread_pct * 0.5)
+    return max(floor, need)
+
+
+def dynamic_trail_pct(trade_cfg: dict[str, Any], peak_gain_pct: float) -> float:
+    base = float(trade_cfg.get("peak_trail_pct") or 0.50)
+    tight = float(trade_cfg.get("peak_trail_tight_pct") or 0.30)
+    after = float(trade_cfg.get("trail_tighten_after_pct") or 1.0)
+    return tight if peak_gain_pct >= after else base
+
+
+def max_positions_for_balance(usdt: float, trade_cfg: dict[str, Any]) -> int:
+    hard = int(trade_cfg.get("max_positions") or 10)
+    min_order = float(trade_cfg.get("min_order_usdt") or 12)
+    deploy = float(trade_cfg.get("deploy_pct") or 0.95)
+    n = int((usdt * deploy) // max(min_order, 1))
+    return max(1, min(hard, max(n, 1 if usdt >= min_order else 0)))
+
+
+SECTOR_MAP: dict[str, str] = {
+    "PEPE": "meme", "DOGE": "meme", "SHIB": "meme", "FLOKI": "meme", "BONK": "meme",
+    "WIF": "meme", "BOME": "meme", "TRUMP": "meme", "NEIRO": "meme", "MEME": "meme",
+    "DOGS": "meme", "MEW": "meme", "PNUT": "meme", "GOAT": "meme",
+    "SOL": "l1", "ADA": "l1", "AVAX": "l1", "NEAR": "l1", "SUI": "l1", "APT": "l1",
+    "SEI": "l1", "TIA": "l1", "INJ": "l1", "TON": "l1", "TRX": "l1", "XRP": "l1",
+    "FET": "ai", "RENDER": "ai", "RNDR": "ai", "TAO": "ai", "WLD": "ai", "AI": "ai",
+    "ARKM": "ai", "AIXBT": "ai",
+    "UNI": "defi", "AAVE": "defi", "CRV": "defi", "MKR": "defi", "SNX": "defi",
+    "COMP": "defi", "DYDX": "defi", "JUP": "defi", "CAKE": "defi",
+    "LINK": "oracle", "PYTH": "oracle", "API3": "oracle",
+    "FIL": "storage", "AR": "storage",
+    "LTC": "payment", "BCH": "payment", "XLM": "payment",
+}
+
+
+def coin_sector(base: str) -> str:
+    return SECTOR_MAP.get((base or "").upper(), "other")
+
+
+def sync_positions_with_exchange(account: BinanceAccount, state: dict[str, Any]) -> list[str]:
+    """Hesapta olmayan hayalet pozisyonları temizle; qty'yi free bakiyeye çek."""
+    notes: list[str] = []
+    if not account.live:
+        return notes
+    positions = state.get("positions") or {}
+    drop: list[str] = []
+    for base, pos in list(positions.items()):
+        try:
+            free = account.free_asset(base)
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"sync fail {base}: {exc}")
+            continue
+        if free <= 0:
+            notes.append(f"🧹 sync: {base} hesapta yok → silindi")
+            drop.append(base)
+            continue
+        q = float(pos.get("qty") or 0)
+        if free < q * 0.98:
+            pos["qty"] = free
+            notes.append(f"🧹 sync: {base} qty {q:.6g}→{free:.6g}")
+    for b in drop:
+        positions.pop(b, None)
+    state["positions"] = positions
+    return notes
+
+
+def build_daily_pnl_report(trade_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """trades.jsonl → bugünün winrate / net PnL (fee düşülmüş tahmini)."""
+    trade_cfg = trade_cfg or {}
+    fee = round_trip_fee_pct(trade_cfg) / 100.0
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    sells: list[float] = []
+    buys = 0
+    if TRADE_LOG.exists():
+        with TRADE_LOG.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = str(row.get("ts") or "")
+                if not ts.startswith(today):
+                    continue
+                act = str(row.get("action") or "")
+                if act == "BUY":
+                    buys += 1
+                elif act.startswith("SELL"):
+                    pnl = float(row.get("pnl_pct") or 0) / 100.0
+                    sells.append(pnl - fee)
+    wins = sum(1 for x in sells if x > 0)
+    summary = {
+        "date": today,
+        "buys": buys,
+        "sells": len(sells),
+        "wins": wins,
+        "winrate_pct": round(100.0 * wins / len(sells), 1) if sells else 0.0,
+        "avg_net_pnl_pct": round(100.0 * (sum(sells) / len(sells)), 3) if sells else 0.0,
+        "sum_net_pnl_pct": round(100.0 * sum(sells), 3) if sells else 0.0,
+        "fee_roundtrip_pct": round(fee * 100, 3),
+    }
+    save_json(PNL_PATH, {"updated_at": now_iso(), "summary": summary})
+    return summary
 
 
 def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
     """
-    Kazanç odaklı çıkış:
-      1) Entry'den -%0.5 → hard stop (zararı kes)
-      2) Zirveden -%0.5 → trailing sat (düşüş başlayınca kârı kilitle)
-      3) +quick_tp ve komisyon üstü net kâr → TP sat
-    Sahte pozisyon (-2010) otomatik temizlenir.
+    1) Entry -%0.5 hard stop
+    2) Dinamik trail (kâr büyüdükçe sıkılaşır)
+    3) +TP (komisyon+spread üstü)
+    4) Zaman stop (~30 dk)
     """
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
     hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
-    peak_trail = float(trade_cfg.get("peak_trail_pct") or 0.50)
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
-    min_gross = min_profit_after_fees_pct(trade_cfg)
+    time_stop_m = float(trade_cfg.get("time_stop_minutes") or 30)
+    bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
+    min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
     rest = account.rest_base
     closed: list[str] = []
+    now = datetime.now(timezone.utc)
 
     def do_sell(base: str, pos: dict[str, Any], price: float, reason: str, action: str) -> bool:
         symbol = pos["symbol"]
         qty = float(pos["qty"])
         entry = float(pos["entry"])
         try:
-            # canlıda eldeki gerçek bakiyeyi kullan (fazla satma / -2010)
             if account.live:
-                free = account.free_asset(base) if hasattr(account, "free_asset") else qty
+                free = account.free_asset(base)
                 if free > 0:
                     qty = min(qty, free)
             if qty <= 0:
-                notes.append(f"⚠ {base} bakiye 0 → pozisyon silindi ({reason})")
+                notes.append(f"⚠ {base} bakiye 0 → silindi ({reason})")
                 closed.append(base)
                 return True
             order = account.market_sell_qty(symbol, qty)
             fill_qty = float(order.get("executedQty") or qty)
             pnl = (price / entry - 1) * 100 if entry else 0
-            notes.append(f"{reason} {base} @ {price} PnL%{pnl:+.2f} qty={fill_qty}")
+            notes.append(f"{reason} {base} @ {price} PnL%{pnl:+.2f}")
             log_trade(
                 {
                     "ts": now_iso(),
@@ -1819,7 +2061,7 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             err = str(exc)
             notes.append(f"{action} fail {base}: {exc}")
             if "-2010" in err or "insufficient" in err.lower():
-                notes.append(f"⚠ {base} hesapta yok → hayalet pozisyon silindi")
+                notes.append(f"⚠ {base} hayalet → silindi")
                 closed.append(base)
                 return True
             return False
@@ -1839,23 +2081,47 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             peak = price
             pos["peak"] = peak
         pnl_pct = (price / entry - 1.0) * 100.0
+        peak_gain = (peak / entry - 1.0) * 100.0
+        trail = dynamic_trail_pct(trade_cfg, peak_gain)
         from_peak_pct = (price / peak - 1.0) * 100.0 if peak > 0 else 0.0
 
-        # 1) Hard stop: entry -0.5%
+        # spread'e göre TP eşiği
+        try:
+            sp = account.spread_pct(symbol)
+        except Exception:  # noqa: BLE001
+            sp = 0.0
+        tp_need = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
+
         if pnl_pct <= -hard_stop:
             do_sell(base, pos, price, f"🛑 STOP%-{hard_stop}", "SELL_STOP")
             continue
 
-        # 2) Zirveden düşüş: peak -0.5% ve zirve en az komisyon+buffer üstü olmuşsa
-        peak_gain = (peak / entry - 1.0) * 100.0
-        if peak_gain >= min_gross and from_peak_pct <= -peak_trail:
-            do_sell(base, pos, price, f"📉 TRAIL zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}", "SELL_TRAIL")
+        if peak_gain >= min_gross and from_peak_pct <= -trail:
+            do_sell(
+                base,
+                pos,
+                price,
+                f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
+                "SELL_TRAIL",
+            )
             continue
 
-        # 3) Hızlı TP: +quick_tp ve net komisyon üstü
-        if pnl_pct >= max(quick_tp, min_gross):
-            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f}", "SELL_TP")
+        if pnl_pct >= tp_need:
+            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f} (≥{tp_need:.2f})", "SELL_TP")
             continue
+
+        # zaman stop
+        opened = pos.get("opened_at")
+        if opened and time_stop_m > 0:
+            try:
+                age_m = (now - datetime.fromisoformat(str(opened))).total_seconds() / 60.0
+            except ValueError:
+                age_m = 0.0
+            if age_m >= time_stop_m:
+                # kâr komisyon üstündeyse veya küçük zarar → çık (büyük zararda hard stop zaten)
+                if pnl_pct >= min_gross or (-hard_stop < pnl_pct <= 0.15):
+                    do_sell(base, pos, price, f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}", "SELL_TIME")
+                    continue
 
     for b in closed:
         positions.pop(b, None)
@@ -1868,95 +2134,118 @@ def manage_entries(
     state: dict[str, Any],
     rows: list[Analysis],
     cfg: dict[str, Any],
+    regime: dict[str, Any] | None = None,
 ) -> list[str]:
-    """AL / UÇ (güçlü İZLE) — bakiyeyi eşit böl, komisyon eşiğinin altında emir atma."""
+    """UÇ + CEX onay + sektör çeşitliliği + bakiyeye göre slot + eşit bölüşüm."""
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
-    max_pos = int(trade_cfg.get("max_positions") or 10)
+    regime = regime or {}
     min_order = float(trade_cfg.get("min_order_usdt") or 12)
     deploy = float(trade_cfg.get("deploy_pct") or 0.95)
-    prefer_uc = bool(trade_cfg.get("prefer_uc", True))
-    also_izle = bool(trade_cfg.get("also_buy_izle", True))
-    izle_min_score = float(trade_cfg.get("izle_min_score") or 58)
-    izle_min_pump = float(trade_cfg.get("izle_min_pump") or 50)
-    izle_max_24h = float(trade_cfg.get("izle_max_24h_pct") or 5.0)
-    max_buy = int(trade_cfg.get("max_buy_per_cycle") or 5)
+    require_uc = bool(trade_cfg.get("require_uc", True))
+    require_cex = int(trade_cfg.get("require_cex_min") or 2)
+    also_izle = bool(trade_cfg.get("also_buy_izle", False))
+    max_buy = int(trade_cfg.get("max_buy_per_cycle") or 3)
+    max_sector = int(trade_cfg.get("max_per_sector") or 2)
     hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
-    min_gross = min_profit_after_fees_pct(trade_cfg)
+    use_limit = bool(trade_cfg.get("use_limit_orders", True))
+    limit_wait = float(trade_cfg.get("limit_wait_sec") or 3.0)
 
-    n_al = sum(1 for r in rows if r.action == "AL")
-    n_izle = sum(1 for r in rows if r.action == "İZLE")
+    if regime.get("block_al"):
+        notes.append("⛔ BTC dump — yeni AL kapalı (hard block)")
+        return notes
+
+    free = account.free_usdt()
+    bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
+    if bnb_ok:
+        notes.append("💎 BNB fee indirimi aktif (~%25)")
+    min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
+    max_pos = max_positions_for_balance(free, trade_cfg)
+    # multi-cex kapalıysa CEX şartını gevşet
+    mc_on = bool((cfg.get("multi_cex") or {}).get("enabled", True))
+    cex_need = require_cex if mc_on else 0
+    scanned_n = len(((regime or {}).get("multi_cex") or {}).get("scanned") or [])
+    if mc_on and scanned_n == 0 and cex_need > 0:
+        notes.append("CEX tarama başarısız/boş → CEX şartı bu tur gevşetildi")
+        cex_need = 0
+
     notes.append(
-        f"sinyal özeti: AL={n_al} İZLE={n_izle} · "
-        f"mod={'LIVE' if account.live else 'PAPER'} · "
-        f"USDT={account.free_usdt():.2f} · "
-        f"fee-koruma≥%{min_gross:.2f} stop%-{hard_stop} trail%-{trade_cfg.get('peak_trail_pct', 0.5)}"
+        f"sinyal: AL={sum(1 for r in rows if r.action=='AL')} · "
+        f"USDT={free:.2f} · slot_max={max_pos} · "
+        f"UÇ_zorunlu={require_uc} CEX≥{cex_need} · fee≥%{min_gross:.2f}"
     )
 
     slots = max_pos - len(positions)
     if slots <= 0:
-        notes.append(f"pozisyon dolu ({len(positions)}/{max_pos})")
+        notes.append(f"pozisyon dolu ({len(positions)}/{max_pos}) — bakiye-slot kuralı")
         return notes
+
+    sector_count: dict[str, int] = {}
+    for b in positions:
+        s = coin_sector(b)
+        sector_count[s] = sector_count.get(s, 0) + 1
 
     def is_buyable(r: Analysis) -> bool:
         if r.base in positions or not r.price:
             return False
-        if r.action == "AL":
-            return True
-        if not also_izle or r.action != "İZLE":
+        if r.action != "AL" and not (also_izle and r.action == "İZLE"):
             return False
-        return (
-            r.score >= izle_min_score
-            and r.pump_score >= izle_min_pump
-            and r.change_24h_pct <= izle_max_24h
-        )
+        if require_uc and not r.is_uc:
+            return False
+        cex_n = int((r.layers or {}).get("cex_count") or 0)
+        if cex_need > 0 and cex_n < cex_need:
+            return False
+        qv = float(r.quote_volume_24h or 0)
+        if qv < float(cfg.get("min_quote_volume_usdt") or 0):
+            return False
+        sec = coin_sector(r.base)
+        if sector_count.get(sec, 0) >= max_sector:
+            return False
+        return True
 
     cands = [r for r in rows if is_buyable(r)]
-    if prefer_uc:
-        cands.sort(
-            key=lambda r: (
-                0 if r.is_uc else 1,
-                0 if r.action == "AL" else 1,
-                -r.pump_score,
-                -r.score,
-            )
-        )
-    else:
-        cands.sort(key=lambda r: (-r.pump_score, -r.score))
-    cands = cands[: min(slots, max_buy)]
+    cands.sort(key=lambda r: (0 if r.is_uc else 1, -int((r.layers or {}).get("cex_count") or 0), -r.pump_score, -r.score))
+    # sektör çeşitliliği seçerken de uygula
+    picked: list[Analysis] = []
+    trial_sec = dict(sector_count)
+    for r in cands:
+        if len(picked) >= min(slots, max_buy):
+            break
+        sec = coin_sector(r.base)
+        if trial_sec.get(sec, 0) >= max_sector:
+            continue
+        picked.append(r)
+        trial_sec[sec] = trial_sec.get(sec, 0) + 1
+    cands = picked
+
     if not cands:
-        notes.append("alım yok — kaliteli AL/İZLE adayı yok")
+        notes.append("alım yok — UÇ+CEX+sektör filtresinden geçen aday yok")
         near = sorted(
-            [r for r in rows if r.action in {"AL", "İZLE"}],
-            key=lambda r: (-r.pump_score, -r.score),
-        )[:5]
+            [r for r in rows if r.action == "AL"],
+            key=lambda r: (-int((r.layers or {}).get("cex_count") or 0), -r.pump_score),
+        )[:6]
         for r in near:
             notes.append(
-                f"  aday değil: {r.base} {r.action} skor={r.score:.0f} "
-                f"uç={r.pump_score:.0f} 24s%{r.change_24h_pct:+.1f}"
+                f"  elendi: {r.base} UÇ={r.is_uc} CEX×{(r.layers or {}).get('cex_count', 0)} "
+                f"uç={r.pump_score:.0f} sektör={coin_sector(r.base)}"
             )
         return notes
 
-    free = account.free_usdt()
     budget = free * deploy
-    # komisyon payı: her emirde biraz reserve
-    fee_reserve = budget * (float(trade_cfg.get("fee_rate_pct") or 0.10) / 100.0) * 2
+    fee_reserve = budget * (round_trip_fee_pct(trade_cfg, bnb_discount=bnb_ok) / 100.0)
     budget = max(0.0, budget - fee_reserve)
     per = budget / len(cands)
     if per < min_order:
         n = int(budget // min_order)
         if n <= 0:
-            notes.append(f"USDT yetersiz free={free:.2f} (min {min_order}, komisyon payı ayrıldı)")
+            notes.append(f"USDT yetersiz free={free:.2f} (min {min_order})")
             return notes
         cands = cands[:n]
         per = budget / len(cands)
 
-    notes.append(
-        f"AL planı: {len(cands)} coin × ~{per:.2f} USDT EŞİT "
-        f"(free={free:.2f}, max={max_pos}, komisyon-korumalı)"
-    )
+    notes.append(f"AL planı: {len(cands)} coin × ~{per:.2f} USDT EŞİT (komisyon payı ayrıldı)")
 
     for sig in cands:
         symbol = sig.symbol
@@ -1967,7 +2256,11 @@ def manage_entries(
             notes.append(f"bakiye bitti, {sig.base} atlandı")
             break
         try:
-            order = account.market_buy_quote(symbol, quote)
+            sp = account.spread_pct(symbol)
+            tp_need = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
+            order = account.smart_buy_quote(
+                symbol, quote, use_limit=use_limit, wait_sec=limit_wait
+            )
             fill_quote = float(order.get("cummulativeQuoteQty") or quote)
             fill_qty = float(order.get("executedQty") or 0)
             px = float(order.get("price") or 0)
@@ -1977,10 +2270,9 @@ def manage_entries(
                 px = get_spot_price(account.rest_base, symbol)
                 fill_qty = fill_quote / px
             entry = fill_quote / fill_qty if fill_qty else get_spot_price(account.rest_base, symbol)
-            # sıkı risk: -0.5% stop, +quick_tp hedef (sinyal SL/TP yerine)
             stop = round(entry * (1.0 - hard_stop / 100.0), 10)
-            tp1 = round(entry * (1.0 + max(quick_tp, min_gross) / 100.0), 10)
-            tp2 = round(entry * (1.0 + max(quick_tp, min_gross) * 1.8 / 100.0), 10)
+            tp1 = round(entry * (1.0 + tp_need / 100.0), 10)
+            tp2 = round(entry * (1.0 + tp_need * 1.6 / 100.0), 10)
             positions[sig.base] = {
                 "symbol": symbol,
                 "entry": entry,
@@ -1992,16 +2284,21 @@ def manage_entries(
                 "score": sig.score,
                 "pump_score": sig.pump_score,
                 "is_uc": sig.is_uc,
+                "cex_count": int((sig.layers or {}).get("cex_count") or 0),
+                "sector": coin_sector(sig.base),
+                "spread_pct": round(sp, 3),
                 "sold_tp1": False,
                 "opened_at": now_iso(),
                 "reasons": sig.reasons[:8],
                 "signal_action": sig.action,
             }
-            tag = "🚀" if sig.is_uc else ("🟡" if sig.action == "İZLE" else "🟢")
-            live_tag = "" if account.live else " [PAPER]"
+            sector_count[coin_sector(sig.base)] = sector_count.get(coin_sector(sig.base), 0) + 1
+            tag = "🚀" if sig.is_uc else "🟢"
             notes.append(
                 f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
-                f"SL%-{hard_stop} TP%+{max(quick_tp, min_gross):.2f}{live_tag}"
+                f"CEX×{positions[sig.base]['cex_count']} "
+                f"sektör={positions[sig.base]['sector']} "
+                f"SL%-{hard_stop} TP%+{tp_need:.2f}"
             )
             log_trade(
                 {
@@ -2014,16 +2311,11 @@ def manage_entries(
                     "quote": fill_quote,
                     "stop": stop,
                     "tp1": tp1,
-                    "tp2": tp2,
                     "score": sig.score,
                     "pump_score": sig.pump_score,
                     "is_uc": sig.is_uc,
+                    "cex_count": positions[sig.base]["cex_count"],
                     "live": account.live,
-                    "order": {
-                        k: order.get(k)
-                        for k in ("orderId", "status", "paper", "executedQty")
-                        if k in order
-                    },
                 }
             )
         except Exception as exc:  # noqa: BLE001
@@ -2045,13 +2337,13 @@ def print_portfolio(account: BinanceAccount, state: dict[str, Any], max_pos: int
         except Exception:  # noqa: BLE001
             px = float(pos["entry"])
         entry = float(pos["entry"])
+        peak = float(pos.get("peak") or entry)
         pnl = (px / entry - 1) * 100
         uc = "🚀" if pos.get("is_uc") else "  "
         print(
             f"  {uc}{base:<8} qty={float(pos['qty']):.6g}  entry={entry:.6g}  "
-            f"now={px:.6g}  PnL%{pnl:+.2f}  "
-            f"SL {pos['stop']}  TP1 {pos['tp1']}  TP2 {pos['tp2']}"
-            f"{'  [TP1✓]' if pos.get('sold_tp1') else ''}"
+            f"now={px:.6g} peak={peak:.6g} PnL%{pnl:+.2f}  "
+            f"sektör={pos.get('sector', '?')} CEX×{pos.get('cex_count', 0)}"
         )
 
 
@@ -2059,21 +2351,34 @@ def run_trade_cycle(
     account: BinanceAccount,
     rows: list[Analysis],
     cfg: dict[str, Any],
+    regime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Exit kontrolü → AL girişleri → pozisyon kaydı."""
     state = load_positions()
-    print("\n[exit] açık pozisyonlar kontrol…", flush=True)
+    print("\n[sync] hesap ↔ pozisyon…", flush=True)
+    for note in sync_positions_with_exchange(account, state):
+        print(" ", note)
+    save_positions(state)
+
+    print("\n[exit] stop / trail / tp / time…", flush=True)
     for note in manage_exits(account, state, cfg):
         print(" ", note)
     save_positions(state)
 
-    print("\n[entry] AL / UÇ alımlar…", flush=True)
-    for note in manage_entries(account, state, rows, cfg):
+    print("\n[entry] UÇ+CEX alımlar…", flush=True)
+    for note in manage_entries(account, state, rows, cfg, regime=regime):
         print(" ", note)
     save_positions(state)
 
-    max_pos = int((cfg.get("trade") or {}).get("max_positions") or 10)
-    print_portfolio(account, state, max_pos=max_pos)
+    free = account.free_usdt()
+    max_pos = max_positions_for_balance(free, cfg.get("trade") or {})
+    print_portfolio(account, state, max_pos=max(max_pos, len(state.get("positions") or {})))
+
+    pnl = build_daily_pnl_report(cfg.get("trade") or {})
+    print(
+        f"\n[pnl bugün] satiş={pnl['sells']} winrate%{pnl['winrate_pct']} "
+        f"ort_net%{pnl['avg_net_pnl_pct']} toplam_net%{pnl['sum_net_pnl_pct']}",
+        flush=True,
+    )
     return state
 
 
