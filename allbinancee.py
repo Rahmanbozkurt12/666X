@@ -151,15 +151,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_per_sector": 1,
         "max_positions": 5,
         "deploy_pct": 0.85,
-        "partial_tp_frac": 0.55,  # ilk TP'de %55 sat
+        "partial_tp_frac": 0.40,  # %40 banka, %60 runner → büyük koşuya kalsın
         "breakeven_after_pct": 0.40,  # +%0.40 sonrası stop → maliyet+fee
         "hard_stop_pct": 0.45,
-        "quick_tp_pct": 0.95,
+        "quick_tp_pct": 0.95,  # sadece kısmi banka eşiği (full çıkış değil)
         "min_net_tp_pct": 0.50,
-        "peak_trail_pct": 0.32,
+        "keep_runner": True,  # büyük koşu için kalanı tut
+        "runner_trail_pct": 5.0,  # runner: zirveden -%5
+        "runner_trail_tight_pct": 2.5,  # büyük kâr sonrası
+        "runner_tighten_after_pct": 12.0,  # peak ≥%12 → sıkı trail
+        "runner_tp_pct": 40.0,  # runner full TP (~uç)
+        "runner_time_stop_minutes": 480,  # runner'a uzun süre (8s)
+        "peak_trail_pct": 0.32,  # banka öncesi (runner yokken)
         "peak_trail_tight_pct": 0.20,
         "trail_tighten_after_pct": 0.70,
-        "time_stop_minutes": 18,
+        "time_stop_minutes": 18,  # sadece banka öncesi / runner yok
     },
     "trade": {
         "enabled": True,
@@ -181,19 +187,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "fee_buffer_pct": 0.20,
         "hard_stop_pct": 0.45,
         "peak_trail_pct": 0.32,
-        "peak_trail_tight_pct": 0.20,  # kâr büyüyünce sıkı trail
-        "trail_tighten_after_pct": 0.70,  # peak kâr ≥0.7% olunca tight trail
-        "quick_tp_pct": 0.95,  # daha yakın TP → daha yüksek isabet
+        "peak_trail_tight_pct": 0.20,
+        "trail_tighten_after_pct": 0.70,
+        "quick_tp_pct": 0.95,  # banka eşiği
         "min_net_tp_pct": 0.50,
-        "time_stop_minutes": 18,  # hızlı çık
-        "time_stop_min_pnl_pct": 0.0,  # zaman stop'ta min brüt (0=fee üstü veya küçük zarar)
+        "time_stop_minutes": 18,
+        "time_stop_min_pnl_pct": 0.0,
         "max_buy_per_cycle": 2,
-        "max_per_sector": 1,  # korelasyon: aynı sektör max 1
-        "use_limit_orders": True,  # maker dene → dolmazsa market
+        "max_per_sector": 1,
+        "use_limit_orders": True,
         "limit_wait_sec": 3.0,
-        "spread_tp_boost": True,  # geniş spread → daha yüksek TP eşiği
-        "partial_tp_frac": 0.55,
+        "spread_tp_boost": True,
+        "partial_tp_frac": 0.40,
         "breakeven_after_pct": 0.40,
+        "keep_runner": True,
+        "runner_trail_pct": 5.0,
+        "runner_trail_tight_pct": 2.5,
+        "runner_tighten_after_pct": 12.0,
+        "runner_tp_pct": 40.0,
+        "runner_time_stop_minutes": 480,
     },
     "multi_cex": {
         "enabled": True,  # 15+ büyük CEX hacim taraması AÇIK
@@ -782,7 +794,7 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
 
 
 def apply_winrate_trade_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
-    """winrate.* değerlerini trade.* üzerine yedir (yakın TP, sıkı trail, az slot)."""
+    """winrate.* değerlerini trade.* üzerine yedir (banka + runner)."""
     wr = cfg.get("winrate") or {}
     if not wr.get("enabled", True):
         return cfg
@@ -802,6 +814,12 @@ def apply_winrate_trade_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
         "partial_tp_frac",
         "breakeven_after_pct",
         "require_cex_min",
+        "keep_runner",
+        "runner_trail_pct",
+        "runner_trail_tight_pct",
+        "runner_tighten_after_pct",
+        "runner_tp_pct",
+        "runner_time_stop_minutes",
     )
     for k in mapping:
         if k in wr:
@@ -2107,7 +2125,17 @@ def min_profit_after_fees_pct(
     return max(floor, need)
 
 
-def dynamic_trail_pct(trade_cfg: dict[str, Any], peak_gain_pct: float) -> float:
+def dynamic_trail_pct(
+    trade_cfg: dict[str, Any],
+    peak_gain_pct: float,
+    *,
+    runner: bool = False,
+) -> float:
+    if runner:
+        base = float(trade_cfg.get("runner_trail_pct") or 5.0)
+        tight = float(trade_cfg.get("runner_trail_tight_pct") or 2.5)
+        after = float(trade_cfg.get("runner_tighten_after_pct") or 12.0)
+        return tight if peak_gain_pct >= after else base
     base = float(trade_cfg.get("peak_trail_pct") or 0.50)
     tight = float(trade_cfg.get("peak_trail_tight_pct") or 0.30)
     after = float(trade_cfg.get("trail_tighten_after_pct") or 1.0)
@@ -2212,11 +2240,10 @@ def build_daily_pnl_report(trade_cfg: dict[str, Any] | None = None) -> dict[str,
 
 def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
     """
-    1) Entry hard stop
-    2) Breakeven stop (ilk kâr sonrası)
-    3) Kısmi TP → kalanı trail
-    4) Dinamik trail / full TP
-    5) Zaman stop
+    1) Hard stop / breakeven
+    2) TP1 banka (kısmi) → kalan = RUNNER (büyük koşu)
+    3) Runner: geniş trail + yüksek TP2 (/%10–50+)
+    4) Zaman stop (runner'da çok daha uzun)
     """
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
@@ -2225,8 +2252,13 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
     hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
     time_stop_m = float(trade_cfg.get("time_stop_minutes") or 30)
-    partial_frac = float(trade_cfg.get("partial_tp_frac") or wr.get("partial_tp_frac") or 0.55)
+    partial_frac = float(trade_cfg.get("partial_tp_frac") or wr.get("partial_tp_frac") or 0.40)
     be_after = float(trade_cfg.get("breakeven_after_pct") or wr.get("breakeven_after_pct") or 0.40)
+    keep_runner = bool(trade_cfg.get("keep_runner", wr.get("keep_runner", True)))
+    runner_tp = float(trade_cfg.get("runner_tp_pct") or wr.get("runner_tp_pct") or 40.0)
+    runner_time_m = float(
+        trade_cfg.get("runner_time_stop_minutes") or wr.get("runner_time_stop_minutes") or 480
+    )
     bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
     min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
     fee_side = float(trade_cfg.get("fee_rate_pct") or 0.10) * (0.75 if bnb_ok else 1.0)
@@ -2280,11 +2312,16 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             else:
                 pos["qty"] = max(0.0, float(pos["qty"]) - fill_qty)
                 pos["sold_tp1"] = True
-                # kalanı breakeven'a çek
+                pos["runner"] = True
                 pos["stop"] = round(entry * (1.0 + fee_side / 100.0), 10)
                 pos["breakeven"] = True
                 if pos["qty"] <= 0:
                     closed.append(base)
+                else:
+                    notes.append(
+                        f"🚀 RUNNER {base} kaldı qty≈{pos['qty']:.6g} "
+                        f"(trail~%{trade_cfg.get('runner_trail_pct', 5)} / TP2~%{pos.get('runner_tp_pct', runner_tp)})"
+                    )
             return True
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
@@ -2311,18 +2348,18 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             pos["peak"] = peak
         pnl_pct = (price / entry - 1.0) * 100.0
         peak_gain = (peak / entry - 1.0) * 100.0
-        trail = dynamic_trail_pct(trade_cfg, peak_gain)
+        is_runner = bool(pos.get("runner") or pos.get("sold_tp1")) and keep_runner
+        trail = dynamic_trail_pct(trade_cfg, peak_gain, runner=is_runner)
         from_peak_pct = (price / peak - 1.0) * 100.0 if peak > 0 else 0.0
 
-        # spread'e göre TP eşiği
         try:
             sp = account.spread_pct(symbol)
         except Exception:  # noqa: BLE001
             sp = 0.0
-        tp_need = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
+        tp_bank = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
+        tp2 = float(pos.get("runner_tp_pct") or runner_tp)
 
-        # dinamik stop: hard veya breakeven
-        dyn_stop = -hard_stop
+        # hard / breakeven
         if pos.get("breakeven") or peak_gain >= be_after:
             be_lvl = entry * (1.0 + fee_side / 100.0)
             if price <= be_lvl and peak_gain >= be_after:
@@ -2333,37 +2370,73 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                 pos["stop"] = round(be_lvl, 10)
                 notes.append(f"🔒 {base} stop → breakeven (+%{peak_gain:.2f})")
 
-        if pnl_pct <= dyn_stop:
+        if pnl_pct <= -hard_stop:
             do_sell(base, pos, price, f"🛑 STOP%-{hard_stop}", "SELL_STOP")
             continue
 
-        if peak_gain >= min_gross and from_peak_pct <= -trail:
-            do_sell(
-                base,
-                pos,
-                price,
-                f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
-                "SELL_TRAIL",
-            )
-            continue
+        # --- RUNNER: geniş trail + büyük TP2 (/%10–50+) ---
+        if is_runner:
+            if pnl_pct >= tp2:
+                do_sell(base, pos, price, f"🏁 RUNNER TP2%+{pnl_pct:.1f} (≥{tp2:.0f})", "SELL_TP2")
+                continue
+            # runner trail: sadece anlamlı pullback'te (zirveden -trail)
+            if peak_gain >= max(tp_bank, 2.0) and from_peak_pct <= -trail:
+                do_sell(
+                    base,
+                    pos,
+                    price,
+                    f"📉 RUNNER TRAIL%{trail:.1f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
+                    "SELL_TRAIL",
+                )
+                continue
+            # runner zaman: çok daha uzun; sadece yatay/küçük kârda çık
+            opened = pos.get("opened_at")
+            if opened and runner_time_m > 0:
+                try:
+                    age_m = (now - datetime.fromisoformat(str(opened))).total_seconds() / 60.0
+                except ValueError:
+                    age_m = 0.0
+                if age_m >= runner_time_m and pnl_pct < max(8.0, tp_bank * 3):
+                    do_sell(
+                        base,
+                        pos,
+                        price,
+                        f"⏱ RUNNER TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}",
+                        "SELL_TIME",
+                    )
+                    continue
+            continue  # runner'da erken full TP / sıkı trail YOK
 
-        # kısmi TP (winrate): ilk isabet → %55 sat, kalanı trail
-        if (not pos.get("sold_tp1")) and pnl_pct >= tp_need and 0 < partial_frac < 0.999:
+        # --- BANKA öncesi: sıkı trail KAPALI (keep_runner) → büyük koşuyu öldürmesin ---
+        if not keep_runner:
+            if peak_gain >= min_gross and from_peak_pct <= -trail:
+                do_sell(
+                    base,
+                    pos,
+                    price,
+                    f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
+                    "SELL_TRAIL",
+                )
+                continue
+
+        # TP1 banka → runner bırak
+        if (not pos.get("sold_tp1")) and pnl_pct >= tp_bank and 0 < partial_frac < 0.999 and keep_runner:
             do_sell(
                 base,
                 pos,
                 price,
-                f"🎯 TP1 kısmi%{partial_frac*100:.0f} +%{pnl_pct:.2f}",
+                f"🎯 TP1 banka%{partial_frac*100:.0f} +%{pnl_pct:.2f} → runner kalır",
                 "SELL_TP1",
                 frac=partial_frac,
             )
             continue
 
-        if pnl_pct >= tp_need:
-            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f} (≥{tp_need:.2f})", "SELL_TP")
+        # keep_runner kapalıysa eski full TP
+        if (not keep_runner) and pnl_pct >= tp_bank:
+            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f} (≥{tp_bank:.2f})", "SELL_TP")
             continue
 
-        # zaman stop
+        # banka öncesi zaman stop (runner olmadan)
         opened = pos.get("opened_at")
         if opened and time_stop_m > 0:
             try:
@@ -2371,7 +2444,6 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             except ValueError:
                 age_m = 0.0
             if age_m >= time_stop_m:
-                # kâr komisyon üstündeyse veya küçük zarar → çık (büyük zararda hard stop zaten)
                 if pnl_pct >= min_gross or (-hard_stop < pnl_pct <= 0.15):
                     do_sell(base, pos, price, f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}", "SELL_TIME")
                     continue
@@ -2594,7 +2666,13 @@ def manage_entries(
             entry = fill_quote / fill_qty if fill_qty else get_spot_price(account.rest_base, symbol)
             stop = round(entry * (1.0 - hard_stop / 100.0), 10)
             tp1 = round(entry * (1.0 + tp_need / 100.0), 10)
-            tp2 = round(entry * (1.0 + tp_need * 1.6 / 100.0), 10)
+            runner_tp_pct = float(
+                (trade_cfg.get("runner_tp_pct") or wr.get("runner_tp_pct") or 40.0)
+            )
+            # UÇ tahmini varsa runner hedefini ona çek (en az %15)
+            if sig.upside_est_pct and float(sig.upside_est_pct) >= 15:
+                runner_tp_pct = max(runner_tp_pct, float(sig.upside_est_pct))
+            tp2 = round(entry * (1.0 + runner_tp_pct / 100.0), 10)
             edge = float((sig.layers or {}).get("edge_score") or compute_edge_score(sig, regime))
             positions[sig.base] = {
                 "symbol": symbol,
@@ -2604,6 +2682,7 @@ def manage_entries(
                 "stop": stop,
                 "tp1": tp1,
                 "tp2": tp2,
+                "runner_tp_pct": round(runner_tp_pct, 1),
                 "score": sig.score,
                 "pump_score": sig.pump_score,
                 "edge_score": edge,
@@ -2612,6 +2691,7 @@ def manage_entries(
                 "sector": coin_sector(sig.base),
                 "spread_pct": round(sp, 3),
                 "sold_tp1": False,
+                "runner": False,
                 "breakeven": False,
                 "opened_at": now_iso(),
                 "reasons": sig.reasons[:8],
@@ -2624,7 +2704,7 @@ def manage_entries(
                 f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
                 f"edge={edge:.0f} CEX×{positions[sig.base]['cex_count']} "
                 f"sektör={positions[sig.base]['sector']} "
-                f"SL%-{hard_stop} TP%+{tp_need:.2f}"
+                f"SL%-{hard_stop} banka%+{tp_need:.2f} runnerTP%{runner_tp_pct:.0f}"
             )
             log_trade(
                 {
@@ -2670,10 +2750,12 @@ def print_portfolio(account: BinanceAccount, state: dict[str, Any], max_pos: int
         uc = "🚀" if pos.get("is_uc") else "  "
         edge = pos.get("edge_score", "-")
         be = "BE" if pos.get("breakeven") else "  "
+        rn = "RUN" if (pos.get("runner") or pos.get("sold_tp1")) else "   "
         print(
             f"  {uc}{base:<8} qty={float(pos['qty']):.6g}  entry={entry:.6g}  "
             f"now={px:.6g} peak={peak:.6g} PnL%{pnl:+.2f}  "
-            f"edge={edge} {be} sektör={pos.get('sector', '?')} CEX×{pos.get('cex_count', 0)}"
+            f"edge={edge} {be} {rn} TP2%{pos.get('runner_tp_pct', '-')} "
+            f"sektör={pos.get('sector', '?')} CEX×{pos.get('cex_count', 0)}"
         )
 
 
