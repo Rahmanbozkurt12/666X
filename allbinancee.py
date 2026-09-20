@@ -340,6 +340,71 @@ def get_json(url: str, params: dict[str, Any] | None = None, timeout: int = 30) 
     return r.json()
 
 
+# data-api.binance.vision bazen 418 (IP/WAF) döner → resmi API'ye düş
+BINANCE_PUBLIC_BASES: list[str] = [
+    "https://data-api.binance.vision",
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+]
+
+
+def get_json_failover(
+    path: str,
+    params: dict[str, Any] | None = None,
+    *,
+    bases: list[str] | None = None,
+    timeout: int = 30,
+    prefer: str | None = None,
+) -> Any:
+    """Public GET: 418/429/5xx olursa diğer Binance host'una geç."""
+    ordered: list[str] = []
+    if prefer:
+        ordered.append(prefer.rstrip("/"))
+    for b in bases or BINANCE_PUBLIC_BASES:
+        b = b.rstrip("/")
+        if b not in ordered:
+            ordered.append(b)
+    last_exc: Exception | None = None
+    for base in ordered:
+        url = f"{base}{path}"
+        try:
+            r = HTTP.get(url, params=params or {}, timeout=timeout)
+            if r.status_code in {418, 429, 403, 451} or r.status_code >= 500:
+                last_exc = RuntimeError(f"{r.status_code} {base}")
+                print(f"[api] {r.status_code} {base} → yedek deneniyor…", file=sys.stderr)
+                time.sleep(0.4)
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            print(f"[api] hata {base}: {exc.__class__.__name__} → yedek…", file=sys.stderr)
+            time.sleep(0.4)
+            continue
+    raise RuntimeError(f"Binance public API başarısız ({path}): {last_exc}")
+
+
+def pick_working_rest_base(prefer: str | None = None) -> str:
+    """Çalışan public base seç (exchangeInfo ile test)."""
+    ordered: list[str] = []
+    if prefer:
+        ordered.append(prefer.rstrip("/"))
+    for b in BINANCE_PUBLIC_BASES:
+        if b not in ordered:
+            ordered.append(b)
+    for base in ordered:
+        try:
+            r = HTTP.get(f"{base}/api/v3/ping", timeout=10)
+            if r.status_code == 200:
+                if base != (prefer or "").rstrip("/"):
+                    print(f"[api] rest_base → {base}", flush=True)
+                return base
+        except Exception:  # noqa: BLE001
+            continue
+    return (prefer or BINANCE_PUBLIC_BASES[1]).rstrip("/")
+
+
 @dataclass
 class Analysis:
     symbol: str
@@ -1823,7 +1888,7 @@ def signed_request(
 
 
 def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
-    info = get_json(f"{rest_base}/api/v3/exchangeInfo")
+    info = get_json_failover("/api/v3/exchangeInfo", prefer=rest_base)
     out: dict[str, dict[str, float]] = {}
     for s in info.get("symbols", []):
         sym = s["symbol"]
@@ -1847,7 +1912,7 @@ def round_step(qty: float, step: float) -> float:
 
 
 def get_spot_price(rest_base: str, symbol: str) -> float:
-    t = get_json(f"{rest_base}/api/v3/ticker/price", {"symbol": symbol})
+    t = get_json_failover("/api/v3/ticker/price", {"symbol": symbol}, prefer=rest_base)
     return float(t["price"])
 
 
@@ -1858,7 +1923,8 @@ class BinanceAccount:
         self.live = live
         self.api_key, self.api_secret = resolve_api_keys()
         self.trade_base = trade_cfg.get("trade_base") or "https://api.binance.com"
-        self.rest_base = cfg.get("rest_base") or "https://data-api.binance.vision"
+        prefer_rest = cfg.get("rest_base") or "https://data-api.binance.vision"
+        self.rest_base = pick_working_rest_base(prefer_rest)
         self.recv = int(trade_cfg.get("recv_window") or 60000)
         self.filters = load_lot_filters(self.rest_base)
         self._paper_usdt = float(env("PAPER_USDT") or 1000)
@@ -2985,9 +3051,10 @@ def main() -> int:
     wr = cfg.get("winrate") or {}
     if wr.get("enabled", True):
         print(
-            f"[winrate] ON · edge≥{wr.get('min_edge_score')} · CEX≥{wr.get('require_cex_min')} · "
-            f"confirm≥{wr.get('confirm_cycles')} · TP~%{wr.get('quick_tp_pct')} · "
-            f"hedef isabet ~%70–85 (piyasa bağlı)"
+            f"[scalp] ON · TP≥%{wr.get('quick_tp_pct')} · STOP%-{wr.get('hard_stop_pct')} · "
+            f"TRAIL%-{wr.get('peak_trail_pct')} · edge≥{wr.get('min_edge_score')} · "
+            f"CEX≥{wr.get('require_cex_min')} · confirm≥{wr.get('confirm_cycles')} · "
+            f"time≤{wr.get('time_stop_minutes')}dk"
         )
     mc = cfg.get("multi_cex") or {}
     if mc.get("enabled", True):

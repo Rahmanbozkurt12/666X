@@ -340,6 +340,71 @@ def get_json(url: str, params: dict[str, Any] | None = None, timeout: int = 30) 
     return r.json()
 
 
+# data-api.binance.vision bazen 418 (IP/WAF) döner → resmi API'ye düş
+BINANCE_PUBLIC_BASES: list[str] = [
+    "https://data-api.binance.vision",
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+]
+
+
+def get_json_failover(
+    path: str,
+    params: dict[str, Any] | None = None,
+    *,
+    bases: list[str] | None = None,
+    timeout: int = 30,
+    prefer: str | None = None,
+) -> Any:
+    """Public GET: 418/429/5xx olursa diğer Binance host'una geç."""
+    ordered: list[str] = []
+    if prefer:
+        ordered.append(prefer.rstrip("/"))
+    for b in bases or BINANCE_PUBLIC_BASES:
+        b = b.rstrip("/")
+        if b not in ordered:
+            ordered.append(b)
+    last_exc: Exception | None = None
+    for base in ordered:
+        url = f"{base}{path}"
+        try:
+            r = HTTP.get(url, params=params or {}, timeout=timeout)
+            if r.status_code in {418, 429, 403, 451} or r.status_code >= 500:
+                last_exc = RuntimeError(f"{r.status_code} {base}")
+                print(f"[api] {r.status_code} {base} → yedek deneniyor…", file=sys.stderr)
+                time.sleep(0.4)
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            print(f"[api] hata {base}: {exc.__class__.__name__} → yedek…", file=sys.stderr)
+            time.sleep(0.4)
+            continue
+    raise RuntimeError(f"Binance public API başarısız ({path}): {last_exc}")
+
+
+def pick_working_rest_base(prefer: str | None = None) -> str:
+    """Çalışan public base seç (exchangeInfo ile test)."""
+    ordered: list[str] = []
+    if prefer:
+        ordered.append(prefer.rstrip("/"))
+    for b in BINANCE_PUBLIC_BASES:
+        if b not in ordered:
+            ordered.append(b)
+    for base in ordered:
+        try:
+            r = HTTP.get(f"{base}/api/v3/ping", timeout=10)
+            if r.status_code == 200:
+                if base != (prefer or "").rstrip("/"):
+                    print(f"[api] rest_base → {base}", flush=True)
+                return base
+        except Exception:  # noqa: BLE001
+            continue
+    return (prefer or BINANCE_PUBLIC_BASES[1]).rstrip("/")
+
+
 @dataclass
 class Analysis:
     symbol: str
@@ -426,7 +491,7 @@ def is_tokenized_stock(base: str) -> bool:
 
 
 def list_usdt_symbols(cfg: dict[str, Any]) -> list[str]:
-    info = get_json(f"{cfg['rest_base']}/api/v3/exchangeInfo")
+    info = get_json_failover("/api/v3/exchangeInfo", prefer=cfg.get("rest_base"))
     quote = cfg.get("quote") or "USDT"
     stables = {s.upper() for s in (cfg.get("stable_bases") or [])}
     skip_bases = {s.upper() for s in (cfg.get("skip_bases") or [])}
@@ -453,15 +518,16 @@ def list_usdt_symbols(cfg: dict[str, Any]) -> list[str]:
 
 
 def fetch_tickers(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows = get_json(f"{cfg['rest_base']}/api/v3/ticker/24hr")
+    rows = get_json_failover("/api/v3/ticker/24hr", prefer=cfg.get("rest_base"))
     return {r["symbol"]: r for r in rows if "symbol" in r}
 
 
 def fetch_ohlcv(cfg: dict[str, Any], symbol: str, interval: str, limit: int) -> dict[str, list[float]] | None:
     try:
-        rows = get_json(
-            f"{cfg['rest_base']}/api/v3/klines",
+        rows = get_json_failover(
+            "/api/v3/klines",
             {"symbol": symbol, "interval": interval, "limit": limit},
+            prefer=cfg.get("rest_base"),
             timeout=25,
         )
         if not isinstance(rows, list) or len(rows) < 10:
@@ -1629,6 +1695,8 @@ def apply_cex_confluence(
 
 
 def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[str, Any]]:
+    # 418/ban olursa çalışan public host'a geç
+    cfg["rest_base"] = pick_working_rest_base(cfg.get("rest_base"))
     print("[1/5] sembol + ticker…", flush=True)
     symbols = list_usdt_symbols(cfg)
     tickers = fetch_tickers(cfg)
@@ -1823,7 +1891,7 @@ def signed_request(
 
 
 def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
-    info = get_json(f"{rest_base}/api/v3/exchangeInfo")
+    info = get_json_failover("/api/v3/exchangeInfo", prefer=rest_base)
     out: dict[str, dict[str, float]] = {}
     for s in info.get("symbols", []):
         sym = s["symbol"]
@@ -1847,7 +1915,7 @@ def round_step(qty: float, step: float) -> float:
 
 
 def get_spot_price(rest_base: str, symbol: str) -> float:
-    t = get_json(f"{rest_base}/api/v3/ticker/price", {"symbol": symbol})
+    t = get_json_failover("/api/v3/ticker/price", {"symbol": symbol}, prefer=rest_base)
     return float(t["price"])
 
 
@@ -1858,7 +1926,8 @@ class BinanceAccount:
         self.live = live
         self.api_key, self.api_secret = resolve_api_keys()
         self.trade_base = trade_cfg.get("trade_base") or "https://api.binance.com"
-        self.rest_base = cfg.get("rest_base") or "https://data-api.binance.vision"
+        prefer_rest = cfg.get("rest_base") or "https://data-api.binance.vision"
+        self.rest_base = pick_working_rest_base(prefer_rest)
         self.recv = int(trade_cfg.get("recv_window") or 60000)
         self.filters = load_lot_filters(self.rest_base)
         self._paper_usdt = float(env("PAPER_USDT") or 1000)
@@ -1946,7 +2015,9 @@ class BinanceAccount:
 
     def book_ticker(self, symbol: str) -> tuple[float, float]:
         try:
-            t = get_json(f"{self.rest_base}/api/v3/ticker/bookTicker", {"symbol": symbol})
+            t = get_json_failover(
+                "/api/v3/ticker/bookTicker", {"symbol": symbol}, prefer=self.rest_base
+            )
             return float(t["bidPrice"]), float(t["askPrice"])
         except Exception:  # noqa: BLE001
             px = get_spot_price(self.rest_base, symbol)
