@@ -154,6 +154,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "partial_tp_frac": 0.40,  # %40 banka, %60 runner → büyük koşuya kalsın
         "breakeven_after_pct": 0.40,  # +%0.40 sonrası stop → maliyet+fee
         "hard_stop_pct": 0.45,
+        "max_loss_pct": 1.20,  # -%1.2 üstü zarar → zorla sat (kaçırma)
         "quick_tp_pct": 0.95,  # sadece kısmi banka eşiği (full çıkış değil)
         "min_net_tp_pct": 0.50,
         "keep_runner": True,  # büyük koşu için kalanı tut
@@ -186,6 +187,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "bnb_fee_discount": True,  # BNB varsa fee ~%25 indirim
         "fee_buffer_pct": 0.20,
         "hard_stop_pct": 0.45,
+        "max_loss_pct": 1.20,
         "peak_trail_pct": 0.32,
         "peak_trail_tight_pct": 0.20,
         "trail_tighten_after_pct": 0.70,
@@ -805,6 +807,7 @@ def apply_winrate_trade_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
         "max_buy_per_cycle",
         "max_per_sector",
         "hard_stop_pct",
+        "max_loss_pct",
         "quick_tp_pct",
         "min_net_tp_pct",
         "peak_trail_pct",
@@ -2240,16 +2243,20 @@ def build_daily_pnl_report(trade_cfg: dict[str, Any] | None = None) -> dict[str,
 
 def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
     """
-    1) Hard stop / breakeven
-    2) TP1 banka (kısmi) → kalan = RUNNER (büyük koşu)
-    3) Runner: geniş trail + yüksek TP2 (/%10–50+)
-    4) Zaman stop (runner'da çok daha uzun)
+    1) HARD STOP en önce (zarar limiti) — satış fail olursa tekrar dene
+    2) Breakeven
+    3) TP1 banka → RUNNER
+    4) Runner: geniş trail + TP2
+    5) Zaman stop
     """
     notes: list[str] = []
     positions: dict[str, Any] = state.get("positions") or {}
     trade_cfg = cfg.get("trade") or {}
     wr = cfg.get("winrate") or {}
-    hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
+    hard_stop = float(trade_cfg.get("hard_stop_pct") or wr.get("hard_stop_pct") or 0.50)
+    # mutlak tavan: bundan fazla zarar asla taşınmaz (varsayılan %1.2)
+    max_loss = float(trade_cfg.get("max_loss_pct") or wr.get("max_loss_pct") or 1.20)
+    kill_at = max(hard_stop, max_loss)  # en az hard_stop kadar, en geç max_loss
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
     time_stop_m = float(trade_cfg.get("time_stop_minutes") or 30)
     partial_frac = float(trade_cfg.get("partial_tp_frac") or wr.get("partial_tp_frac") or 0.40)
@@ -2274,19 +2281,28 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
         action: str,
         *,
         frac: float = 1.0,
+        force_all: bool = False,
     ) -> bool:
         symbol = pos["symbol"]
-        qty = float(pos["qty"]) * max(0.0, min(1.0, frac))
         entry = float(pos["entry"])
+        qty = float(pos["qty"]) * max(0.0, min(1.0, frac))
         try:
             if account.live:
                 free = account.free_asset(base)
-                if free > 0:
-                    qty = min(qty, free if frac >= 0.999 else free * frac)
+                if force_all or frac >= 0.999:
+                    qty = free if free > 0 else qty
+                elif free > 0:
+                    qty = min(qty, free * frac)
             if qty <= 0:
-                notes.append(f"⚠ {base} bakiye 0 → silindi ({reason})")
-                closed.append(base)
-                return True
+                # live'da bir kez daha free bak
+                if account.live:
+                    free2 = account.free_asset(base)
+                    if free2 > 0:
+                        qty = free2
+                if qty <= 0:
+                    notes.append(f"⚠ {base} bakiye 0 → state silindi ({reason})")
+                    closed.append(base)
+                    return True
             order = account.market_sell_qty(symbol, qty)
             fill_qty = float(order.get("executedQty") or qty)
             pnl = (price / entry - 1) * 100 if entry else 0
@@ -2307,7 +2323,7 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                     "order": order,
                 }
             )
-            if frac >= 0.999:
+            if frac >= 0.999 or force_all:
                 closed.append(base)
             else:
                 pos["qty"] = max(0.0, float(pos["qty"]) - fill_qty)
@@ -2320,17 +2336,27 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                 else:
                     notes.append(
                         f"🚀 RUNNER {base} kaldı qty≈{pos['qty']:.6g} "
-                        f"(trail~%{trade_cfg.get('runner_trail_pct', 5)} / TP2~%{pos.get('runner_tp_pct', runner_tp)})"
+                        f"(trail~%{trade_cfg.get('runner_trail_pct', 5)} / "
+                        f"TP2~%{pos.get('runner_tp_pct', runner_tp)})"
                     )
             return True
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
-            notes.append(f"{action} fail {base}: {exc}")
+            notes.append(f"❌ {action} FAIL {base}: {exc}")
+            # yetersiz bakiye → hayalet temizle
             if "-2010" in err or "insufficient" in err.lower():
                 notes.append(f"⚠ {base} hayalet → silindi")
                 closed.append(base)
                 return True
+            # LOT / filtre: free bakiyenin tamamını bir kez daha dene
+            if account.live and not force_all:
+                notes.append(f"↻ {base} STOP yeniden denenecek (force_all)")
+                return do_sell(base, pos, price, reason + " [retry]", action, frac=1.0, force_all=True)
             return False
+
+    if not positions:
+        notes.append("⚠ açık pozisyon YOK (positions.json boş) — Binance’teki coin bot’ta kayıtlı değilse SATMAZ")
+        return notes
 
     for base, pos in list(positions.items()):
         symbol = pos["symbol"]
@@ -2359,27 +2385,45 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
         tp_bank = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
         tp2 = float(pos.get("runner_tp_pct") or runner_tp)
 
-        # hard / breakeven
+        notes.append(
+            f"· {base} PnL%{pnl_pct:+.2f} peak%{peak_gain:+.2f} "
+            f"{'RUNNER' if is_runner else 'POS'} kill≤%-{kill_at:.2f}"
+        )
+
+        # ========== 1) HARD / MAX LOSS — her şeyden önce ==========
+        if pnl_pct <= -kill_at:
+            ok = do_sell(
+                base,
+                pos,
+                price,
+                f"🛑 HARD STOP PnL%{pnl_pct:+.2f} (limit%-{kill_at:.2f})",
+                "SELL_STOP",
+                frac=1.0,
+                force_all=True,
+            )
+            if not ok:
+                notes.append(f"🚨 {base} STOP SATILAMADI — sonraki turda tekrar")
+            continue
+
+        # ========== 2) Breakeven (sadece kâr gördükten sonra) ==========
         if pos.get("breakeven") or peak_gain >= be_after:
             be_lvl = entry * (1.0 + fee_side / 100.0)
             if price <= be_lvl and peak_gain >= be_after:
-                do_sell(base, pos, price, f"🔒 BE stop (+%{peak_gain:.2f} zirve)", "SELL_BE")
-                continue
-            if not pos.get("breakeven") and peak_gain >= be_after:
+                ok = do_sell(
+                    base, pos, price, f"🔒 BE stop (+%{peak_gain:.2f} zirve)", "SELL_BE", force_all=True
+                )
+                if ok:
+                    continue
+            elif not pos.get("breakeven") and peak_gain >= be_after:
                 pos["breakeven"] = True
                 pos["stop"] = round(be_lvl, 10)
                 notes.append(f"🔒 {base} stop → breakeven (+%{peak_gain:.2f})")
 
-        if pnl_pct <= -hard_stop:
-            do_sell(base, pos, price, f"🛑 STOP%-{hard_stop}", "SELL_STOP")
-            continue
-
-        # --- RUNNER: geniş trail + büyük TP2 (/%10–50+) ---
+        # ========== 3) RUNNER ==========
         if is_runner:
             if pnl_pct >= tp2:
-                do_sell(base, pos, price, f"🏁 RUNNER TP2%+{pnl_pct:.1f} (≥{tp2:.0f})", "SELL_TP2")
+                do_sell(base, pos, price, f"🏁 RUNNER TP2%+{pnl_pct:.1f} (≥{tp2:.0f})", "SELL_TP2", force_all=True)
                 continue
-            # runner trail: sadece anlamlı pullback'te (zirveden -trail)
             if peak_gain >= max(tp_bank, 2.0) and from_peak_pct <= -trail:
                 do_sell(
                     base,
@@ -2387,9 +2431,9 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                     price,
                     f"📉 RUNNER TRAIL%{trail:.1f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
                     "SELL_TRAIL",
+                    force_all=True,
                 )
                 continue
-            # runner zaman: çok daha uzun; sadece yatay/küçük kârda çık
             opened = pos.get("opened_at")
             if opened and runner_time_m > 0:
                 try:
@@ -2403,11 +2447,12 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                         price,
                         f"⏱ RUNNER TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}",
                         "SELL_TIME",
+                        force_all=True,
                     )
                     continue
-            continue  # runner'da erken full TP / sıkı trail YOK
+            continue
 
-        # --- BANKA öncesi: sıkı trail KAPALI (keep_runner) → büyük koşuyu öldürmesin ---
+        # ========== 4) banka öncesi (runner yok) ==========
         if not keep_runner:
             if peak_gain >= min_gross and from_peak_pct <= -trail:
                 do_sell(
@@ -2416,10 +2461,10 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                     price,
                     f"📉 TRAIL%{trail:.2f} zirve%{peak_gain:.1f}→%{from_peak_pct:.1f}",
                     "SELL_TRAIL",
+                    force_all=True,
                 )
                 continue
 
-        # TP1 banka → runner bırak
         if (not pos.get("sold_tp1")) and pnl_pct >= tp_bank and 0 < partial_frac < 0.999 and keep_runner:
             do_sell(
                 base,
@@ -2431,12 +2476,10 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             )
             continue
 
-        # keep_runner kapalıysa eski full TP
         if (not keep_runner) and pnl_pct >= tp_bank:
-            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f} (≥{tp_bank:.2f})", "SELL_TP")
+            do_sell(base, pos, price, f"🎯 TP%+{pnl_pct:.2f} (≥{tp_bank:.2f})", "SELL_TP", force_all=True)
             continue
 
-        # banka öncesi zaman stop (runner olmadan)
         opened = pos.get("opened_at")
         if opened and time_stop_m > 0:
             try:
@@ -2445,7 +2488,9 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                 age_m = 0.0
             if age_m >= time_stop_m:
                 if pnl_pct >= min_gross or (-hard_stop < pnl_pct <= 0.15):
-                    do_sell(base, pos, price, f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}", "SELL_TIME")
+                    do_sell(
+                        base, pos, price, f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}", "SELL_TIME", force_all=True
+                    )
                     continue
 
     for b in closed:
