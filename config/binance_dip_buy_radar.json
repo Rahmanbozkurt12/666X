@@ -1,0 +1,104 @@
+{
+  "rest_base": "https://data-api.binance.vision",
+  "futures_base": "https://fapi.binance.com",
+  "quote": "USDT",
+  "workers": 20,
+  "poll_seconds": 120,
+  "max_symbols": 0,
+  "min_quote_volume_usdt": 200000,
+  "ohlcv": {
+    "5m": 48,
+    "15m": 96,
+    "1h": 72,
+    "1d": 90
+  },
+  "early_buy": {
+    "max_24h_change_pct": 6.0,
+    "min_24h_change_pct": -25.0,
+    "early_rally_max_pct": 5.0,
+    "near_low_lookback_days": 14,
+    "near_low_max_pct": 10.0,
+    "max_rsi_1h": 58.0,
+    "min_rsi_1h": 25.0,
+    "volume_rise_mult_5m": 1.35,
+    "min_score_al": 60,
+    "min_score_izle": 46,
+    "min_pump_score_al": 55
+  },
+  "late_reject": {
+    "max_already_up_24h_pct": 12.0,
+    "max_rsi_1h": 70.0,
+    "max_from_14d_low_pct": 28.0
+  },
+  "pump_upside": {
+    "enabled": true,
+    "target_low_pct": 40.0,
+    "target_high_pct": 70.0,
+    "min_room_to_30d_high_pct": 25.0,
+    "quiet_vol_bars": 18,
+    "vol_turn_mult": 1.8,
+    "compression_atr_ratio": 0.75
+  },
+  "regime": {
+    "enabled": true,
+    "btc_dump_pct": -3.0,
+    "block_al_on_btc_dump": true,
+    "soft_penalty": 12
+  },
+  "futures": {
+    "enabled": true,
+    "neg_funding_bonus": 6,
+    "funding_threshold": -0.0001,
+    "oi_rise_bonus": 5
+  },
+  "risk": {
+    "stop_buffer_pct": 1.2,
+    "tp1_pct": 6.0,
+    "tp2_pct": 14.0,
+    "use_pump_tp": true
+  },
+  "trade": {
+    "enabled": true,
+    "max_positions": 10,
+    "deploy_pct": 0.95,
+    "min_order_usdt": 12.0,
+    "tp1_sell_pct": 1.0,
+    "prefer_uc": true,
+    "also_buy_izle": true,
+    "izle_min_score": 58.0,
+    "izle_min_pump": 50.0,
+    "izle_max_24h_pct": 5.0,
+    "trade_base": "https://api.binance.com",
+    "recv_window": 60000,
+    "fee_rate_pct": 0.10,
+    "fee_buffer_pct": 0.20,
+    "hard_stop_pct": 0.50,
+    "peak_trail_pct": 0.50,
+    "quick_tp_pct": 1.20,
+    "min_net_tp_pct": 0.50,
+    "max_buy_per_cycle": 5
+  },
+  "multi_cex": {
+    "enabled": true,
+    "ids": [
+      "binance", "okx", "bybit", "bitget", "gate", "kucoin",
+      "mexc", "htx", "coinbase", "upbit", "kraken", "bingx",
+      "cryptocom", "whitebit", "coinex", "bitstamp"
+    ],
+    "max_symbols_per_exchange": 60,
+    "ohlcv_limit": 30,
+    "workers_per_exchange": 8,
+    "min_confluence_boost": 2,
+    "confluence_score_bonus": 8,
+    "uc_min_cex": 3
+  },
+  "stable_bases": [
+    "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
+    "RLUSD", "USDE", "USD1", "XUSD", "U", "USD0", "USDD"
+  ],
+  "skip_bases": [
+    "WBTC", "WETH", "BTCB", "WBETH", "BETH", "STETH", "WSTETH", "RLUSD", "XAUT", "PAXG"
+  ],
+  "skip_suffixes": ["UP", "DOWN", "BULL", "BEAR"],
+  "skip_tokenized_stocks": true
+}
