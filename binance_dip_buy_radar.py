@@ -144,7 +144,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "izle_min_pump": 40.0,
         "izle_max_24h_pct": 8.0,
         "trade_base": "https://api.binance.com",
-        "recv_window": 5000,
+        "recv_window": 60000,
     },
     "multi_cex": {
         "enabled": True,
@@ -1464,11 +1464,31 @@ def log_trade(row: dict[str, Any]) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def clean_api_credential(raw: str) -> str:
+    """Boşluk / tırnak / gizli karakter temizle (Windows yapıştırma hataları)."""
+    s = (raw or "").strip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        s = s[1:-1].strip()
+    for ch in (" ", "\t", "\r", "\n", "\u200b", "\u200c", "\u200d", "\ufeff"):
+        s = s.replace(ch, "")
+    return s
+
+
 def resolve_api_keys() -> tuple[str, str]:
     """Env öncelikli; yoksa dosyadaki HARDCODE alanları."""
-    key = env("BINANCE_API_KEY") or BINANCE_API_KEY_HARDCODE.strip()
-    secret = env("BINANCE_API_SECRET") or BINANCE_API_SECRET_HARDCODE.strip()
-    return key or "", secret or ""
+    key = clean_api_credential(env("BINANCE_API_KEY") or BINANCE_API_KEY_HARDCODE or "")
+    secret = clean_api_credential(env("BINANCE_API_SECRET") or BINANCE_API_SECRET_HARDCODE or "")
+    return key, secret
+
+
+def binance_server_time_ms(trade_base: str) -> int:
+    """PC saati kaymışsa imza/timestamp bozulmasın diye Binance saatini kullan."""
+    try:
+        r = HTTP.get(f"{trade_base}/api/v3/time", timeout=10)
+        r.raise_for_status()
+        return int(r.json()["serverTime"])
+    except Exception:  # noqa: BLE001
+        return int(time.time() * 1000)
 
 
 def signed_request(
@@ -1480,23 +1500,47 @@ def signed_request(
     params: dict[str, Any] | None = None,
     recv_window: int = 5000,
 ) -> Any:
+    api_key = clean_api_credential(api_key)
+    api_secret = clean_api_credential(api_secret)
     params = dict(params or {})
-    params["timestamp"] = int(time.time() * 1000)
-    params["recvWindow"] = recv_window
+    params["timestamp"] = binance_server_time_ms(trade_base)
+    params["recvWindow"] = int(recv_window)
+    # Binance: sabit sıralı query + HMAC-SHA256
     query = urllib.parse.urlencode(params, doseq=True)
-    sig = hmac.new(api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
-    url = f"{trade_base}{path}?{query}&signature={sig}"
+    sig = hmac.new(
+        api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     headers = {"X-MBX-APIKEY": api_key}
+    url = f"{trade_base}{path}"
     if method == "GET":
-        r = HTTP.get(url, headers=headers, timeout=30)
+        r = HTTP.get(f"{url}?{query}&signature={sig}", headers=headers, timeout=30)
     elif method == "POST":
-        r = HTTP.post(url, headers=headers, timeout=30)
+        # POST: body olarak imzalı form (imza hatalarını azaltır)
+        body = f"{query}&signature={sig}"
+        headers = {
+            **headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        r = HTTP.post(url, data=body, headers=headers, timeout=30)
     elif method == "DELETE":
-        r = HTTP.delete(url, headers=headers, timeout=30)
+        r = HTTP.delete(f"{url}?{query}&signature={sig}", headers=headers, timeout=30)
     else:
         raise ValueError(method)
     if r.status_code >= 400:
-        raise RuntimeError(f"Binance {r.status_code}: {r.text[:400]}")
+        msg = r.text[:400]
+        if "-1022" in msg or "Signature" in msg:
+            raise RuntimeError(
+                f"Binance {r.status_code}: {msg}\n"
+                "→ İmza geçersiz (-1022). Çoğu zaman SECRET KEY yanlış.\n"
+                "  1) Binance → API Management → Secret Key'i YENİDEN kopyala\n"
+                "  2) API Key ile Secret Key yer değiştirmiş olmasın\n"
+                "  3) Tırnak/boşluk olmasın: SECRET = \"abc...\"  (tek çift tırnak)\n"
+                "  4) Enable Spot & Margin Trading açık olsun\n"
+                "  5) Gerekirse yeni API key oluştur"
+            )
+        raise RuntimeError(f"Binance {r.status_code}: {msg}")
     return r.json()
 
 
@@ -1537,15 +1581,25 @@ class BinanceAccount:
         self.api_key, self.api_secret = resolve_api_keys()
         self.trade_base = trade_cfg.get("trade_base") or "https://api.binance.com"
         self.rest_base = cfg.get("rest_base") or "https://data-api.binance.vision"
-        self.recv = int(trade_cfg.get("recv_window") or 5000)
+        self.recv = int(trade_cfg.get("recv_window") or 60000)
         self.filters = load_lot_filters(self.rest_base)
         self._paper_usdt = float(env("PAPER_USDT") or 1000)
         self._paper_balances: dict[str, float] = {"USDT": self._paper_usdt}
 
         if self.live and not (self.api_key and self.api_secret):
             raise SystemExit(
-                "LIVE=1 için BINANCE_API_KEY + BINANCE_API_SECRET gerekli "
+                "LIVE için BINANCE_API_KEY + BINANCE_API_SECRET gerekli "
                 "(env veya dosyadaki HARDCODE alanları)"
+            )
+        if self.live:
+            if len(self.api_secret) < 20:
+                raise SystemExit(
+                    f"[HATA] Secret Key çok kısa ({len(self.api_secret)} karakter). "
+                    "API Key değil, Secret Key yapıştırdığından emin ol."
+                )
+            print(
+                f"[keys] len key={len(self.api_key)} secret={len(self.api_secret)} "
+                f"(secret son 4: …{self.api_secret[-4:]})"
             )
 
     def free_usdt(self) -> float:

@@ -69,7 +69,7 @@
     "izle_min_pump": 40.0,
     "izle_max_24h_pct": 8.0,
     "trade_base": "https://api.binance.com",
-    "recv_window": 5000
+    "recv_window": 60000
   },
   "multi_cex": {
     "enabled": true,
