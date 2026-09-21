@@ -13,20 +13,22 @@ Jared / UniV4 / Eff6 tipi **MEV** botlar çoğu trade’i **aynı blokta** alıp
 Asıl işe yarayan hedef: **dakikalarca tutan** sniper / smart-money cüzdanları.  
 `rsync-builder` kapalı (builder, trader değil). Maestro adresini Arkham’dan elle ekle.
 
-## Çalıştır
-
-```bash
-python mev_copy_trader.py --once --dry-run
-python mev_copy_trader.py
-```
-
-Canlı Binance kopya (sadece listeli USDT çift, max `$max_copy_usd`):
+## Çalıştır (varsayılan = GERÇEK al-sat)
 
 ```bash
 export BINANCE_API_KEY=...
 export BINANCE_API_SECRET=...
-python mev_copy_trader.py --live
+python mev_copy_trader.py
 ```
+
+Kağıt mod (emir yok):
+
+```bash
+python mev_copy_trader.py --dry-run
+python mev_copy_trader.py --once --dry-run
+```
+
+Sadece Binance’te USDT listeli coinler; max `$max_copy_usd` (config, varsayılan 50).
 
 Config: `config/mev_copy_wallets.json`  
 Log: `output/mev_copy_signals.jsonl`  

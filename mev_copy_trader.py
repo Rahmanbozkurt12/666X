@@ -7,9 +7,9 @@ Ne yapar:
   - AL / SAT sinyali üretir
   - copy_delay_seconds sonra hâlâ tutuyor mu bakar (hold confirm)
   - Aynı blok / ~12 sn içinde gir-çık MEV atomik trade'leri ATLAR
-  - dry_run=true iken sadece log/Telegram (para harcamaz)
-  - trade_enabled + Binance key varsa, token Binance USDT'te listeliyse
-    bakiyene göre küçük market emir dener
+  - Varsayılan: trade_enabled=true → Binance key varsa GERÇEK market emir
+  - --dry-run ile kağıt moduna düşer (emir yok)
+  - Token Binance USDT'te listeliyse bakiyene göre küçük market AL/SAT
 
 ÖNEMLİ:
   Jared / UniV4 / Eff6 tipi MEV botlar çoğu alımı aynı tx'te satar.
@@ -17,13 +17,13 @@ Ne yapar:
   Asıl işe yarayan: sniper / smart-money cüzdanları (dakikalarca tutanlar).
 
 Kullanım:
+  python mev_copy_trader.py                 # CANLI al-sat (key gerekir)
+  python mev_copy_trader.py --dry-run       # sadece sinyal, emir yok
   python mev_copy_trader.py --once --dry-run
-  python mev_copy_trader.py                 # sürekli, dry_run config'ten
-  python mev_copy_trader.py --live          # trade_enabled zorla aç (dikkat)
 
-Env (opsiyonel):
-  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-  BINANCE_API_KEY, BINANCE_API_SECRET   # sadece --live / trade_enabled
+Env:
+  BINANCE_API_KEY, BINANCE_API_SECRET       # zorunlu (canlı için)
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID      # opsiyonel
 """
 
 from __future__ import annotations
@@ -515,26 +515,41 @@ def flush_pending(
     return keep
 
 
-def run_loop(*, once: bool, live: bool, config_path: Path) -> int:
+def run_loop(*, once: bool, live: bool, force_dry: bool, config_path: Path) -> int:
     cfg = load_json(config_path)
     settings = dict(cfg.get("settings") or {})
+    # Config varsayılan canlı; --live zorla açar; --dry-run kağıt moda düşürür
     if live:
         settings["trade_enabled"] = True
         settings["dry_run"] = False
+    if force_dry:
+        settings["trade_enabled"] = False
+        settings["dry_run"] = True
+
+    do_live = bool(settings.get("trade_enabled")) and not bool(settings.get("dry_run"))
     chains = settings.get("chains") or {}
     watched = load_watched(cfg)
     if not watched:
         print("izlenecek cüzdan yok — config/mev_copy_wallets.json", file=sys.stderr)
         return 1
 
+    if do_live and not (env("BINANCE_API_KEY") or env("API_KEY")):
+        print(
+            "[UYARI] trade_enabled=true ama BINANCE_API_KEY yok — emir gidemez, sinyal yazar",
+            flush=True,
+        )
+        do_live = False
+
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {}
     pending: list[PendingSignal] = []
     # restore pending keys lightly skipped (process restart = drop queue — güvenli)
 
+    mode = "CANLI AL-SAT" if do_live else "DRY (emir yok)"
     print(
-        f"[mev-copy] wallets={len(watched)} delay={settings.get('copy_delay_seconds')}s "
-        f"dry_run={settings.get('dry_run', True)} trade={settings.get('trade_enabled')} "
-        f"live_flag={live}",
+        f"[mev-copy] mode={mode} wallets={len(watched)} "
+        f"delay={settings.get('copy_delay_seconds')}s "
+        f"max_copy_usd={settings.get('max_copy_usd')} "
+        f"trade={settings.get('trade_enabled')} dry_run={settings.get('dry_run')}",
         flush=True,
     )
     for w in watched:
@@ -552,7 +567,7 @@ def run_loop(*, once: bool, live: bool, config_path: Path) -> int:
                 print(f"  ! {w.label} {e}", flush=True)
             time.sleep(1.1)
 
-        pending[:] = flush_pending(pending, settings, chains, live=live)
+        pending[:] = flush_pending(pending, settings, chains, live=do_live)
         save_json(STATE_PATH, state)
 
         if once:
@@ -564,21 +579,25 @@ def run_loop(*, once: bool, live: bool, config_path: Path) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="60s delayed wallet copy trader")
+    p = argparse.ArgumentParser(description="60s delayed wallet copy trader (live by default)")
     p.add_argument("--config", default=str(CONFIG_PATH))
     p.add_argument("--once", action="store_true")
-    p.add_argument("--dry-run", action="store_true", help="force dry (no binance orders)")
+    p.add_argument("--dry-run", action="store_true", help="force paper mode (no orders)")
     p.add_argument(
         "--live",
         action="store_true",
-        help="enable Binance copy if keys + token listed (DANGEROUS)",
+        help="force live even if config dry (keys required)",
     )
     args = p.parse_args()
-    live = bool(args.live) and not bool(args.dry_run)
     if args.live and args.dry_run:
         print("--live ve --dry-run birlikte olmaz", file=sys.stderr)
         return 2
-    return run_loop(once=args.once, live=live, config_path=Path(args.config))
+    return run_loop(
+        once=args.once,
+        live=bool(args.live),
+        force_dry=bool(args.dry_run),
+        config_path=Path(args.config),
+    )
 
 
 if __name__ == "__main__":
