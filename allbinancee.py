@@ -715,9 +715,11 @@ def fetch_tickers(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def fetch_ohlcv(cfg: dict[str, Any], symbol: str, interval: str, limit: int) -> dict[str, list[float]] | None:
     try:
-        rows = get_json(
-            f"{cfg['rest_base']}/api/v3/klines",
+        rows = get_json_failover(
+            "/api/v3/klines",
             {"symbol": symbol, "interval": interval, "limit": limit},
+            prefer=cfg.get("rest_base"),
+            retries=1,
             timeout=25,
         )
         if not isinstance(rows, list) or len(rows) < 10:
@@ -3568,13 +3570,17 @@ def apply_news_feed(
 
 
 def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[str, Any]]:
-    print("[1/6] sembol + ticker…", flush=True)
+    # DNS/418 için çalışan public host'u sabitle
+    cfg = dict(cfg)
+    cfg["rest_base"] = pick_working_rest_base(cfg.get("rest_base"))
+
+    print("[1/7] sembol + ticker…", flush=True)
     symbols = list_usdt_symbols(cfg)
     tickers = fetch_tickers(cfg)
     max_sym = int(cfg.get("max_symbols") or 0)
     min_qv = float(cfg.get("min_quote_volume_usdt") or 0)
 
-    print("[2/6] BTC rejim + funding…", flush=True)
+    print("[2/7] BTC rejim + funding…", flush=True)
     regime = btc_regime(cfg, tickers)
     funding_map = fetch_funding_map(cfg)
     print(
@@ -3584,7 +3590,7 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
         flush=True,
     )
 
-    print("[3/6] çoklu CEX hacim taraması (15+)…", flush=True)
+    print("[3/7] çoklu CEX hacim taraması (15+)…", flush=True)
     confluence = scan_multi_cex_confluence(cfg)
     regime["multi_cex"] = {
         "requested": confluence.get("requested"),
@@ -3609,8 +3615,9 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
     if max_sym > 0:
         ranked = ranked[:max_sym]
 
-    print(f"[4/6] Binance derin analiz · {len(ranked)} coin…", flush=True)
+    print(f"[4/7] Binance derin analiz · {len(ranked)} coin…", flush=True)
     results: list[Analysis] = []
+    fail_n = 0
 
     def job(sym: str) -> Analysis | None:
         return analyze_symbol(sym, tickers[sym], cfg, regime, funding_map)
@@ -3625,11 +3632,26 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
             try:
                 row = fut.result()
             except Exception:  # noqa: BLE001
+                fail_n += 1
                 continue
             if row:
                 results.append(row)
+            else:
+                fail_n += 1
 
-    print("[5/6] CEX confluence birleştir…", flush=True)
+    print(
+        f"  → analiz OK={len(results)} · boş/OHLCV-fail={fail_n} "
+        f"(0 ise ağ/DNS mum çekemiyor demektir)",
+        flush=True,
+    )
+    if not results and ranked:
+        print(
+            "[uyarı] 325 coin tarandı ama 0 sonuç → internet/DNS sorunu "
+            "(klines çekilemedi). WiFi reset / DNS 8.8.8.8 / VPN dene.",
+            file=sys.stderr,
+        )
+
+    print("[5/7] CEX confluence birleştir…", flush=True)
     results = apply_cex_confluence(results, confluence, cfg)
 
     print("[6/7] zincir/DEX para akışı…", flush=True)
@@ -3740,12 +3762,18 @@ def resolve_api_keys() -> tuple[str, str]:
 
 def binance_server_time_ms(trade_base: str) -> int:
     """PC saati kaymışsa imza/timestamp bozulmasın diye Binance saatini kullan."""
-    try:
-        r = HTTP.get(f"{trade_base}/api/v3/time", timeout=10)
-        r.raise_for_status()
-        return int(r.json()["serverTime"])
-    except Exception:  # noqa: BLE001
-        return int(time.time() * 1000)
+    bases = [trade_base.rstrip("/")]
+    for b in ("https://api.binance.com", "https://api1.binance.com", "https://api2.binance.com", "https://api3.binance.com"):
+        if b not in bases:
+            bases.append(b)
+    for base in bases:
+        try:
+            r = HTTP.get(f"{base}/api/v3/time", timeout=10)
+            if r.status_code == 200:
+                return int(r.json()["serverTime"])
+        except Exception:  # noqa: BLE001
+            continue
+    return int(time.time() * 1000)
 
 
 def signed_request(
@@ -3759,46 +3787,80 @@ def signed_request(
 ) -> Any:
     api_key = clean_api_credential(api_key)
     api_secret = clean_api_credential(api_secret)
-    params = dict(params or {})
-    params["timestamp"] = binance_server_time_ms(trade_base)
-    params["recvWindow"] = int(recv_window)
-    # Binance: sabit sıralı query + HMAC-SHA256
-    query = urllib.parse.urlencode(params, doseq=True)
-    sig = hmac.new(
-        api_secret.encode("utf-8"),
-        query.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    headers = {"X-MBX-APIKEY": api_key}
-    url = f"{trade_base}{path}"
-    if method == "GET":
-        r = HTTP.get(f"{url}?{query}&signature={sig}", headers=headers, timeout=30)
-    elif method == "POST":
-        # POST: body olarak imzalı form (imza hatalarını azaltır)
-        body = f"{query}&signature={sig}"
-        headers = {
-            **headers,
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        r = HTTP.post(url, data=body, headers=headers, timeout=30)
-    elif method == "DELETE":
-        r = HTTP.delete(f"{url}?{query}&signature={sig}", headers=headers, timeout=30)
-    else:
-        raise ValueError(method)
-    if r.status_code >= 400:
-        msg = r.text[:400]
-        if "-1022" in msg or "Signature" in msg:
-            raise RuntimeError(
-                f"Binance {r.status_code}: {msg}\n"
-                "→ İmza geçersiz (-1022). Çoğu zaman SECRET KEY yanlış.\n"
-                "  1) Binance → API Management → Secret Key'i YENİDEN kopyala\n"
-                "  2) API Key ile Secret Key yer değiştirmiş olmasın\n"
-                "  3) Tırnak/boşluk olmasın: SECRET = \"abc...\"  (tek çift tırnak)\n"
-                "  4) Enable Spot & Margin Trading açık olsun\n"
-                "  5) Gerekirse yeni API key oluştur"
+    bases = [trade_base.rstrip("/")]
+    for b in (
+        "https://api.binance.com",
+        "https://api1.binance.com",
+        "https://api2.binance.com",
+        "https://api3.binance.com",
+    ):
+        if b not in bases:
+            bases.append(b)
+
+    last_exc: Exception | None = None
+    for base in bases:
+        params_try = dict(params or {})
+        try:
+            params_try["timestamp"] = binance_server_time_ms(base)
+            params_try["recvWindow"] = int(recv_window)
+            query = urllib.parse.urlencode(params_try, doseq=True)
+            sig = hmac.new(
+                api_secret.encode("utf-8"),
+                query.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            headers = {"X-MBX-APIKEY": api_key}
+            url = f"{base}{path}"
+            if method == "GET":
+                r = HTTP.get(f"{url}?{query}&signature={sig}", headers=headers, timeout=30)
+            elif method == "POST":
+                body = f"{query}&signature={sig}"
+                headers = {
+                    **headers,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                }
+                r = HTTP.post(url, data=body, headers=headers, timeout=30)
+            elif method == "DELETE":
+                r = HTTP.delete(f"{url}?{query}&signature={sig}", headers=headers, timeout=30)
+            else:
+                raise ValueError(method)
+            if r.status_code >= 400:
+                msg = r.text[:400]
+                if "-1022" in msg or "Signature" in msg:
+                    raise RuntimeError(
+                        f"Binance {r.status_code}: {msg}\n"
+                        "→ İmza geçersiz (-1022). Çoğu zaman SECRET KEY yanlış.\n"
+                        "  1) Binance → API Management → Secret Key'i YENİDEN kopyala\n"
+                        "  2) API Key ile Secret Key yer değiştirmiş olmasın\n"
+                        "  3) Tırnak/boşluk olmasın: SECRET = \"abc...\"  (tek çift tırnak)\n"
+                        "  4) Enable Spot & Margin Trading açık olsun\n"
+                        "  5) Gerekirse yeni API key oluştur"
+                    )
+                # 418/451 → diğer trade host
+                if r.status_code in {418, 429, 403, 451}:
+                    last_exc = RuntimeError(f"{r.status_code} {base}")
+                    print(f"[trade-api] {r.status_code} {base} → yedek…", file=sys.stderr)
+                    time.sleep(0.5)
+                    continue
+                raise RuntimeError(f"Binance {r.status_code}: {msg}")
+            if base != trade_base.rstrip("/"):
+                print(f"[trade-api] OK → {base}", flush=True)
+            return r.json()
+        except RuntimeError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            print(
+                f"[trade-api] bağlanamadı {base}: {exc.__class__.__name__} → yedek…",
+                file=sys.stderr,
             )
-        raise RuntimeError(f"Binance {r.status_code}: {msg}")
-    return r.json()
+            time.sleep(0.4)
+            continue
+    raise RuntimeError(
+        f"Binance trade API başarısız (DNS/ağ): {last_exc}\n"
+        "  → getaddrinfo failed = internet/DNS kopuk.\n"
+        "  → WiFi reset, DNS 8.8.8.8, veya mobil hotspot dene."
+    )
 
 
 def _filters_from_exchange_info(info: dict[str, Any]) -> dict[str, dict[str, float]]:
