@@ -22,6 +22,7 @@ import hmac
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -113,6 +114,26 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "keep_runner": True,
         "relax_from_low": True,  # 14g dip şartını gevşet
         "max_from_low_pct": 35.0,
+    },
+    # Anlık duyuru / haber: Binance CMS + OKX (+ Bybit dene)
+    # 16 borsanın hepsinde public news API yok — listing/airdrop/delist en değerlisi
+    "news_feed": {
+        "enabled": True,
+        "cache_sec": 180,  # rate-limit: 3 dk cache
+        "max_articles_per_source": 20,
+        "binance_catalogs": [48, 49, 128, 161, 93],  # listing/news/airdrop/delist/activity
+        "okx_types": ["announcements-new-listings"],
+        "try_bybit": True,
+        "score_bonus_listing": 18,
+        "score_bonus_airdrop": 12,
+        "score_bonus_activity": 8,
+        "score_bonus_general": 5,
+        "edge_bonus_listing": 12,
+        "edge_bonus_airdrop": 8,
+        "edge_bonus_activity": 5,
+        "block_on_delist": True,
+        "promote_izle_on_listing": True,
+        "fresh_hours": 36,  # kaç saatlik haber "taze"
     },
     "pump_upside": {
         "enabled": True,
@@ -432,6 +453,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "order_book",
             "alpha_filters",
             "ignition",
+            "news_feed",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -1083,6 +1105,12 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
     # ignition erken gainer
     if layers.get("ignition"):
         score += 10.0
+    # haber / listing
+    score += float(layers.get("news_edge_bonus") or 0)
+    if layers.get("news_listing"):
+        score += 4.0
+    if layers.get("news_delist"):
+        score -= 20.0
     if regime.get("supportive"):
         score += 6
     elif regime.get("hostile") or regime.get("block_al"):
@@ -2362,12 +2390,13 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
     als = [r for r in rows if r.action == "AL"]
     ucs = [r for r in als if r.is_uc]
     igns = [r for r in als if (r.layers or {}).get("ignition")]
+    news_n = [r for r in als if (r.layers or {}).get("news_hit")]
     izles = [r for r in rows if r.action == "İZLE"]
     gec = [r for r in rows if r.action == "GEÇ"]
     lines = [
         f"BINANCE DİP AL RADARI v2.1 · {now}",
         f"Tarama: {len(rows)} aday | 🟢AL={len(als)} 🚀UÇ={len(ucs)} "
-        f"⚡IGN={len(igns)} 🟡İZLE={len(izles)} 🔴GEÇ={len(gec)}",
+        f"⚡IGN={len(igns)} 📰NEWS={len(news_n)} 🟡İZLE={len(izles)} 🔴GEÇ={len(gec)}",
     ]
     if regime:
         lines.append(
@@ -2400,6 +2429,17 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
                     for t in tops[:5]
                 ]
                 lines.append("  " + " · ".join(bits))
+        nw = regime.get("news_feed") or {}
+        if nw.get("enabled"):
+            lines.append(
+                f"Haber: {','.join(nw.get('sources') or []) or '-'} · "
+                f"duyuru={nw.get('article_count', 0)} · ticker_hit={nw.get('ticker_hits', 0)}"
+            )
+            for s in (nw.get("sample") or [])[:3]:
+                lines.append(
+                    f"  📰 [{s.get('source')}/{s.get('kind')}] {s.get('title')} "
+                    f"→ {','.join(s.get('tickers') or [])}"
+                )
     lines.append("")
 
     if ucs:
@@ -3157,6 +3197,318 @@ def apply_chain_flow(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Haber / duyuru katmanı (Binance CMS + OKX; Bybit opsiyonel)
+# 16 CEX'in hepsinde public news API yok — listing/airdrop/delist en alpha
+# ---------------------------------------------------------------------------
+
+_NEWS_CACHE: dict[str, Any] = {"ts": 0.0, "payload": None}
+_NEWS_SKIP_WORDS = {
+    "USDT", "USDC", "USD", "BNB", "THE", "AND", "FOR", "WILL", "WITH", "FROM",
+    "BINANCE", "SPOT", "FUTURES", "MARGIN", "NEW", "ADD", "ADDS", "LIST", "LISTS",
+    "NOTICE", "ON", "OF", "TO", "IN", "AT", "IS", "NOW", "AVAILABLE", "AVAILABLES",
+    "TRADING", "PAIR", "PAIRS", "PERPETUAL", "CONTRACT", "LAUNCH", "LAUNCHES",
+    "SUPPORT", "NETWORK", "UPGRADE", "TOKEN", "TOKENS", "CRYPTO", "AIRDROP",
+    "HODLER", "EARN", "SHARE", "REWARDS", "USERS", "ALL", "VIA", "USING",
+    "CREDIT", "DEBIT", "CARD", "CARDS", "FIAT", "BALANCES", "DIRECTLY",
+    "OKX", "BYBIT", "GATE", "MEXC", "HTX", "UTC", "GMT",
+    "SEP", "OCT", "NOV", "DEC", "JAN", "FEB", "MAR", "APR", "JUN", "JUL", "AUG",
+    "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "AM", "PM",
+    "API", "UPDATE", "CMS", "USD", "BRL", "EUR", "TRY", "STOCK", "STOCKS",
+}
+
+
+def _news_kind_from_title(title: str, catalog_hint: str = "") -> str:
+    t = (title or "").upper()
+    h = (catalog_hint or "").upper()
+    if "DELIST" in t or "REMOVAL" in t or "DELIST" in h or h == "161":
+        return "delist"
+    if "AIRDROP" in t or "HODLER" in t or h == "128":
+        return "airdrop"
+    if (
+        "LIST" in t
+        or "WILL LIST" in t
+        or "ADDS" in t
+        or "NEW TRADING PAIR" in t
+        or "LAUNCH" in t
+        or h in {"48", "LISTING"}
+    ):
+        return "listing"
+    if "COMPETITION" in t or "SHARE" in t or "REWARD" in t or h == "93":
+        return "activity"
+    return "general"
+
+
+def _extract_tickers_from_text(text: str) -> list[str]:
+    found: list[str] = []
+    # (AAA) veya AAA/USDT veya AAAUSDT
+    for m in re.finditer(r"\(([A-Z][A-Z0-9]{1,9})\)", text or ""):
+        found.append(m.group(1))
+    for m in re.finditer(r"\b([A-Z][A-Z0-9]{1,9})/(?:USDT|USD|USDC)\b", text or ""):
+        found.append(m.group(1))
+    for m in re.finditer(r"\b([A-Z][A-Z0-9]{1,9})USDT\b", text or ""):
+        found.append(m.group(1))
+    for m in re.finditer(r"\b([A-Z][A-Z0-9]{2,9})\b", text or ""):
+        tok = m.group(1)
+        if tok not in _NEWS_SKIP_WORDS and not tok.isdigit():
+            found.append(tok)
+    # unique preserve order
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in found:
+        if t not in seen and t not in _NEWS_SKIP_WORDS:
+            seen.add(t)
+            out.append(t)
+    return out[:12]
+
+
+def fetch_binance_cms_news(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    nf = cfg.get("news_feed") or {}
+    catalogs = list(nf.get("binance_catalogs") or [48, 49, 128, 161, 93])
+    limit = int(nf.get("max_articles_per_source") or 20)
+    items: list[dict[str, Any]] = []
+    for cid in catalogs:
+        try:
+            url = (
+                "https://www.binance.com/bapi/composite/v1/public/cms/article/"
+                f"catalog/list/query?catalogId={int(cid)}&pageNo=1&pageSize={min(20, limit)}"
+            )
+            row = get_json(url, timeout=18)
+            arts = ((row or {}).get("data") or {}).get("articles") or []
+            for a in arts:
+                title = str(a.get("title") or "")
+                if not title:
+                    continue
+                items.append(
+                    {
+                        "source": "binance",
+                        "catalog": str(cid),
+                        "title": title,
+                        "kind": _news_kind_from_title(title, str(cid)),
+                        "url": f"https://www.binance.com/en/support/announcement/{a.get('code') or ''}",
+                        "tickers": _extract_tickers_from_text(title),
+                        "ts": a.get("releaseDate") or a.get("publishDate") or a.get("createTime"),
+                    }
+                )
+            time.sleep(0.15)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[news] binance catalog {cid} hata: {exc.__class__.__name__}", file=sys.stderr)
+    return items
+
+
+def fetch_okx_news(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    nf = cfg.get("news_feed") or {}
+    types = list(nf.get("okx_types") or ["announcements-new-listings"])
+    items: list[dict[str, Any]] = []
+    for ann in types:
+        try:
+            url = f"https://www.okx.com/api/v5/support/announcements?annType={ann}"
+            row = get_json(url, timeout=15)
+            data = (row or {}).get("data") or []
+            # OKX: data[0].details = list
+            details = []
+            if data and isinstance(data[0], dict):
+                details = data[0].get("details") or []
+            for a in details[: int(nf.get("max_articles_per_source") or 20)]:
+                title = str(a.get("title") or "")
+                if not title:
+                    continue
+                items.append(
+                    {
+                        "source": "okx",
+                        "catalog": ann,
+                        "title": title,
+                        "kind": _news_kind_from_title(title, "LISTING"),
+                        "url": a.get("url"),
+                        "tickers": _extract_tickers_from_text(title),
+                        "ts": a.get("pTime"),
+                    }
+                )
+            time.sleep(0.12)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[news] okx {ann} hata: {exc.__class__.__name__}", file=sys.stderr)
+    return items
+
+
+def fetch_bybit_news(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Bybit public announcements — bazı bölgelerde 403."""
+    nf = cfg.get("news_feed") or {}
+    if not nf.get("try_bybit", True):
+        return []
+    items: list[dict[str, Any]] = []
+    try:
+        url = "https://api.bybit.com/v5/announcements/index?locale=en-US&limit=10"
+        row = get_json(url, timeout=12)
+        for a in ((row or {}).get("result") or {}).get("list") or []:
+            title = str(a.get("title") or "")
+            if not title:
+                continue
+            items.append(
+                {
+                    "source": "bybit",
+                    "catalog": str(a.get("type") or ""),
+                    "title": title,
+                    "kind": _news_kind_from_title(title),
+                    "url": a.get("url"),
+                    "tickers": _extract_tickers_from_text(title),
+                    "ts": a.get("publishTime") or a.get("dateTimestamp"),
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[news] bybit atlandı ({exc.__class__.__name__})", file=sys.stderr)
+    return items
+
+
+def scan_exchange_news(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Paralel haber çek + ticker indeksi (cache'li)."""
+    nf = cfg.get("news_feed") or {}
+    if not nf.get("enabled", True):
+        return {"enabled": False, "by_base": {}, "articles": [], "sources": []}
+    cache_sec = float(nf.get("cache_sec") or 180)
+    now = time.time()
+    if _NEWS_CACHE.get("payload") and now - float(_NEWS_CACHE.get("ts") or 0) < cache_sec:
+        return _NEWS_CACHE["payload"]  # type: ignore[return-value]
+
+    articles: list[dict[str, Any]] = []
+    sources_ok: list[str] = []
+    try:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            fb = pool.submit(fetch_binance_cms_news, cfg)
+            fo = pool.submit(fetch_okx_news, cfg)
+            fy = pool.submit(fetch_bybit_news, cfg)
+            for name, fut in (("binance", fb), ("okx", fo), ("bybit", fy)):
+                try:
+                    part = fut.result() or []
+                    if part:
+                        sources_ok.append(name)
+                        articles.extend(part)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[news] {name} pool hata: {exc.__class__.__name__}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[news] tarama hata: {exc.__class__.__name__}", file=sys.stderr)
+
+    by_base: dict[str, list[dict[str, Any]]] = {}
+    for art in articles:
+        for t in art.get("tickers") or []:
+            by_base.setdefault(str(t).upper(), []).append(art)
+
+    payload = {
+        "enabled": True,
+        "articles": articles,
+        "by_base": by_base,
+        "sources": sources_ok,
+        "article_count": len(articles),
+        "ticker_hits": len(by_base),
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _NEWS_CACHE["ts"] = now
+    _NEWS_CACHE["payload"] = payload
+    return payload
+
+
+def apply_news_feed(
+    rows: list[Analysis],
+    news: dict[str, Any],
+    cfg: dict[str, Any],
+) -> list[Analysis]:
+    """Haber eşleşmesini skor / edge / AL-promote olarak yaz."""
+    nf = cfg.get("news_feed") or {}
+    if not nf.get("enabled", True) or not news.get("enabled"):
+        return rows
+    by_base: dict[str, list[dict[str, Any]]] = news.get("by_base") or {}
+    if not by_base:
+        return rows
+
+    bonus_l = float(nf.get("score_bonus_listing") or 18)
+    bonus_a = float(nf.get("score_bonus_airdrop") or 12)
+    bonus_act = float(nf.get("score_bonus_activity") or 8)
+    bonus_g = float(nf.get("score_bonus_general") or 5)
+    edge_l = float(nf.get("edge_bonus_listing") or 12)
+    edge_a = float(nf.get("edge_bonus_airdrop") or 8)
+    edge_act = float(nf.get("edge_bonus_activity") or 5)
+    block_delist = bool(nf.get("block_on_delist", True))
+    promote = bool(nf.get("promote_izle_on_listing", True))
+
+    out: list[Analysis] = []
+    hit_n = 0
+    for r in rows:
+        hits = by_base.get(r.base) or []
+        if not hits:
+            out.append(r)
+            continue
+        hit_n += 1
+        # en kritik türü seç
+        kinds = {str(h.get("kind") or "general") for h in hits}
+        title0 = str((hits[0] or {}).get("title") or "")[:80]
+        src0 = str((hits[0] or {}).get("source") or "")
+        r.layers["news_hit"] = True
+        r.layers["news_kinds"] = sorted(kinds)
+        r.layers["news_title"] = title0
+        r.layers["news_source"] = src0
+        r.layers["news_count"] = len(hits)
+
+        edge_b = 0.0
+        if "delist" in kinds:
+            r.layers["news_delist"] = True
+            r.score = max(0.0, round(r.score - 25, 1))
+            r.layers["news_edge_bonus"] = -15.0
+            if "NEWS_DELIST" not in r.reasons:
+                r.reasons.append("NEWS_DELIST")
+            if block_delist and r.action == "AL":
+                r.action = "GEÇ"
+                r.phase = "news_delist"
+        elif "listing" in kinds:
+            r.layers["news_listing"] = True
+            r.score = min(100.0, round(r.score + bonus_l, 1))
+            r.pump_score = min(100.0, round(r.pump_score + 10, 1))
+            edge_b = edge_l
+            if "NEWS_LISTING" not in r.reasons:
+                r.reasons.insert(0, "NEWS_LISTING")
+            if promote and r.action == "İZLE" and r.change_24h_pct <= 8.0:
+                r.action = "AL"
+                r.phase = "news_listing"
+        elif "airdrop" in kinds:
+            r.layers["news_airdrop"] = True
+            r.score = min(100.0, round(r.score + bonus_a, 1))
+            edge_b = edge_a
+            if "NEWS_AIRDROP" not in r.reasons:
+                r.reasons.append("NEWS_AIRDROP")
+        elif "activity" in kinds:
+            r.layers["news_activity"] = True
+            r.score = min(100.0, round(r.score + bonus_act, 1))
+            edge_b = edge_act
+            if "NEWS_ACTIVITY" not in r.reasons:
+                r.reasons.append("NEWS_ACTIVITY")
+        else:
+            r.score = min(100.0, round(r.score + bonus_g, 1))
+            edge_b = 3.0
+            if "NEWS_HIT" not in r.reasons:
+                r.reasons.append("NEWS_HIT")
+
+        if edge_b:
+            r.layers["news_edge_bonus"] = float(r.layers.get("news_edge_bonus") or 0) + edge_b
+            # ignition + listing birlikte güçlü
+            if r.layers.get("ignition") and r.layers.get("news_listing"):
+                r.layers["news_edge_bonus"] = float(r.layers["news_edge_bonus"]) + 6
+                if "NEWS_IGN" not in r.reasons:
+                    r.reasons.append("NEWS_IGN")
+        out.append(r)
+
+    if hit_n:
+        print(f"  → haber eşleşen coin={hit_n}", flush=True)
+    order = {"AL": 0, "İZLE": 1, "GEÇ": 2, "YOK": 3}
+    out.sort(
+        key=lambda x: (
+            order.get(x.action, 9),
+            0 if x.layers.get("news_listing") else 1,
+            0 if x.layers.get("ignition") else 1,
+            0 if x.is_uc else 1,
+            -float(x.score or 0),
+        )
+    )
+    return out
+
+
 def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[str, Any]]:
     print("[1/6] sembol + ticker…", flush=True)
     symbols = list_usdt_symbols(cfg)
@@ -3222,7 +3574,7 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
     print("[5/6] CEX confluence birleştir…", flush=True)
     results = apply_cex_confluence(results, confluence, cfg)
 
-    print("[6/6] zincir/DEX para akışı…", flush=True)
+    print("[6/7] zincir/DEX para akışı…", flush=True)
     flow = scan_chain_money_flow(cfg, results)
     results = apply_chain_flow(results, flow, cfg)
     regime["chain_flow"] = {
@@ -3236,9 +3588,30 @@ def run_scan(cfg: dict[str, Any], workers: int) -> tuple[list[Analysis], dict[st
         "top_chains": (flow.get("llama") or {}).get("chains", [])[:8],
         "hot_sample": list((flow.get("hot_tokens") or {}).keys())[:12],
     }
+
+    print("[7/7] borsa haber/duyuru taraması…", flush=True)
+    news = scan_exchange_news(cfg)
+    results = apply_news_feed(results, news, cfg)
+    regime["news_feed"] = {
+        "enabled": news.get("enabled"),
+        "sources": news.get("sources"),
+        "article_count": news.get("article_count"),
+        "ticker_hits": news.get("ticker_hits"),
+        "sample": [
+            {
+                "source": a.get("source"),
+                "kind": a.get("kind"),
+                "title": str(a.get("title") or "")[:70],
+                "tickers": (a.get("tickers") or [])[:4],
+            }
+            for a in (news.get("articles") or [])[:6]
+        ],
+    }
     print(
         f"  → {len(results)} sonuç · CEX OK {len(confluence.get('scanned') or [])} · "
-        f"DEX hot={flow.get('hot_count')} surge={sum(1 for r in results if r.layers.get('dex_surge'))}",
+        f"DEX hot={flow.get('hot_count')} surge={sum(1 for r in results if r.layers.get('dex_surge'))} · "
+        f"news={news.get('article_count', 0)} hit={news.get('ticker_hits', 0)} "
+        f"src={','.join(news.get('sources') or [])}",
         flush=True,
     )
     return results, regime
@@ -4696,6 +5069,21 @@ def main() -> int:
             f"+ lead {','.join(ll.get('lead_exchanges') or ['bybit','okx'])} · "
             f"max_sym={afc.get('max_symbols_per_cycle')} · "
             f"workers={afc.get('workers')}"
+        )
+    igc = cfg.get("ignition") or {}
+    if igc.get("enabled", True):
+        print(
+            f"[ignition] erken gainer AÇIK · 24s {igc.get('chg24_min_pct')}..{igc.get('chg24_max_pct')}% · "
+            f"hacim×{igc.get('vol_mult_vs_median')} + kırılım · "
+            f"runnerTP%{igc.get('runner_tp_pct')}",
+            flush=True,
+        )
+    nfc = cfg.get("news_feed") or {}
+    if nfc.get("enabled", True):
+        print(
+            f"[news] Binance+OKX duyuru AÇIK · cache={nfc.get('cache_sec')}s · "
+            f"listing/airdrop/delist skor boost",
+            flush=True,
         )
     mc = cfg.get("multi_cex") or {}
     if mc.get("enabled", True):

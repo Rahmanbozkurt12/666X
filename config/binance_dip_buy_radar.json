@@ -45,6 +45,24 @@
     "relax_from_low": true,
     "max_from_low_pct": 35.0
   },
+  "news_feed": {
+    "enabled": true,
+    "cache_sec": 180,
+    "max_articles_per_source": 20,
+    "binance_catalogs": [48, 49, 128, 161, 93],
+    "okx_types": ["announcements-new-listings"],
+    "try_bybit": true,
+    "score_bonus_listing": 18,
+    "score_bonus_airdrop": 12,
+    "score_bonus_activity": 8,
+    "score_bonus_general": 5,
+    "edge_bonus_listing": 12,
+    "edge_bonus_airdrop": 8,
+    "edge_bonus_activity": 5,
+    "block_on_delist": true,
+    "promote_izle_on_listing": true,
+    "fresh_hours": 36
+  },
   "pump_upside": {
     "enabled": true,
     "target_low_pct": 40.0,
