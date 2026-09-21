@@ -1044,7 +1044,8 @@ def passes_winrate_gates(
         if not ok_fb:
             return False, "UÇ_yok", edge
 
-    cex_need = int(wr.get("require_cex_min") or 3)
+    _cex = wr.get("require_cex_min")
+    cex_need = int(0 if _cex is None else _cex)
     cex_n = int(layers.get("cex_count") or 0)
     mc_on = bool((cfg.get("multi_cex") or {}).get("enabled", True))
     cf_cfg = cfg.get("chain_flow") or {}
