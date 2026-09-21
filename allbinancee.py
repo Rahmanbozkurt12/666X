@@ -2847,7 +2847,7 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
     trail_activate = float(
         trade_cfg.get("trail_activate_pct") or wr.get("trail_activate_pct") or 0.50
     )
-    bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
+    bnb_ok = bool(trade_cfg.get("bnb_fee_discount", False)) and account.free_asset("BNB") >= 0.01
     min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
     fee_side = float(trade_cfg.get("fee_rate_pct") or 0.10) * (0.75 if bnb_ok else 1.0)
     rest = account.rest_base
@@ -3133,7 +3133,7 @@ def manage_entries(
         return notes
 
     free = account.free_usdt()
-    bnb_ok = bool(trade_cfg.get("bnb_fee_discount", True)) and account.free_asset("BNB") >= 0.01
+    bnb_ok = bool(trade_cfg.get("bnb_fee_discount", False)) and account.free_asset("BNB") >= 0.01
     if bnb_ok:
         notes.append("💎 BNB fee indirimi aktif (~%25)")
     min_gross = min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok)
