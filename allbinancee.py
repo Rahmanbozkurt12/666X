@@ -187,7 +187,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "trade_base": "https://api.binance.com",
         "recv_window": 60000,
         "fee_rate_pct": 0.10,
-        "bnb_fee_discount": True,
+        "bnb_fee_discount": False,  # USDT ile devam — BNB fee indirimi yok
         "fee_buffer_pct": 0.20,
         "hard_stop_pct": 1.0,
         "max_loss_pct": 1.0,
