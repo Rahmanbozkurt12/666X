@@ -383,6 +383,7 @@ BACKTEST_PATH = OUTPUT_DIR / "binance_dip_buy_backtest.json"
 POS_PATH = OUTPUT_DIR / "binance_dip_buy_positions.json"
 TRADE_LOG = OUTPUT_DIR / "binance_dip_buy_trades.jsonl"
 PNL_PATH = OUTPUT_DIR / "binance_dip_buy_pnl_daily.json"
+EXCHANGE_INFO_CACHE = OUTPUT_DIR / "binance_exchange_info_cache.json"
 
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "binance-dip-buy-radar/2.2"})
@@ -493,7 +494,7 @@ def get_json_failover(
     prefer: str | None = None,
     retries: int = 2,
 ) -> Any:
-    """Public GET: 418/429/5xx olursa diğer Binance host'una geç + kısa bekle."""
+    """Public GET: 418/429/5xx olursa diğer host; 418 yağmurunda erken çık."""
     ordered: list[str] = []
     if prefer:
         ordered.append(prefer.rstrip("/"))
@@ -502,39 +503,40 @@ def get_json_failover(
         if b not in ordered:
             ordered.append(b)
     last_exc: Exception | None = None
+    ban_hits = 0
     for attempt in range(max(1, retries)):
         if attempt > 0:
-            wait = 2.5 * attempt
-            print(f"[api] 418/ban → {wait:.0f}s bekleyip yeniden…", file=sys.stderr)
+            wait = 3.0 * attempt
+            print(f"[api] ban/rate → {wait:.0f}s bekleniyor…", file=sys.stderr)
             time.sleep(wait)
         for base in ordered:
             url = f"{base}{path}"
             try:
                 r = HTTP.get(url, params=params or {}, timeout=timeout)
                 if r.status_code in {418, 429, 403, 451} or r.status_code >= 500:
+                    ban_hits += 1
                     last_exc = RuntimeError(f"{r.status_code} {base}")
-                    print(f"[api] {r.status_code} {base} → yedek deneniyor…", file=sys.stderr)
-                    time.sleep(0.6 + 0.3 * attempt)
+                    print(f"[api] {r.status_code} {base} → yedek…", file=sys.stderr)
+                    if ban_hits >= 3 and r.status_code == 418:
+                        print("[api] 418 yoğun → cache/bekleme", file=sys.stderr)
+                        time.sleep(0.8)
+                        break
+                    time.sleep(0.7)
                     continue
                 r.raise_for_status()
-                if attempt > 0 or base != (prefer or "").rstrip("/"):
-                    print(f"[api] OK {base}{path}", flush=True)
                 return r.json()
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
-                print(f"[api] hata {base}: {exc.__class__.__name__} → yedek…", file=sys.stderr)
-                time.sleep(0.5)
+                print(f"[api] hata {base}: {exc.__class__.__name__}", file=sys.stderr)
+                time.sleep(0.35)
                 continue
-    raise RuntimeError(
-        f"Binance public API başarısız ({path}): {last_exc}\n"
-        "  → 418 = IP geçici ban / WAF (çok istek).\n"
-        "  → 3–10 dk bekle veya WiFi/VPN değiştir, botu tekrar aç.\n"
-        "  → Çok fazla bot/tarayıcı aynı anda Binance’e vuruyor olabilir."
-    )
+        if ban_hits >= 4:
+            break
+    raise RuntimeError(f"Binance public API başarısız ({path}): {last_exc}")
 
 
 def pick_working_rest_base(prefer: str | None = None) -> str:
-    """Çalışan public base seç (ping + hafif exchangeInfo)."""
+    """Çalışan public base seç. Hepsi 418 ise fallback (cache ile devam)."""
     ordered: list[str] = []
     if prefer:
         ordered.append(prefer.rstrip("/"))
@@ -543,18 +545,16 @@ def pick_working_rest_base(prefer: str | None = None) -> str:
             ordered.append(b)
     for base in ordered:
         try:
-            r = HTTP.get(f"{base}/api/v3/ping", timeout=10)
-            if r.status_code != 200:
-                continue
-            # exchangeInfo ağır — sadece time ile doğrula
-            r2 = HTTP.get(f"{base}/api/v3/time", timeout=10)
-            if r2.status_code == 200:
+            r = HTTP.get(f"{base}/api/v3/ping", timeout=8)
+            if r.status_code == 200:
                 if base != (prefer or "").rstrip("/"):
                     print(f"[api] rest_base → {base}", flush=True)
                 return base
         except Exception:  # noqa: BLE001
             continue
-    return (prefer or BINANCE_PUBLIC_BASES[1]).rstrip("/")
+    fallback = (prefer or BINANCE_PUBLIC_BASES[0]).rstrip("/")
+    print(f"[api] uyarı: public host 418/ölü → {fallback} (cache ile)", file=sys.stderr)
+    return fallback
 
 
 @dataclass
@@ -643,12 +643,41 @@ def is_tokenized_stock(base: str) -> bool:
 
 
 def list_usdt_symbols(cfg: dict[str, Any]) -> list[str]:
-    info = get_json(f"{cfg['rest_base']}/api/v3/exchangeInfo")
     quote = cfg.get("quote") or "USDT"
     stables = {s.upper() for s in (cfg.get("stable_bases") or [])}
     skip_bases = {s.upper() for s in (cfg.get("skip_bases") or [])}
     skip_suf = tuple(cfg.get("skip_suffixes") or [])
     skip_stocks = bool(cfg.get("skip_tokenized_stocks", True))
+
+    def _pull() -> dict[str, Any] | None:
+        try:
+            info = get_json_failover(
+                "/api/v3/exchangeInfo",
+                prefer=cfg.get("rest_base"),
+                retries=1,
+                timeout=40,
+            )
+            if isinstance(info, dict) and info.get("symbols"):
+                _save_exchange_info_cache(info)
+                return info
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[api] exchangeInfo tarama fail ({exc.__class__.__name__})",
+                file=sys.stderr,
+            )
+        return _load_exchange_info_cache()
+
+    info = _pull()
+    if not info:
+        print("[api] 418 — 12s bekleyip exchangeInfo tekrar…", file=sys.stderr)
+        time.sleep(12)
+        info = _pull()
+    if not info:
+        raise RuntimeError(
+            "Sembol listesi alınamadı (418 IP ban).\n"
+            "  → 5–10 dk bekle veya mobil hotspot/VPN aç, botu yeniden başlat.\n"
+            "  → Ban kalkınca otomatik cache oluşur; sonraki 418'lerde çökmez."
+        )
     out: list[str] = []
     for s in info.get("symbols", []):
         if s.get("status") != "TRADING" or s.get("quoteAsset") != quote:
@@ -670,8 +699,18 @@ def list_usdt_symbols(cfg: dict[str, Any]) -> list[str]:
 
 
 def fetch_tickers(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows = get_json(f"{cfg['rest_base']}/api/v3/ticker/24hr")
-    return {r["symbol"]: r for r in rows if "symbol" in r}
+    try:
+        rows = get_json_failover(
+            "/api/v3/ticker/24hr", prefer=cfg.get("rest_base"), retries=1, timeout=40
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[api] ticker/24hr fail ({exc.__class__.__name__})", file=sys.stderr)
+        raise RuntimeError(
+            "24h ticker alınamadı (418 IP ban). 5–10 dk bekle veya hotspot/VPN ile tekrar aç."
+        ) from exc
+    if not isinstance(rows, list):
+        return {}
+    return {r["symbol"]: r for r in rows if isinstance(r, dict) and "symbol" in r}
 
 
 def fetch_ohlcv(cfg: dict[str, Any], symbol: str, interval: str, limit: int) -> dict[str, list[float]] | None:
@@ -3762,35 +3801,12 @@ def signed_request(
     return r.json()
 
 
-def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
-    """exchangeInfo — 418 olursa birkaç tur bekleyip yeniden dener."""
-    info = None
-    last_err: Exception | None = None
-    for i in range(3):
-        try:
-            info = get_json_failover(
-                "/api/v3/exchangeInfo", prefer=rest_base, retries=2, timeout=45
-            )
-            break
-        except Exception as exc:  # noqa: BLE001
-            last_err = exc
-            wait = 5 * (i + 1)
-            print(
-                f"[api] exchangeInfo fail ({exc.__class__.__name__}) → {wait}s bekleniyor…",
-                file=sys.stderr,
-            )
-            time.sleep(wait)
-    if info is None:
-        raise RuntimeError(
-            "exchangeInfo alınamadı (418 IP ban olası).\n"
-            "  1) 5–15 dakika bekle\n"
-            "  2) VPN / mobil hotspot dene\n"
-            "  3) Aynı anda birden fazla bot çalıştırma\n"
-            f"  Son hata: {last_err}"
-        ) from last_err
+def _filters_from_exchange_info(info: dict[str, Any]) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
-    for s in info.get("symbols", []):
-        sym = s["symbol"]
+    for s in info.get("symbols", []) or []:
+        sym = s.get("symbol")
+        if not sym:
+            continue
         step = min_qty = min_notional = 0.0
         for f in s.get("filters", []):
             if f.get("filterType") == "LOT_SIZE":
@@ -3798,8 +3814,65 @@ def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
                 min_qty = float(f["minQty"])
             elif f.get("filterType") in {"MIN_NOTIONAL", "NOTIONAL"}:
                 min_notional = float(f.get("minNotional") or f.get("notional") or 0)
-        out[sym] = {"stepSize": step, "minQty": min_qty, "minNotional": min_notional}
+        out[str(sym)] = {"stepSize": step, "minQty": min_qty, "minNotional": min_notional}
     return out
+
+
+def _save_exchange_info_cache(info: dict[str, Any]) -> None:
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        save_json(
+            EXCHANGE_INFO_CACHE,
+            {"saved_at": datetime.now(timezone.utc).isoformat(), "info": info},
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[api] cache yazılamadı: {exc.__class__.__name__}", file=sys.stderr)
+
+
+def _load_exchange_info_cache() -> dict[str, Any] | None:
+    try:
+        if not EXCHANGE_INFO_CACHE.exists():
+            return None
+        raw = load_json(EXCHANGE_INFO_CACHE)
+        info = raw.get("info") if isinstance(raw, dict) else None
+        if isinstance(info, dict) and info.get("symbols"):
+            return info
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
+    """exchangeInfo çek. 418 olursa CACHE — bot ÇÖKMEZ."""
+    try:
+        info = get_json_failover(
+            "/api/v3/exchangeInfo", prefer=rest_base, retries=1, timeout=40
+        )
+        if isinstance(info, dict) and info.get("symbols"):
+            _save_exchange_info_cache(info)
+            filters = _filters_from_exchange_info(info)
+            print(f"[api] exchangeInfo OK · {len(filters)} sembol", flush=True)
+            return filters
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[api] exchangeInfo canlı yok ({exc.__class__.__name__}) → cache…",
+            file=sys.stderr,
+        )
+
+    cached = _load_exchange_info_cache()
+    if cached:
+        filters = _filters_from_exchange_info(cached)
+        print(
+            f"[api] ⚠️ 418/ban → CACHE ile devam ({len(filters)} sembol)",
+            flush=True,
+        )
+        return filters
+
+    print(
+        "[api] ⚠️ exchangeInfo+cache yok → boş filtre ile devam (çökmez)",
+        file=sys.stderr,
+    )
+    return {}
 
 
 def round_step(qty: float, step: float) -> float:
