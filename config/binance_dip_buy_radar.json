@@ -183,6 +183,44 @@
     "require_bid_support": false,
     "pause_sec": 0.15
   },
+  "alpha_filters": {
+    "enabled": true,
+    "max_symbols_per_cycle": 12,
+    "pause_sec": 0.12,
+    "workers": 4,
+    "taker": {
+      "enabled": true,
+      "lookback_minutes": 5,
+      "min_trades": 40,
+      "hot_ratio": 0.58,
+      "strong_ratio": 0.62,
+      "flat_max_chg_pct": 4.0,
+      "edge_bonus_hot": 6,
+      "edge_bonus_strong": 10,
+      "score_bonus_hot": 5,
+      "score_bonus_strong": 8,
+      "block_ratio_max": 0.38
+    },
+    "basis": {
+      "enabled": true,
+      "premium_min_pct": 0.08,
+      "premium_strong_pct": 0.20,
+      "discount_cut_pct": -0.15,
+      "edge_bonus_premium": 5,
+      "edge_bonus_strong": 9,
+      "edge_penalty_discount": 8,
+      "block_on_discount": true
+    },
+    "lead_lag": {
+      "enabled": true,
+      "lead_exchanges": ["bybit", "okx"],
+      "ohlcv_limit": 8,
+      "min_lead_ret_pct": 0.35,
+      "max_binance_lag_ret_pct": 0.15,
+      "edge_bonus": 8,
+      "score_bonus": 6
+    }
+  },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
     "RLUSD", "USDE", "XUSD", "U", "USD0", "USDD"

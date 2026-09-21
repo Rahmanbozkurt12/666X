@@ -271,6 +271,46 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "require_bid_support": False,  # opsiyonel — false = sadece ask duvarı keser
         "pause_sec": 0.15,
     },
+    # Alpha katmanı: taker baskı + spot-perp basis + cross-CEX lead-lag
+    # (slot_max / tahta / chain_flow üstüne eklenir — paralel ThreadPool)
+    "alpha_filters": {
+        "enabled": True,
+        "max_symbols_per_cycle": 12,  # rate-limit: sadece top aday
+        "pause_sec": 0.12,
+        "workers": 4,
+        "taker": {
+            "enabled": True,
+            "lookback_minutes": 5,
+            "min_trades": 40,
+            "hot_ratio": 0.58,  # taker buy ≥%58
+            "strong_ratio": 0.62,
+            "flat_max_chg_pct": 4.0,  # fiyat henüz kaçmamışsa bonus
+            "edge_bonus_hot": 6,
+            "edge_bonus_strong": 10,
+            "score_bonus_hot": 5,
+            "score_bonus_strong": 8,
+            "block_ratio_max": 0.38,  # aşırı satıcı baskısı → kes
+        },
+        "basis": {
+            "enabled": True,
+            "premium_min_pct": 0.08,  # perp > spot
+            "premium_strong_pct": 0.20,
+            "discount_cut_pct": -0.15,  # perp < spot → scalp kes/sertleştir
+            "edge_bonus_premium": 5,
+            "edge_bonus_strong": 9,
+            "edge_penalty_discount": 8,
+            "block_on_discount": True,
+        },
+        "lead_lag": {
+            "enabled": True,
+            "lead_exchanges": ["bybit", "okx"],
+            "ohlcv_limit": 8,
+            "min_lead_ret_pct": 0.35,  # öncü 5m getiri
+            "max_binance_lag_ret_pct": 0.15,  # Binance henüz geride
+            "edge_bonus": 8,
+            "score_bonus": 6,
+        },
+    },
     "stable_bases": [
         "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR",
         "USD1", "BFUSD", "RLUSD", "USDE", "XUSD", "U", "USD0", "USDD",
@@ -373,6 +413,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "winrate",
             "chain_flow",
             "order_book",
+            "alpha_filters",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -907,6 +948,8 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
         score += 6.0
     if layers.get("chain_inflow"):
         score += 4.0
+    # alpha: taker / basis / lead-lag (layers doldurulmuşsa)
+    score += float(layers.get("alpha_edge_bonus") or 0)
     if regime.get("supportive"):
         score += 6
     elif regime.get("hostile") or regime.get("block_al"):
@@ -1208,6 +1251,588 @@ def check_order_book_for_buy(
         # API fail → engelleme (kaçırma yerine izin)
         return {"ok": True, "skipped": True, "reason": "ob_fetch_fail"}
     return analyze_order_book_path(book, price, cfg)
+
+
+# ---------------------------------------------------------------------------
+# Alpha: taker baskı (aggTrades) + spot-perp basis + cross-CEX lead-lag
+# Mevcut mimari: sync requests + ThreadPool (aiohttp yok — bozmadan paralel)
+# ---------------------------------------------------------------------------
+
+def fetch_taker_buy_ratio(
+    rest_base: str,
+    symbol: str,
+    *,
+    lookback_minutes: int = 5,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """
+    aggTrades → taker buy oranı.
+    buyerIsMaker=False → alıcı taker (agresör alım).
+    """
+    out: dict[str, Any] = {
+        "ok": False,
+        "taker_buy_ratio": None,
+        "trades": 0,
+        "buy_quote": 0.0,
+        "sell_quote": 0.0,
+        "error": None,
+    }
+    try:
+        end_ms = int(time.time() * 1000)
+        start_ms = end_ms - max(1, lookback_minutes) * 60_000
+        rows = get_json_failover(
+            "/api/v3/aggTrades",
+            {
+                "symbol": symbol,
+                "startTime": start_ms,
+                "endTime": end_ms,
+                "limit": min(1000, max(50, limit)),
+            },
+            prefer=rest_base,
+            timeout=20,
+        )
+        if not isinstance(rows, list) or not rows:
+            out["error"] = "empty"
+            return out
+        buy_q = 0.0
+        sell_q = 0.0
+        for t in rows:
+            try:
+                px = float(t.get("p") or 0)
+                qty = float(t.get("q") or 0)
+                quote = px * qty
+                # m = buyerIsMaker → True ise satıcı taker
+                if bool(t.get("m")):
+                    sell_q += quote
+                else:
+                    buy_q += quote
+            except (TypeError, ValueError):
+                continue
+        total = buy_q + sell_q
+        if total <= 0:
+            out["error"] = "zero_vol"
+            return out
+        ratio = buy_q / total
+        out.update(
+            {
+                "ok": True,
+                "taker_buy_ratio": round(ratio, 4),
+                "trades": len(rows),
+                "buy_quote": round(buy_q, 2),
+                "sell_quote": round(sell_q, 2),
+            }
+        )
+        return out
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = exc.__class__.__name__
+        return out
+
+
+def fetch_spot_perp_basis(
+    spot_price: float,
+    symbol: str,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Spot vs USDT-M perp fiyat farkı %: (perp-spot)/spot*100.
+
+    Önce Binance fapi; geo-block/451 olursa OKX/Bitget/Gate swap ile proxy basis.
+    """
+    out: dict[str, Any] = {
+        "ok": False,
+        "basis_pct": None,
+        "perp_price": None,
+        "spot_price": spot_price,
+        "source": None,
+        "error": None,
+    }
+    if spot_price <= 0:
+        out["error"] = "bad_spot"
+        return out
+    fut_base = str(cfg.get("futures_base") or "https://fapi.binance.com").rstrip("/")
+    # 1) Binance USDT-M mark
+    try:
+        row = get_json(f"{fut_base}/fapi/v1/premiumIndex", {"symbol": symbol}, timeout=15)
+        if isinstance(row, dict):
+            mark = float(row.get("markPrice") or row.get("indexPrice") or 0)
+            if mark <= 0:
+                t = get_json(f"{fut_base}/fapi/v1/ticker/price", {"symbol": symbol}, timeout=12)
+                mark = float((t or {}).get("price") or 0)
+            if mark > 0:
+                basis = (mark / spot_price - 1.0) * 100.0
+                out.update(
+                    {
+                        "ok": True,
+                        "basis_pct": round(basis, 4),
+                        "perp_price": mark,
+                        "source": "binance_fapi",
+                        "last_funding": row.get("lastFundingRate"),
+                    }
+                )
+                return out
+        out["error"] = "bad_json"
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = exc.__class__.__name__
+
+    # 2) Proxy: diğer CEX perp vs Binance spot (aynı sinyal mantığı)
+    if ccxt is None:
+        return out
+    base = symbol.replace("USDT", "")
+    proxies = ["okx", "bitget", "gate", "bingx"]
+    for ex_id in proxies:
+        try:
+            ex = _ccxt_exchange(ex_id)
+            opts = dict(getattr(ex, "options", None) or {})
+            opts["defaultType"] = "swap"
+            ex.options = opts
+            t = ex.fetch_ticker(f"{base}/USDT:USDT")
+            mark = float(t.get("last") or t.get("close") or 0)
+            if mark <= 0:
+                info = t.get("info") or {}
+                mark = float(info.get("markPx") or info.get("markPrice") or 0)
+            if mark <= 0:
+                continue
+            basis = (mark / spot_price - 1.0) * 100.0
+            out.update(
+                {
+                    "ok": True,
+                    "basis_pct": round(basis, 4),
+                    "perp_price": mark,
+                    "source": f"proxy_{ex_id}",
+                    "error": None,
+                }
+            )
+            return out
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _cex_short_return(ex_id: str, symbol_ccxt: str, limit: int = 8) -> dict[str, Any]:
+    """Tek CEX 1m OHLCV → son 1m / ~5m getiri."""
+    out: dict[str, Any] = {"ex": ex_id, "ok": False, "ret_1m": None, "ret_5m": None, "error": None}
+    if ccxt is None:
+        out["error"] = "ccxt_yok"
+        return out
+    try:
+        ex = _ccxt_exchange(ex_id)
+        rows = ex.fetch_ohlcv(symbol_ccxt, timeframe="1m", limit=max(6, limit))
+        if not rows or len(rows) < 4:
+            out["error"] = "ohlcv_short"
+            return out
+        # son mum açık olabilir → bir önceye kadar
+        closes = [float(r[4]) for r in rows[:-1]]
+        if len(closes) < 3 or closes[-1] <= 0:
+            out["error"] = "bad_close"
+            return out
+        ret_1m = (closes[-1] / closes[-2] - 1.0) * 100.0 if closes[-2] > 0 else 0.0
+        look = min(5, len(closes) - 1)
+        ret_5m = (closes[-1] / closes[-(look + 1)] - 1.0) * 100.0 if closes[-(look + 1)] > 0 else 0.0
+        out.update({"ok": True, "ret_1m": round(ret_1m, 4), "ret_5m": round(ret_5m, 4)})
+        return out
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = exc.__class__.__name__
+        return out
+
+
+def fetch_cross_cex_lead_lag(
+    symbol: str,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Bybit/OKX 1m getirisi Binance'ten önde mi?
+    Lead: öncü ↑, Binance henüz yatay/dip.
+    """
+    af = (cfg.get("alpha_filters") or {}).get("lead_lag") or {}
+    leads = list(af.get("lead_exchanges") or ["bybit", "okx"])
+    limit = int(af.get("ohlcv_limit") or 8)
+    out: dict[str, Any] = {
+        "ok": False,
+        "is_lead": False,
+        "leader": None,
+        "binance_ret_5m": None,
+        "leader_ret_5m": None,
+        "details": [],
+        "error": None,
+    }
+    # Binance önce
+    bn = _cex_short_return("binance", symbol.replace("USDT", "/USDT"), limit=limit)
+    # vision fallback: kendi klines
+    if not bn.get("ok"):
+        try:
+            rest = pick_working_rest_base(cfg.get("rest_base"))
+            rows = get_json_failover(
+                "/api/v3/klines",
+                {"symbol": symbol, "interval": "1m", "limit": limit},
+                prefer=rest,
+                timeout=15,
+            )
+            if isinstance(rows, list) and len(rows) >= 5:
+                closes = [float(r[4]) for r in rows[:-1]]
+                ret_1m = (closes[-1] / closes[-2] - 1.0) * 100.0
+                ret_5m = (closes[-1] / closes[-6] - 1.0) * 100.0 if len(closes) >= 6 else ret_1m
+                bn = {
+                    "ex": "binance",
+                    "ok": True,
+                    "ret_1m": round(ret_1m, 4),
+                    "ret_5m": round(ret_5m, 4),
+                }
+        except Exception as exc:  # noqa: BLE001
+            bn = {"ex": "binance", "ok": False, "error": exc.__class__.__name__}
+
+    out["details"].append(bn)
+    out["binance_ret_5m"] = bn.get("ret_5m")
+    if not bn.get("ok"):
+        out["error"] = f"binance:{bn.get('error')}"
+        return out
+
+    min_lead = float(af.get("min_lead_ret_pct") or 0.35)
+    max_bn = float(af.get("max_binance_lag_ret_pct") or 0.15)
+    best_leader = None
+    best_ret = -999.0
+
+    def job(ex_id: str) -> dict[str, Any]:
+        # ccxt market id: BTC/USDT
+        base = symbol.replace("USDT", "")
+        return _cex_short_return(ex_id, f"{base}/USDT", limit=limit)
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, len(leads))) as pool:
+            futs = {pool.submit(job, ex): ex for ex in leads}
+            for fut in as_completed(futs):
+                try:
+                    det = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    det = {"ex": futs[fut], "ok": False, "error": exc.__class__.__name__}
+                out["details"].append(det)
+                if det.get("ok") and float(det.get("ret_5m") or -999) > best_ret:
+                    best_ret = float(det["ret_5m"])
+                    best_leader = det
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = exc.__class__.__name__
+        return out
+
+    bn_ret = float(bn.get("ret_5m") or 0)
+    if best_leader and best_ret >= min_lead and bn_ret <= max_bn and best_ret >= bn_ret + 0.20:
+        out.update(
+            {
+                "ok": True,
+                "is_lead": True,
+                "leader": best_leader.get("ex"),
+                "leader_ret_5m": best_ret,
+            }
+        )
+    else:
+        out.update(
+            {
+                "ok": True,
+                "is_lead": False,
+                "leader": (best_leader or {}).get("ex"),
+                "leader_ret_5m": best_ret if best_leader else None,
+            }
+        )
+    return out
+
+
+def evaluate_alpha_for_symbol(
+    rest_base: str,
+    symbol: str,
+    *,
+    price: float,
+    change_24h_pct: float,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Tek sembol için 3 alpha'yı paralel çek + skor bonus/ceza üret.
+    Log alanları: taker_buy_ratio, basis_pct, lead, edge_bonus, score_bonus, block, notes.
+    """
+    af = cfg.get("alpha_filters") or {}
+    result: dict[str, Any] = {
+        "ok": True,
+        "blocked": False,
+        "block_reason": None,
+        "edge_bonus": 0.0,
+        "score_bonus": 0.0,
+        "taker": {},
+        "basis": {},
+        "lead_lag": {},
+        "log_lines": [],
+    }
+    if not af.get("enabled", True):
+        result["log_lines"].append("alpha=OFF")
+        return result
+
+    taker_cfg = af.get("taker") or {}
+    basis_cfg = af.get("basis") or {}
+    lead_cfg = af.get("lead_lag") or {}
+    pause = float(af.get("pause_sec") or 0.12)
+
+    def run_taker() -> dict[str, Any]:
+        if not taker_cfg.get("enabled", True):
+            return {"ok": False, "skipped": True}
+        return fetch_taker_buy_ratio(
+            rest_base,
+            symbol,
+            lookback_minutes=int(taker_cfg.get("lookback_minutes") or 5),
+        )
+
+    def run_basis() -> dict[str, Any]:
+        if not basis_cfg.get("enabled", True):
+            return {"ok": False, "skipped": True}
+        return fetch_spot_perp_basis(price, symbol, cfg)
+
+    def run_lead() -> dict[str, Any]:
+        if not lead_cfg.get("enabled", True):
+            return {"ok": False, "skipped": True}
+        return fetch_cross_cex_lead_lag(symbol, cfg)
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            ft = pool.submit(run_taker)
+            fb = pool.submit(run_basis)
+            fl = pool.submit(run_lead)
+            taker = ft.result()
+            basis = fb.result()
+            lead = fl.result()
+    except Exception as exc:  # noqa: BLE001
+        result["log_lines"].append(f"alpha_pool_err={exc.__class__.__name__}")
+        return result
+
+    if pause > 0:
+        time.sleep(pause)
+
+    result["taker"] = taker
+    result["basis"] = basis
+    result["lead_lag"] = lead
+    edge_b = 0.0
+    score_b = 0.0
+
+    # --- 1) TAKER ---
+    if taker.get("ok") and taker.get("taker_buy_ratio") is not None:
+        ratio = float(taker["taker_buy_ratio"])
+        ntr = int(taker.get("trades") or 0)
+        min_tr = int(taker_cfg.get("min_trades") or 40)
+        hot = float(taker_cfg.get("hot_ratio") or 0.58)
+        strong = float(taker_cfg.get("strong_ratio") or 0.62)
+        flat_max = float(taker_cfg.get("flat_max_chg_pct") or 4.0)
+        block_lo = float(taker_cfg.get("block_ratio_max") or 0.38)
+        flat_ok = float(change_24h_pct) <= flat_max
+        pts_e = 0.0
+        pts_s = 0.0
+        if ntr >= min_tr and ratio <= block_lo:
+            result["blocked"] = True
+            result["block_reason"] = f"taker_sell_baski({ratio:.0%})"
+            result["log_lines"].append(
+                f"TAKER {ratio:.1%} trades={ntr} → BLOCK (satıcı baskı) edge+0"
+            )
+        elif ntr >= min_tr and flat_ok and ratio >= strong:
+            pts_e = float(taker_cfg.get("edge_bonus_strong") or 10)
+            pts_s = float(taker_cfg.get("score_bonus_strong") or 8)
+            result["log_lines"].append(
+                f"TAKER {ratio:.1%} trades={ntr} dip/yatay → edge+{pts_e:.0f} skor+{pts_s:.0f}"
+            )
+        elif ntr >= min_tr and flat_ok and ratio >= hot:
+            pts_e = float(taker_cfg.get("edge_bonus_hot") or 6)
+            pts_s = float(taker_cfg.get("score_bonus_hot") or 5)
+            result["log_lines"].append(
+                f"TAKER {ratio:.1%} trades={ntr} → edge+{pts_e:.0f} skor+{pts_s:.0f}"
+            )
+        else:
+            result["log_lines"].append(
+                f"TAKER {ratio:.1%} trades={ntr} flat={flat_ok} → edge+0 (eşik yok)"
+            )
+        edge_b += pts_e
+        score_b += pts_s
+    else:
+        result["log_lines"].append(
+            f"TAKER skip/err={taker.get('error') or taker.get('skipped')} → edge+0"
+        )
+
+    # --- 2) BASIS ---
+    if basis.get("ok") and basis.get("basis_pct") is not None:
+        bp = float(basis["basis_pct"])
+        src = basis.get("source") or "binance"
+        prem = float(basis_cfg.get("premium_min_pct") or 0.08)
+        prem_s = float(basis_cfg.get("premium_strong_pct") or 0.20)
+        disc = float(basis_cfg.get("discount_cut_pct") or -0.15)
+        pts_e = 0.0
+        if bp <= disc and basis_cfg.get("block_on_discount", True):
+            result["blocked"] = True
+            result["block_reason"] = result["block_reason"] or f"basis_discount({bp:+.3f}%)"
+            pen = float(basis_cfg.get("edge_penalty_discount") or 8)
+            edge_b -= pen
+            result["log_lines"].append(
+                f"BASIS {bp:+.3f}% [{src}] (perp discount) → BLOCK edge-{pen:.0f}"
+            )
+        elif bp >= prem_s:
+            pts_e = float(basis_cfg.get("edge_bonus_strong") or 9)
+            edge_b += pts_e
+            result["log_lines"].append(
+                f"BASIS {bp:+.3f}% [{src}] güçlü premium → edge+{pts_e:.0f}"
+            )
+        elif bp >= prem:
+            pts_e = float(basis_cfg.get("edge_bonus_premium") or 5)
+            edge_b += pts_e
+            result["log_lines"].append(
+                f"BASIS {bp:+.3f}% [{src}] premium → edge+{pts_e:.0f}"
+            )
+        else:
+            result["log_lines"].append(f"BASIS {bp:+.3f}% [{src}] nötr → edge+0")
+    else:
+        result["log_lines"].append(
+            f"BASIS skip/err={basis.get('error') or basis.get('skipped')} → edge+0"
+        )
+
+    # --- 3) LEAD-LAG ---
+    if lead.get("ok"):
+        if lead.get("is_lead"):
+            pts_e = float(lead_cfg.get("edge_bonus") or 8)
+            pts_s = float(lead_cfg.get("score_bonus") or 6)
+            edge_b += pts_e
+            score_b += pts_s
+            result["log_lines"].append(
+                f"LEAD {lead.get('leader')} "
+                f"%{float(lead.get('leader_ret_5m') or 0):+.2f} "
+                f"vs BN %{float(lead.get('binance_ret_5m') or 0):+.2f} → "
+                f"edge+{pts_e:.0f} skor+{pts_s:.0f} (kopya giriş)"
+            )
+        else:
+            result["log_lines"].append(
+                f"LEAD yok (BN %{lead.get('binance_ret_5m')}, "
+                f"best {lead.get('leader')} %{lead.get('leader_ret_5m')}) → edge+0"
+            )
+    else:
+        result["log_lines"].append(
+            f"LEAD skip/err={lead.get('error') or lead.get('skipped')} → edge+0"
+        )
+
+    result["edge_bonus"] = round(edge_b, 1)
+    result["score_bonus"] = round(score_b, 1)
+    result["ok"] = not result["blocked"]
+    return result
+
+
+def apply_alpha_filters_to_candidates(
+    account: "BinanceAccount",
+    cands: list[Analysis],
+    cfg: dict[str, Any],
+    notes: list[str],
+    regime: dict[str, Any] | None = None,
+) -> list[Analysis]:
+    """Final adaylara alpha katmanı — rate-limit için sınırlı sembol, paralel ThreadPool."""
+    af = cfg.get("alpha_filters") or {}
+    if not af.get("enabled", True) or not cands:
+        return cands
+    max_n = int(af.get("max_symbols_per_cycle") or 12)
+    workers = max(1, min(int(af.get("workers") or 4), max_n))
+    rest = account.rest_base
+    target = cands[:max_n]
+    notes.append(
+        f"[alpha] taker+basis+lead · aday={len(target)} · workers={workers}"
+    )
+
+    def _one(r: Analysis) -> tuple[Analysis, dict[str, Any] | None, str | None]:
+        try:
+            alpha = evaluate_alpha_for_symbol(
+                rest,
+                r.symbol,
+                price=float(r.price),
+                change_24h_pct=float(r.change_24h_pct or 0),
+                cfg=cfg,
+            )
+            return r, alpha, None
+        except Exception as exc:  # noqa: BLE001
+            return r, None, exc.__class__.__name__
+
+    results: list[tuple[Analysis, dict[str, Any] | None, str | None]] = []
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [pool.submit(_one, r) for r in target]
+            for fut in as_completed(futs):
+                try:
+                    results.append(fut.result())
+                except Exception as exc:  # noqa: BLE001
+                    notes.append(f"alpha pool HATA: {exc.__class__.__name__}")
+    except Exception as exc:  # noqa: BLE001
+        notes.append(f"alpha ThreadPool HATA={exc.__class__.__name__} → alpha pas")
+        return cands
+
+    # orijinal sırayı koru (edge sıralı gelmişti)
+    by_base = {r.base: (r, alpha, err) for r, alpha, err in results}
+    kept: list[Analysis] = []
+    for r0 in target:
+        item = by_base.get(r0.base)
+        if not item:
+            kept.append(r0)
+            continue
+        r, alpha, err = item
+        if err or alpha is None:
+            notes.append(f"alpha HATA {r.base}: {err or '?'} → geç")
+            kept.append(r)
+            continue
+
+        bonus_e = float(alpha.get("edge_bonus") or 0)
+        bonus_s = float(alpha.get("score_bonus") or 0)
+        r.layers["alpha_edge_bonus"] = bonus_e
+        r.layers["taker_buy_ratio"] = (alpha.get("taker") or {}).get("taker_buy_ratio")
+        r.layers["basis_pct"] = (alpha.get("basis") or {}).get("basis_pct")
+        r.layers["basis_source"] = (alpha.get("basis") or {}).get("source")
+        r.layers["cex_lead"] = (alpha.get("lead_lag") or {}).get("is_lead")
+        r.layers["cex_leader"] = (alpha.get("lead_lag") or {}).get("leader")
+        r.layers["alpha_blocked"] = bool(alpha.get("blocked"))
+
+        # Mevcut edge'e alpha bonus ekle (yeniden hesaplama bileşen kaybettirir)
+        old_edge = float(r.layers.get("edge_score") or 0)
+        new_edge = min(100.0, max(0.0, round(old_edge + bonus_e, 1)))
+        r.layers["edge_score"] = new_edge
+        if bonus_s:
+            r.score = min(100.0, round(float(r.score) + bonus_s, 1))
+
+        for line in alpha.get("log_lines") or []:
+            notes.append(f"  α {r.base}: {line}")
+        notes.append(
+            f"  α {r.base} ÖZET edge {old_edge:.0f}→{new_edge:.0f} "
+            f"(α_edge{bonus_e:+.0f} α_skor{bonus_s:+.0f}) "
+            f"taker={r.layers.get('taker_buy_ratio')} "
+            f"basis={r.layers.get('basis_pct')}% "
+            f"lead={r.layers.get('cex_lead')}({r.layers.get('cex_leader')})"
+        )
+
+        if alpha.get("blocked"):
+            notes.append(
+                f"🚫 alpha BLOCK {r.base}: {alpha.get('block_reason')}"
+            )
+            continue
+
+        if r.layers.get("cex_lead"):
+            if "CEX_LEAD" not in r.reasons:
+                r.reasons.append("CEX_LEAD")
+        tr = r.layers.get("taker_buy_ratio")
+        if isinstance(tr, (int, float)) and float(tr) >= 0.58:
+            tag = f"TAKER%{float(tr) * 100:.0f}"
+            if tag not in r.reasons:
+                r.reasons.append(tag)
+        bp = r.layers.get("basis_pct")
+        if isinstance(bp, (int, float)) and float(bp) >= 0.08:
+            tag = f"BASIS+{float(bp):.2f}%"
+            if tag not in r.reasons:
+                r.reasons.append(tag)
+
+        kept.append(r)
+
+    kept.sort(
+        key=lambda x: (
+            -float((x.layers or {}).get("edge_score") or 0),
+            0 if (x.layers or {}).get("cex_lead") else 1,
+            -float(x.score or 0),
+        )
+    )
+    if len(cands) > max_n:
+        notes.append(f"[alpha] {len(cands) - max_n} aday limit dışı atlandı (rate-limit)")
+    notes.append(
+        f"[alpha] geçen={len(kept)}/{len(target)} "
+        f"(taker/basis/lead skorları logda)"
+    )
+    return kept
 
 
 def calc_risk_levels(
@@ -3469,6 +4094,12 @@ def manage_entries(
                 notes.append(f"📋 yedek temiz tahta: {r.base}")
         cands = clean
 
+    # Alpha katmanı (tahta sonrası): taker baskı + spot-perp basis + CEX lead-lag
+    if cands and (cfg.get("alpha_filters") or {}).get("enabled", True):
+        cands = apply_alpha_filters_to_candidates(
+            account, cands, cfg, notes, regime=regime
+        )
+
     if not cands:
         notes.append("alım yok — winrate/edge/onay filtresinden geçen aday yok")
         near = sorted(
@@ -3555,6 +4186,7 @@ def manage_entries(
                 runner_tp_pct = max(runner_tp_pct, float(sig.upside_est_pct))
             tp2 = round(entry * (1.0 + runner_tp_pct / 100.0), 10)
             edge = float((sig.layers or {}).get("edge_score") or compute_edge_score(sig, regime))
+            ly = sig.layers or {}
             positions[sig.base] = {
                 "symbol": symbol,
                 "entry": entry,
@@ -3568,9 +4200,14 @@ def manage_entries(
                 "pump_score": sig.pump_score,
                 "edge_score": edge,
                 "is_uc": sig.is_uc,
-                "cex_count": int((sig.layers or {}).get("cex_count") or 0),
+                "cex_count": int(ly.get("cex_count") or 0),
                 "sector": coin_sector(sig.base),
                 "spread_pct": round(sp, 3),
+                "taker_buy_ratio": ly.get("taker_buy_ratio"),
+                "basis_pct": ly.get("basis_pct"),
+                "cex_lead": ly.get("cex_lead"),
+                "cex_leader": ly.get("cex_leader"),
+                "alpha_edge_bonus": ly.get("alpha_edge_bonus"),
                 "sold_tp1": False,
                 "runner": False,
                 "breakeven": False,
@@ -3581,10 +4218,16 @@ def manage_entries(
             sector_count[coin_sector(sig.base)] = sector_count.get(coin_sector(sig.base), 0) + 1
             watch.pop(sig.base, None)
             tag = "🚀" if sig.is_uc else "🟢"
+            alpha_bit = (
+                f"α(taker={ly.get('taker_buy_ratio')} "
+                f"basis={ly.get('basis_pct')} "
+                f"lead={ly.get('cex_lead')} "
+                f"αe{float(ly.get('alpha_edge_bonus') or 0):+.0f})"
+            )
             notes.append(
                 f"{tag} AL {sig.base} ~{fill_quote:.2f} USDT @ {entry:.8g} "
                 f"edge={edge:.0f} CEX×{positions[sig.base]['cex_count']} "
-                f"sektör={positions[sig.base]['sector']} "
+                f"sektör={positions[sig.base]['sector']} {alpha_bit} "
                 f"SL%-{hard_stop} banka%+{tp_need:.2f} runnerTP%{runner_tp_pct:.0f}"
             )
             log_trade(
@@ -3814,6 +4457,18 @@ def main() -> int:
             f"[tahta] order-book duvar filtresi AÇIK · "
             f"look+%{obc.get('look_ahead_pct')} · "
             f"ask_wall≥${obc.get('ask_wall_quote_min')}"
+        )
+    afc = cfg.get("alpha_filters") or {}
+    if afc.get("enabled", True):
+        tk = afc.get("taker") or {}
+        bs = afc.get("basis") or {}
+        ll = afc.get("lead_lag") or {}
+        print(
+            f"[alpha] taker≥%{float(tk.get('hot_ratio') or 0.58)*100:.0f} "
+            f"+ basis prem≥%{bs.get('premium_min_pct')} "
+            f"+ lead {','.join(ll.get('lead_exchanges') or ['bybit','okx'])} · "
+            f"max_sym={afc.get('max_symbols_per_cycle')} · "
+            f"workers={afc.get('workers')}"
         )
     mc = cfg.get("multi_cex") or {}
     if mc.get("enabled", True):
