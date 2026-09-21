@@ -1,32 +1,53 @@
 {
   "settings": {
-    "poll_seconds": 15,
+    "poll_seconds": 45,
     "copy_delay_seconds": 60,
     "hold_confirm_seconds": 60,
     "atomic_window_seconds": 12,
     "min_usd_notional": 8.0,
     "max_copy_usd": 50.0,
-    "copy_pct_of_free_usdt": 0.10,
+    "copy_pct_of_free_usdt": 0.1,
     "dry_run": false,
     "trade_enabled": true,
     "prefer_binance_if_listed": true,
-    "stable_symbols": ["USDT", "USDC", "USD1", "DAI", "FDUSD", "BUSD", "TUSD", "USDe", "USDE"],
-    "quote_symbols": ["WETH", "ETH", "WBTC", "BTC", "WAVAX", "AVAX"],
+    "stable_symbols": [
+      "USDT",
+      "USDC",
+      "USD1",
+      "DAI",
+      "FDUSD",
+      "BUSD",
+      "TUSD",
+      "USDe",
+      "USDE"
+    ],
+    "quote_symbols": [
+      "WETH",
+      "ETH",
+      "WBTC",
+      "BTC",
+      "WAVAX",
+      "AVAX"
+    ],
     "skip_spam_decimals_zero": true,
     "chains": {
       "ethereum": {
-        "explorer_api": "https://eth.blockscout.com/api",
+        "explorer_apis": [
+          "https://eth.blockscout.com/api",
+          "https://api.etherscan.io/v2/api?chainid=1"
+        ],
         "explorer_tx": "https://etherscan.io/tx/",
-        "native": "ETH",
         "enabled": true
       },
       "avalanche": {
-        "explorer_api": "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api",
+        "explorer_apis": [
+          "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api"
+        ],
         "explorer_tx": "https://snowtrace.io/tx/",
-        "native": "AVAX",
         "enabled": true
       }
-    }
+    },
+    "wallet_pause_sec": 3.0
   },
   "wallets": [
     {

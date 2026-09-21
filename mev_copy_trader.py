@@ -36,17 +36,19 @@ BINANCE_API_KEY = ""  # örn: "abc..."
 BINANCE_API_SECRET = ""  # örn: "xyz..."
 TELEGRAM_BOT_TOKEN = ""  # opsiyonel
 TELEGRAM_CHAT_ID = ""  # opsiyonel
+ETHERSCAN_API_KEY = ""  # opsiyonel — 429 azalır (ücretsiz etherscan key)
 
 # =============================================================================
 # AYAR + CÜZDANLAR (tek dosya — ayrı json gerekmez)
 # =============================================================================
 CONFIG: dict[str, Any] = {
     "settings": {
-        "poll_seconds": 15,
+        "poll_seconds": 45,
+        "wallet_pause_sec": 3.0,
         "copy_delay_seconds": 60,
         "min_usd_notional": 8.0,
         "max_copy_usd": 50.0,
-        "copy_pct_of_free_usdt": 0.10,  # serbest USDT'nin %10'u, max_copy_usd tavan
+        "copy_pct_of_free_usdt": 0.10,
         "dry_run": False,
         "trade_enabled": True,
         "prefer_binance_if_listed": True,
@@ -57,14 +59,17 @@ CONFIG: dict[str, Any] = {
         "skip_spam_decimals_zero": True,
         "chains": {
             "ethereum": {
-                "explorer_api": "https://eth.blockscout.com/api",
+                "explorer_apis": [
+                    "https://eth.blockscout.com/api",
+                    "https://api.etherscan.io/v2/api?chainid=1",
+                ],
                 "explorer_tx": "https://etherscan.io/tx/",
                 "enabled": True,
             },
             "avalanche": {
-                "explorer_api": (
-                    "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api"
-                ),
+                "explorer_apis": [
+                    "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api",
+                ],
                 "explorer_tx": "https://snowtrace.io/tx/",
                 "enabled": True,
             },
@@ -217,34 +222,108 @@ def load_watched(cfg: dict[str, Any]) -> list[Watched]:
 
 
 def explorer_get(api: str, params: dict[str, Any], timeout: float = 25.0) -> Any:
-    r = requests.get(api, params=params, timeout=timeout)
+    # etherscan v2 URL already has ?chainid= — merge carefully
+    if "?" in api:
+        base, qs = api.split("?", 1)
+        url = base
+        # parse existing qs into params without overwrite
+        for part in qs.split("&"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                params.setdefault(k, v)
+    else:
+        url = api
+    # Etherscan key (v2 / classic)
+    ek = pick_env("ETHERSCAN_API_KEY", hardcoded=ETHERSCAN_API_KEY)
+    if ek and "etherscan.io" in url:
+        params.setdefault("apikey", ek)
+    r = requests.get(url, params=params, timeout=timeout)
+    if r.status_code == 429:
+        raise requests.HTTPError("429", response=r)
     r.raise_for_status()
     data = r.json()
     if isinstance(data, dict) and "result" in data:
+        # etherscan NOTOK
+        if str(data.get("status")) == "0" and isinstance(data.get("result"), str):
+            msg = str(data.get("result") or data.get("message") or "")
+            if "rate" in msg.lower() or "Max rate" in msg:
+                raise requests.HTTPError("429 " + msg, response=r)
+            if "Invalid API Key" in msg or "NOTOK" in str(data.get("message") or ""):
+                # başka explorer dene
+                raise RuntimeError(msg)
         return data.get("result")
     return data
 
 
-def fetch_tokentx(api: str, address: str, *, offset: int = 40) -> list[dict[str, Any]]:
-    try:
-        result = explorer_get(
-            api,
-            {
-                "module": "account",
-                "action": "tokentx",
-                "address": address,
-                "page": 1,
-                "offset": offset,
-                "sort": "desc",
-            },
-        )
-    except Exception as e:  # noqa: BLE001
-        print(f"  ! tokentx fail {address[:10]}… {e}", flush=True)
-        return []
-    if isinstance(result, str):
-        print(f"  ! tokentx msg {address[:10]}… {result[:120]}", flush=True)
-        return []
-    return result if isinstance(result, list) else []
+_last_explorer_call = 0.0
+_explorer_cooldown_until = 0.0
+
+
+def fetch_tokentx(
+    chain_cfg: dict[str, Any], address: str, *, offset: int = 40
+) -> tuple[list[dict[str, Any]], str | None]:
+    """
+    Returns (rows, error).
+    error='rate_limit' → çağıran bekle / pending tut
+    """
+    global _last_explorer_call, _explorer_cooldown_until
+    now = time.time()
+    if now < _explorer_cooldown_until:
+        wait = _explorer_cooldown_until - now
+        print(f"  · explorer cooldown {wait:.0f}s…", flush=True)
+        time.sleep(wait)
+
+    apis: list[str] = []
+    if chain_cfg.get("explorer_apis"):
+        apis = list(chain_cfg["explorer_apis"])
+    elif chain_cfg.get("explorer_api"):
+        apis = [str(chain_cfg["explorer_api"])]
+
+    last_err: str | None = None
+    for api in apis:
+        # global min gap 1.4s
+        gap = 1.4 - (time.time() - _last_explorer_call)
+        if gap > 0:
+            time.sleep(gap)
+        try:
+            _last_explorer_call = time.time()
+            result = explorer_get(
+                api,
+                {
+                    "module": "account",
+                    "action": "tokentx",
+                    "address": address,
+                    "page": 1,
+                    "offset": offset,
+                    "sort": "desc",
+                },
+            )
+            if isinstance(result, str):
+                last_err = result[:120]
+                if "rate" in result.lower():
+                    _explorer_cooldown_until = time.time() + 25
+                    continue
+                continue
+            if isinstance(result, list):
+                return result, None
+        except requests.HTTPError as e:
+            last_err = str(e)
+            resp = getattr(e, "response", None)
+            code = getattr(resp, "status_code", None)
+            if code == 429 or "429" in str(e):
+                _explorer_cooldown_until = time.time() + 30
+                print(f"  ! 429 → 30s bekle, yedek API dene ({api[:40]}…)", flush=True)
+                time.sleep(5)
+                continue
+            print(f"  ! tokentx HTTP {address[:10]}… {e}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)
+            print(f"  ! tokentx fail {address[:10]}… {e}", flush=True)
+            continue
+
+    if last_err and ("429" in last_err or "rate" in last_err.lower()):
+        return [], "rate_limit"
+    return [], last_err or "empty"
 
 
 def is_stable_or_quote(symbol: str, settings: dict[str, Any]) -> bool:
