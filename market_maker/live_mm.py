@@ -13,6 +13,7 @@ Ne yapar:
   • Aldığı coin YÜKSELINCE SATar
   • Satıştan sonra aynı coine 1 dk ara verir, sonra tekrar devam
   • LIMIT_MAKER + ban koruması (418/-1003 → bekler)
+  • Bakiye/emir/fill aralıkları 55s (20 pair için yavaş)
 """
 
 from __future__ import annotations
@@ -54,16 +55,18 @@ TOP_REFRESH_SEC = 300.0         # top-20 listesini 5 dk'da bir yenile
 MIN_QUOTE_VOL_USDT = 5_000_000  # çok ölü pair alma
 MIN_PRICE = 0.00001
 
-# Emir / ban koruma
-REPLACE_SEC = 8.0               # sinyal kontrol aralığı (pozisyon varken daha sık)
-BALANCE_CACHE_SEC = 45.0
-FILL_POLL_SEC = 45.0
+# Emir / ban koruma — 20 pair için YAVAŞ tut (45→55 yetmez, emir aralığı kritik)
+REPLACE_SEC = 55.0              # her pair için emir yenileme / sinyal (az REST)
+BALANCE_CACHE_SEC = 55.0        # ortak bakiye cache
+FILL_POLL_SEC = 55.0            # trade geçmişi poll
+REST_BOOK_SEC = 25.0            # WS yoksa book REST aralığı
 MIN_QUOTE_FREE = 5.0
 POST_ONLY = True
 MAKER_FEE = 0.001
 FEE_SAFETY = 1.5
 MIN_EDGE_BPS = 6.0
 MAX_DRAWDOWN_RATIO = 0.08       # slot başına DD kill
+WORKER_STAGGER_SEC = 3.0        # pair'leri aralıklı başlat (burst engelle)
 
 SKIP_BASES = {
     "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
@@ -139,7 +142,7 @@ class Exchange:
             "apiKey": key,
             "secret": secret,
             "enableRateLimit": True,
-            "rateLimit": 200,
+            "rateLimit": 350,
             "options": {"defaultType": "spot", "adjustForTimeDifference": True},
         }
         self.rest = ccxt.binance(opts)
@@ -614,7 +617,7 @@ class Worker:
                     if ob:
                         self.on_book(ob)
                 else:
-                    if time.time() - last_rest >= 12:
+                    if time.time() - last_rest >= REST_BOOK_SEC:
                         ob = await self.ex.book_rest(self.symbol)
                         if ob:
                             self.on_book(ob)
@@ -676,6 +679,7 @@ async def main_async() -> None:
     print(f"USDT: ${free:,.2f} | {n}×${slot:,.2f}")
     print("TOP:", ", ".join(s.replace("/USDT", "") for s in symbols))
     print(f"dip≥{DIP_BPS:.0f}bps | rise≥{RISE_BPS:.0f}bps | cooldown={COOLDOWN_SEC:.0f}s")
+    print(f"ban-safe: replace={REPLACE_SEC:.0f}s balance={BALANCE_CACHE_SEC:.0f}s fill={FILL_POLL_SEC:.0f}s")
     print("Ctrl+C ile dur")
     print("=" * 64)
 
@@ -687,7 +691,7 @@ async def main_async() -> None:
         log.warning("ccxt.pro yok → REST (ban riski). pip install 'ccxt[pro]'")
 
     workers = [Worker(ex, s, slot) for s in symbols]
-    tasks = [asyncio.create_task(w.run(i * 2.0)) for i, w in enumerate(workers)]
+    tasks = [asyncio.create_task(w.run(i * WORKER_STAGGER_SEC)) for i, w in enumerate(workers)]
     refresh_task = asyncio.create_task(refresh_loop(ex, workers, tasks))
 
     try:
