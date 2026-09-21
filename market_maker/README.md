@@ -4,6 +4,8 @@ Kaynak: https://github.com/yuthavithi/binance-makret-maker-bot (MIT)
 
 **Varsayılan:** canlı Binance spot + **USDT bakiyesini 8'e böl** → 8 likit pair'de paralel limit AL/SAT.
 
+**Komisyon koruması:** spread ≥ 2×maker×safety + min edge; emirler **Post-Only (GTX)** — taker ücrete düşmez.
+
 ## Kurulum
 ```bash
 cd market_maker
@@ -26,3 +28,15 @@ Durdurmak: `Ctrl+C` (tüm açık emirler iptal).
 
 ## Pair değiştir
 `market_maker_config.json` → `exchange.symbols` listesini düzenle (en fazla `balance_slots` kadar kullanılır).
+
+## Fees
+```json
+"fees": {
+  "maker_fee_rate": 0.001,
+  "taker_fee_rate": 0.001,
+  "fee_safety_mult": 1.5,
+  "min_edge_bps": 8.0,
+  "post_only": true
+}
+```
+VIP/BNB ile maker düşükse API rates güncellenir; `fee_safety_mult` tampon bırakır.

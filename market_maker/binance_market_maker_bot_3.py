@@ -83,6 +83,13 @@ class ConfigFile:
                 "market_impact": 0.01,
                 "time_horizon": 1.0,
                 "use_avellaneda": True
+            },
+            "fees": {
+                "maker_fee_rate": 0.001,
+                "taker_fee_rate": 0.001,
+                "fee_safety_mult": 1.5,
+                "min_edge_bps": 8.0,
+                "post_only": True
             }
         }
         
@@ -169,10 +176,13 @@ class Config:
     TRADE_HISTORY_SIZE: int = 100
     VOLATILITY_WINDOW: float = 60.0
     
-    # Fee tracking (will be populated from API)
+    # Fee tracking / komisyon koruması
     MAKER_FEE_RATE: float = 0.001
     TAKER_FEE_RATE: float = 0.001
     FEE_CURRENCY: str = ""
+    FEE_SAFETY_MULT: float = 1.5      # API fee × bu çarpan (BNB indirimi kaybı vs.)
+    MIN_EDGE_BPS: float = 8.0        # round-trip sonrası min kâr (bps)
+    POST_ONLY: bool = True           # GTX — taker komisyonuna düşme
 
     def __post_init__(self):
         if self.SYMBOLS is None:
@@ -229,6 +239,14 @@ class Config:
         config.MARKET_IMPACT = risk.get("market_impact", 0.01)
         config.TIME_HORIZON = risk.get("time_horizon", 1.0)
         config.USE_AVELLANEDA = risk.get("use_avellaneda", True)
+
+        # Load fee / komisyon koruması
+        fees = config_data.get("fees", {})
+        config.MAKER_FEE_RATE = float(fees.get("maker_fee_rate", config.MAKER_FEE_RATE))
+        config.TAKER_FEE_RATE = float(fees.get("taker_fee_rate", config.TAKER_FEE_RATE))
+        config.FEE_SAFETY_MULT = float(fees.get("fee_safety_mult", 1.5))
+        config.MIN_EDGE_BPS = float(fees.get("min_edge_bps", 8.0))
+        config.POST_ONLY = bool(fees.get("post_only", True))
         
         return config
 
@@ -277,6 +295,9 @@ class Config:
             MAKER_FEE_RATE=self.MAKER_FEE_RATE,
             TAKER_FEE_RATE=self.TAKER_FEE_RATE,
             FEE_CURRENCY=self.FEE_CURRENCY,
+            FEE_SAFETY_MULT=self.FEE_SAFETY_MULT,
+            MIN_EDGE_BPS=self.MIN_EDGE_BPS,
+            POST_ONLY=self.POST_ONLY,
         )
     
     @property
@@ -375,10 +396,11 @@ class EMA:
 # ============================================================================
 
 class BinanceCCXTClient:
-    def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
+    def __init__(self, api_key: str, api_secret: str, testnet: bool = False, post_only: bool = True):
         self.api_key = api_key
         self.api_secret = api_secret
         self.testnet = testnet
+        self.post_only = post_only
         
         # Initialize CCXT exchange (sandbox=False → gerçek Binance spot)
         exchange_class = ccxt.binance
@@ -514,6 +536,9 @@ class BinanceCCXTClient:
             params = {
                     'newClientOrderId': get_client_id()
                 }
+            # Post-Only (Binance GTX): emir book'a maker olarak girer, taker olursa iptal
+            if self.post_only:
+                params['timeInForce'] = 'GTX'
             
 
             loop = asyncio.get_event_loop()
@@ -525,7 +550,12 @@ class BinanceCCXTClient:
             self.logger.info(f"Order placed: {order['id']} - {side} {amount:.8f} {symbol} @ {price:.4f}")
             return order
         except Exception as e:
-            self.logger.error(f"Failed to place order: {e}")
+            err = str(e)
+            # Post-only reddi normal — log'u yumuşat
+            if 'Post Only' in err or '-5022' in err or 'GTX' in err:
+                self.logger.warning(f"Post-only reddedildi (taker olurdu): {e}")
+            else:
+                self.logger.error(f"Failed to place order: {e}")
             self.logger.debug(f"Order details - Symbol: {symbol}, Side: {side}, Amount: {amount}, Price: {price}, Type: {order_type}")
             return None
     
@@ -820,7 +850,15 @@ class MarketMakerBot:
     def __init__(self, config: Config, client: Optional[BinanceCCXTClient] = None, owns_client: bool = True):
         self.config = config
         self.owns_client = owns_client and client is None
-        self.client = client or BinanceCCXTClient(config.API_KEY, config.API_SECRET, testnet=config.USE_TESTNET)
+        self.client = client or BinanceCCXTClient(
+            config.API_KEY,
+            config.API_SECRET,
+            testnet=config.USE_TESTNET,
+            post_only=config.POST_ONLY,
+        )
+        if client is not None:
+            # Paylaşılan client'ta post-only config'i senkron tut
+            self.client.post_only = bool(config.POST_ONLY)
         self.ws_manager = None
         
         # Market State
@@ -878,16 +916,81 @@ class MarketMakerBot:
                 if not fee_info.get('percentage', True):
                     self.logger.warning("Fees are not percentage-based, this might affect calculations")
                 
-                self.logger.info(f"Trading fees: Maker={self.config.MAKER_FEE_RATE*100:.3f}%, "
-                            f"Taker={self.config.TAKER_FEE_RATE*100:.3f}%")
+                self.logger.info(
+                    f"Trading fees: Maker={self.config.MAKER_FEE_RATE*100:.4f}%, "
+                    f"Taker={self.config.TAKER_FEE_RATE*100:.4f}% | "
+                    f"safety×{self.config.FEE_SAFETY_MULT} edge≥{self.config.MIN_EDGE_BPS:.1f}bps "
+                    f"post_only={self.config.POST_ONLY}"
+                )
             else:
                 self.logger.warning("Using default fee rates")
                 
         except Exception as e:
             self.logger.error(f"Error initializing fees: {e}")
-            # Use defaults
-            self.config.MAKER_FEE_RATE = 0.001
-            self.config.TAKER_FEE_RATE = 0.001
+            # Use defaults (Binance spot VIP0 ~0.1%)
+            self.config.MAKER_FEE_RATE = max(self.config.MAKER_FEE_RATE, 0.001)
+            self.config.TAKER_FEE_RATE = max(self.config.TAKER_FEE_RATE, 0.001)
+
+    def effective_maker_fee(self) -> float:
+        """Pad'li maker fee (BNB indirimi kaybı / VIP değişimi tamponu)."""
+        return max(float(self.config.MAKER_FEE_RATE), 0.0) * float(self.config.FEE_SAFETY_MULT)
+
+    def effective_taker_fee(self) -> float:
+        return max(float(self.config.TAKER_FEE_RATE), float(self.config.MAKER_FEE_RATE), 0.0) * float(
+            self.config.FEE_SAFETY_MULT
+        )
+
+    def round_trip_fee_rate(self) -> float:
+        """AL+SAT komisyon maliyeti (oran). Maker+maker; güvenlik için maker+taker."""
+        # Post-only ile genelde maker+maker; tampon için maker + max(maker,taker*0.5)
+        maker = self.effective_maker_fee()
+        return maker * 2.0
+
+    def min_profitable_full_spread(self, mid_price: float) -> float:
+        """Komisyon + min edge sonrası kâr bırakacak minimum full spread (ask-bid)."""
+        if mid_price <= 0:
+            return 0.0
+        edge = mid_price * (float(self.config.MIN_EDGE_BPS) / 10000.0)
+        fee_cost = mid_price * self.round_trip_fee_rate()
+        tick_floor = self.tick_size * max(2.0, float(self.config.BASE_SPREAD_TICKS))
+        return max(fee_cost + edge, tick_floor)
+
+    def min_profitable_half_spread(self, mid_price: float) -> float:
+        return self.min_profitable_full_spread(mid_price) / 2.0
+
+    def apply_fee_floor(self, bid_price: float, ask_price: float, mid_price: float) -> Tuple[float, float]:
+        """Spread komisyon+edge altına inerse genişlet — ezilmeyelim."""
+        min_full = self.min_profitable_full_spread(mid_price)
+        cur = ask_price - bid_price
+        if cur < min_full:
+            half = min_full / 2.0
+            # Mid etrafında yeniden merkezle (skew'i hafif koru)
+            center = (bid_price + ask_price) / 2.0 if ask_price > bid_price else mid_price
+            # Center mid'den çok sapmasın
+            if abs(center - mid_price) > mid_price * 0.002:
+                center = mid_price
+            bid_price = center - half
+            ask_price = center + half
+            self.logger.debug(
+                f"Fee floor: spread {cur:.6f} → {min_full:.6f} "
+                f"(fees={self.round_trip_fee_rate()*100:.3f}% + edge={self.config.MIN_EDGE_BPS}bps)"
+            )
+        bid_price = self.round_to_tick(bid_price)
+        ask_price = self.round_to_tick(ask_price)
+        # Tick yuvarlama sonrası hâlâ dar olabilir
+        if ask_price - bid_price < min_full:
+            half = min_full / 2.0
+            bid_price = self.round_to_tick(mid_price - half)
+            ask_price = self.round_to_tick(mid_price + half)
+            if ask_price <= bid_price:
+                ask_price = bid_price + max(self.tick_size, self.round_to_tick(min_full))
+        return bid_price, ask_price
+
+    def quotes_cover_fees(self, bid_price: float, ask_price: float) -> bool:
+        mid = (bid_price + ask_price) / 2.0 if ask_price > 0 else self.market_state.mid_price
+        if mid <= 0 or ask_price <= bid_price:
+            return False
+        return (ask_price - bid_price) + 1e-12 >= self.min_profitable_full_spread(mid)
 
     async def refresh_fees_periodically(self, interval: int = 3600):
         """Periodically refresh fee information"""
@@ -1309,6 +1412,16 @@ class MarketMakerBot:
                 quotes = self.generate_volatility_quotes()
                 
             if quotes:
+                # Komisyon tabanı — spread fee+edge altına inmesin
+                quotes.bid_price, quotes.ask_price = self.apply_fee_floor(
+                    quotes.bid_price, quotes.ask_price, self.market_state.mid_price
+                )
+                if not self.quotes_cover_fees(quotes.bid_price, quotes.ask_price):
+                    self.logger.warning(
+                        f"{self.config.SYMBOL}: spread komisyonu karşılamıyor — emir yok "
+                        f"(bid={quotes.bid_price} ask={quotes.ask_price})"
+                    )
+                    return None
                 quotes.can_place_bid = self.can_place_buy_order(quotes.bid_size, quotes.bid_price)
                 quotes.can_place_ask = self.can_place_sell_order(quotes.ask_size)
                 
@@ -1320,52 +1433,49 @@ class MarketMakerBot:
 
     # Additional Fix: More conservative volatility-based quotes as fallback
     def generate_volatility_quotes(self) -> Quotes:
-        """Generate quotes using simple volatility-based spread - MADE MORE CONSERVATIVE"""
+        """Generate quotes using simple volatility-based spread - fee-aware"""
         mid_price = self.market_state.mid_price
-        fee_adjustment = mid_price * self.config.MAKER_FEE_RATE * 4
+        fee_half = self.min_profitable_half_spread(mid_price)
         volatility = max(self.market_state.volatility, 0.001)
         
         # More conservative spread calculation
         base_spread = max(
             self.config.BASE_SPREAD_TICKS * self.tick_size,
-            mid_price * 0.0005  # Minimum 0.05% spread
+            mid_price * 0.0005,  # Minimum 0.05% spread
+            fee_half * 2,        # Komisyon tabanı
         )
         
         # Reduce volatility impact
         vol_spread = min(
-            self.config.VOLATILITY_MULTIPLIER * volatility * mid_price * 0.1,  # REDUCED volatility impact
+            self.config.VOLATILITY_MULTIPLIER * volatility * mid_price * 0.1,
             mid_price * 0.01  # Cap at 1% 
         )
         
-        half_spread = (base_spread + vol_spread) / 2 + fee_adjustment
+        half_spread = max((base_spread + vol_spread) / 2, fee_half)
         
         # Conservative inventory and imbalance skew
-        inventory_skew = self.get_inventory_skew() * 0.5  # REDUCED impact
-        imbalance_skew = self.get_imbalance_skew() * 0.5  # REDUCED impact
+        inventory_skew = self.get_inventory_skew() * 0.5
+        imbalance_skew = self.get_imbalance_skew() * 0.5
+        # Skew spread'i fee floor altına indirmesin
+        max_skew = half_spread * 0.25
+        inventory_skew = max(-max_skew, min(inventory_skew, max_skew))
+        imbalance_skew = max(-max_skew, min(imbalance_skew, max_skew))
         
         # Calculate prices
         bid_price = mid_price - half_spread + inventory_skew - imbalance_skew
         ask_price = mid_price + half_spread + inventory_skew + imbalance_skew
-
-        # ADJUST FOR FEES using dynamically fetched rates
-        #bid_price = bid_price * (1 - self.config.MAKER_FEE_RATE)
-        #ask_price = ask_price * (1 + self.config.MAKER_FEE_RATE)
         
         # Ensure reasonable bounds
-        bid_price = max(bid_price, mid_price * 0.99)   # No more than 1% below mid
-        ask_price = min(ask_price, mid_price * 1.01)   # No more than 1% above mid
+        bid_price = max(bid_price, mid_price * 0.985)
+        ask_price = min(ask_price, mid_price * 1.015)
         
-        # Round to tick size
-        bid_price = self.round_to_tick(bid_price)
-        ask_price = self.round_to_tick(ask_price)
+        bid_price, ask_price = self.apply_fee_floor(bid_price, ask_price, mid_price)
         
         # Final validation
         if ask_price <= bid_price:
-            spread = max(self.tick_size * 2, mid_price * 0.0005)
-            bid_price = mid_price - spread/2
-            ask_price = mid_price + spread/2
-            bid_price = self.round_to_tick(bid_price)
-            ask_price = self.round_to_tick(ask_price)
+            half = self.min_profitable_half_spread(mid_price)
+            bid_price = self.round_to_tick(mid_price - half)
+            ask_price = self.round_to_tick(mid_price + half)
         
         bid_size, ask_size = self.calculate_order_sizes()
         
@@ -1375,11 +1485,10 @@ class MarketMakerBot:
     # The reservation price calculation is going haywire
 
     def generate_avellaneda_quotes(self) -> Quotes:
-        """Generate quotes using Avellaneda-Stoikov model - FIXED extreme pricing"""
+        """Generate quotes using Avellaneda-Stoikov model - fee-aware floor"""
         
         mid_price = self.market_state.mid_price
-        
-        fee_adjustment = mid_price * self.config.MAKER_FEE_RATE * 4
+        fee_half = self.min_profitable_half_spread(mid_price)
 
         volatility = max(self.market_state.volatility, 0.001)
         
@@ -1389,58 +1498,52 @@ class MarketMakerBot:
             return self.generate_volatility_quotes()
         
         # Much more conservative Avellaneda-Stoikov parameters
-        gamma = max(0.001, min(self.config.RISK_AVERSION, 0.05))    # REDUCED: Risk aversion capped at 1%
-        k = max(0.0001, min(self.config.MARKET_IMPACT, 0.001))     # REDUCED: Market impact much smaller
-        T = max(0.1, min(self.config.TIME_HORIZON, 0.5))           # REDUCED: Shorter time horizon
+        gamma = max(0.001, min(self.config.RISK_AVERSION, 0.05))
+        T = max(0.1, min(self.config.TIME_HORIZON, 0.5))
         
         # Current inventory position (normalized) - clamp to smaller range
         inventory_pos = self.get_inventory_position()
-        q = max(-0.5, min(inventory_pos, 0.5))  # REDUCED: Limit inventory impact to ±50%
+        q = max(-0.5, min(inventory_pos, 0.5))
         
         # Much more conservative price adjustment
-        volatility_squared = min(volatility ** 2, 0.0001)  # REDUCED: Cap vol² much lower
+        volatility_squared = min(volatility ** 2, 0.0001)
         price_adjustment = q * gamma * volatility_squared * T
         
-        # CRITICAL: Limit price adjustment to tiny percentage
-        max_adjustment = mid_price * 0.1  # REDUCED: Only 0.1% max adjustment instead of 10%
+        # CRITICAL: Limit price adjustment
+        max_adjustment = mid_price * 0.001
         price_adjustment = max(-max_adjustment, min(price_adjustment, max_adjustment))
         
         reservation_price = mid_price - price_adjustment
         
         # Validate reservation price is close to mid
-        if abs(reservation_price - mid_price) > mid_price * 0.01:  # If more than 1% away
+        if abs(reservation_price - mid_price) > mid_price * 0.01:
             self.logger.warning(f"Reservation price {reservation_price:.4f} too far from mid {mid_price:.4f}, using mid")
             reservation_price = mid_price
         
-        # Much smaller base spread
+        # Base half spread + fee floor
         base_half_spread = max(
-            self.config.BASE_SPREAD_TICKS * self.tick_size / 2,  # Minimum spread from config
-            mid_price * 0.0001  # Or 0.01% of price, whichever is larger
+            self.config.BASE_SPREAD_TICKS * self.tick_size / 2,
+            mid_price * 0.0001,
+            fee_half,
         )
         
-        # Simplified spread calculation - ignore complex impact adjustment for now
-        half_spread = base_half_spread + fee_adjustment
+        half_spread = base_half_spread
         
-        # Convert volatility component more conservatively
         if volatility > 0:
-            vol_component = volatility * mid_price * 0.1  # REDUCED: Much smaller volatility impact
+            vol_component = volatility * mid_price * 0.1
             half_spread = max(half_spread, vol_component)
         
-        # Cap the spread at reasonable level
-        max_half_spread = mid_price * 0.01  # Max 1% half spread
-        half_spread = min(half_spread, max_half_spread)
+        # Cap the spread at reasonable level but never below fee floor
+        max_half_spread = mid_price * 0.015
+        half_spread = min(max(half_spread, fee_half), max_half_spread)
         
         # Calculate bid and ask prices around reservation price
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
-
-        # ADJUST FOR FEES using dynamically fetched rates
-        #bid_price = bid_price * (1 - self.config.MAKER_FEE_RATE)
-        #ask_price = ask_price * (1 + self.config.MAKER_FEE_RATE)
         
-        # Apply small imbalance skew
+        # Apply small imbalance skew (fee floor korunur)
         imbalance_skew = self.get_imbalance_skew()
-        max_skew = half_spread * 0.2  # Limit skew to 20% of spread
+        max_skew = half_spread * 0.2
         imbalance_skew = max(-max_skew, min(imbalance_skew, max_skew))
         
         bid_price -= imbalance_skew
@@ -1451,23 +1554,23 @@ class MarketMakerBot:
         max_ask = mid_price * 1.02
         
         if bid_price < min_bid:
-            self.logger.warning(f"Bid too low: {bid_price:.4f}, adjusting to {min_bid:.4f}")
             bid_price = min_bid
         
         if ask_price > max_ask:
-            self.logger.warning(f"Ask too high: {ask_price:.4f}, adjusting to {max_ask:.4f}")  
             ask_price = max_ask
+        
+        bid_price, ask_price = self.apply_fee_floor(bid_price, ask_price, mid_price)
         
         # Ensure bid < ask
         if bid_price >= ask_price:
-            self.logger.warning("Bid >= Ask, adjusting spread")
-            spread = max(self.tick_size * 2, mid_price * 0.0005)  # Minimum 2 ticks or 0.05%
-            bid_price = mid_price - spread/2
-            ask_price = mid_price + spread/2
+            half = self.min_profitable_half_spread(mid_price)
+            bid_price = mid_price - half
+            ask_price = mid_price + half
         
         # Round to tick size
         bid_price = self.round_to_tick(bid_price)
         ask_price = self.round_to_tick(ask_price)
+        bid_price, ask_price = self.apply_fee_floor(bid_price, ask_price, mid_price)
         
         # Final sanity check
         if bid_price <= 0 or ask_price <= 0 or ask_price <= bid_price:
@@ -1478,15 +1581,18 @@ class MarketMakerBot:
         bid_diff_pct = abs(bid_price - mid_price) / mid_price
         ask_diff_pct = abs(ask_price - mid_price) / mid_price
         
-        if bid_diff_pct > 0.02 or ask_diff_pct > 0.02:  # More than 2% away
+        if bid_diff_pct > 0.025 or ask_diff_pct > 0.025:
             self.logger.warning(f"Avellaneda prices too far from mid (bid: {bid_diff_pct:.2%}, ask: {ask_diff_pct:.2%}), using volatility method")
             return self.generate_volatility_quotes()
         
         # Calculate order sizes
         bid_size, ask_size = self.calculate_order_sizes()
         
-        self.logger.debug(f"Avellaneda quotes: bid={bid_price:.4f} ({bid_diff_pct:.3%} from mid), "
-                        f"ask={ask_price:.4f} ({ask_diff_pct:.3%} from mid)")
+        self.logger.debug(
+            f"Avellaneda quotes: bid={bid_price:.4f} ask={ask_price:.4f} "
+            f"spread={(ask_price-bid_price)/mid_price*100:.3f}% "
+            f"fee_floor={self.min_profitable_full_spread(mid_price)/mid_price*100:.3f}%"
+        )
         
         return Quotes(bid_price, ask_price, bid_size, ask_size, time.time())
 
@@ -1855,7 +1961,12 @@ async def resolve_slot_capitals(client: BinanceCCXTClient, config: Config) -> Tu
 
 async def run_multi_market_maker(config: Config):
     """8 (veya config.symbols) pair — bakiyeyi eşit böl, paralel al/sat."""
-    client = BinanceCCXTClient(config.API_KEY, config.API_SECRET, testnet=config.USE_TESTNET)
+    client = BinanceCCXTClient(
+        config.API_KEY,
+        config.API_SECRET,
+        testnet=config.USE_TESTNET,
+        post_only=config.POST_ONLY,
+    )
     if not await client.initialize():
         print("❌ Exchange bağlantısı kurulamadı")
         return
