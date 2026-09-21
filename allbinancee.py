@@ -81,9 +81,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "min_quote_volume_usdt": 400000,  # ince coin / kayma koruması
     "ohlcv": {"5m": 48, "15m": 96, "1h": 72, "1d": 90},
     "early_buy": {
-        "max_24h_change_pct": 5.0,
+        "max_24h_change_pct": 8.0,
         "min_24h_change_pct": -25.0,
-        "early_rally_max_pct": 4.0,
+        "early_rally_max_pct": 6.0,
         "near_low_lookback_days": 14,
         "near_low_max_pct": 10.0,
         "max_rsi_1h": 58.0,
@@ -177,11 +177,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "strong_al_min_pump": 50.0,
         "require_cex_min": 0,
         "max_spread_pct": 0.22,
-        "max_from_low_pct": 16.0,
-        "max_24h_change_pct": 6.0,
+        "max_from_low_pct": 22.0,
+        "max_24h_change_pct": 8.0,
         "min_24h_change_pct": -16.0,
-        "rsi_min": 24.0,
-        "rsi_max": 60.0,
+        "rsi_min": 22.0,
+        "rsi_max": 62.0,
         "require_vol_turn": False,
         "require_btc_supportive": True,
         "min_quote_volume_usdt": 500000,
@@ -1164,7 +1164,13 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
     score += float(layers.get("alpha_edge_bonus") or 0)
     # ignition erken gainer
     if layers.get("ignition"):
-        score += 10.0
+        score += 12.0
+    if layers.get("rs_strong"):
+        score += 8.0
+    if layers.get("mom_1h") or layers.get("mom_5m"):
+        score += 6.0
+    if layers.get("lagger"):
+        score -= 14.0
     # haber / listing
     score += float(layers.get("news_edge_bonus") or 0)
     if layers.get("news_listing"):
@@ -1255,6 +1261,11 @@ def passes_winrate_gates(
         return False, f"score<{wr.get('min_score')}", edge
     if float(r.pump_score) < float(wr.get("min_pump_score") or 68):
         return False, f"pump<{wr.get('min_pump_score')}", edge
+    # BTC yeşilken geride kalan zayıf coinleri alma
+    if layers.get("lagger") and not (
+        layers.get("ignition") or layers.get("rs_strong") or layers.get("news_listing")
+    ):
+        return False, "lagger_btc_arkasi", edge
 
     require_uc = bool(wr.get("require_uc", True))
     if require_uc and not r.is_uc:
@@ -2138,24 +2149,27 @@ def analyze_symbol(
     reasons: list[str] = []
     layers: dict[str, Any] = {"change_24h_pct": chg24, "quote_volume_24h": qv24}
 
-    # 1) Dip
+    # 1) Dip — risk-on'da aşırı dip ödülü = zayıf/lagger coin seçtirir
     lookback_d = int(early.get("near_low_lookback_days") or 14)
     day_lows = c1d["l"][-lookback_d:] if len(c1d["l"]) >= lookback_d else c1d["l"]
     day_low = min(day_lows) if day_lows else price
     from_low_pct = ((price / day_low) - 1.0) * 100.0 if day_low > 0 else 999.0
     near_max = float(early.get("near_low_max_pct") or 8.0)
     layers["from_nd_low_pct"] = round(from_low_pct, 2)
+    risk_on = bool(regime.get("supportive")) and float(btc_change_24h) >= 1.0
 
     if from_low_pct <= near_max:
-        score += 18
+        # BTC yeşilken dipte kalan = çoğu zaman lagger; ödülü kıs
+        score += 8 if risk_on else 18
         reasons.append(f"DIP_YAKIN_{lookback_d}g(%{from_low_pct:.1f})")
     elif from_low_pct <= near_max * 1.5:
-        score += 10
+        score += 6 if risk_on else 10
         reasons.append(f"DIP_BOLGE(%{from_low_pct:.1f})")
     elif from_low_pct <= float(late.get("max_from_14d_low_pct") or 25):
         score += 3
     else:
-        score -= 12
+        # risk-on'da dip uzaklığı cezası yumuşak (momentum coinleri kaçmasın)
+        score -= 4 if risk_on else 12
         reasons.append(f"DIP_UZAK(%{from_low_pct:.1f})")
 
     # 2) Hacim
@@ -2181,7 +2195,7 @@ def analyze_symbol(
             score -= 6
             reasons.append("HACIM_COK_GEC")
 
-    # 3) Momentum
+    # 3) Momentum — kısa vadeli güç (dip değil gaz)
     closes5, opens5 = c5["c"], c5["o"]
     if len(closes5) >= 3:
         ret_prev = (closes5[-2] - closes5[-3]) / closes5[-3] if closes5[-3] else 0
@@ -2193,6 +2207,29 @@ def analyze_symbol(
         if closes5[-1] > opens5[-1] and closes5[-2] <= opens5[-2]:
             score += 6
             reasons.append("YESIL_MUM")
+        # son 3 yeşil 5m → erken gainer gazı
+        greens = sum(1 for i in range(1, 4) if len(closes5) >= i and closes5[-i] > opens5[-i])
+        if greens >= 3 and ret_now > 0:
+            score += 10
+            reasons.append("MOM_5m×3")
+            layers["mom_5m"] = True
+
+    # 15m / 1h kısa getiri
+    if len(c1h["c"]) >= 4:
+        ret_1h = (c1h["c"][-1] / c1h["c"][-2] - 1.0) * 100.0 if c1h["c"][-2] else 0.0
+        ret_3h = (c1h["c"][-1] / c1h["c"][-4] - 1.0) * 100.0 if c1h["c"][-4] else 0.0
+        layers["ret_1h_pct"] = round(ret_1h, 3)
+        layers["ret_3h_pct"] = round(ret_3h, 3)
+        if ret_1h >= 0.4:
+            score += 10
+            reasons.append(f"MOM_1h(+%{ret_1h:.1f})")
+            layers["mom_1h"] = True
+        elif ret_1h <= -0.8 and risk_on:
+            score -= 8
+            reasons.append(f"ZAYIF_1h(%{ret_1h:.1f})")
+        if ret_3h >= 1.0:
+            score += 8
+            reasons.append(f"MOM_3h(+%{ret_3h:.1f})")
 
     if c15 and len(c15["l"]) >= 20:
         recent = min(c15["l"][-6:])
@@ -2221,29 +2258,35 @@ def analyze_symbol(
             reasons.append(f"RSI_ASIRI_ALIM({rsi_1h:.0f})")
             already_late = True
 
-    # 5) EMA
+    # 5) EMA — risk-on'da stack'i geç sayma (momentum stack olur)
     ema7 = ema(c1h["c"], 7)
     ema25 = ema(c1h["c"], 25)
     layers["ema7_1h"] = round(ema7, 6) if ema7 else None
     layers["ema25_1h"] = round(ema25, 6) if ema25 else None
     if ema7 and ema25:
         if price > ema7 > ema25:
-            if chg24 < 5 and from_low_pct <= 12:
-                score += 6
-                reasons.append("EMA_STACK_ERKEN")
+            if risk_on or (chg24 < 8 and from_low_pct <= 20):
+                score += 8
+                reasons.append("EMA_STACK_GUCLÜ")
             else:
-                score -= 4
+                score -= 2
                 reasons.append("EMA_STACK_GEC")
         elif price > ema7 and ema7 < ema25:
             score += 10
             reasons.append("EMA7_KIRILIM")
 
-    # 6) RS + BTC rejim
+    # 6) RS + LAGGER filtresi (asıl bug fix)
+    # BTC +%6 iken coin %0 kalan = zayıf; bot eskiden bunu "erken" sanıyordu
     rel = chg24 - btc_change_24h
     layers["rel_vs_btc_pct"] = round(rel, 2)
-    if -2 <= chg24 <= 8 and rel > 1.5:
+    if rel >= 2.0 and chg24 <= float(early.get("max_24h_change_pct") or 8) + 2:
+        score += 14
+        reasons.append(f"RS_GUCLU(+{rel:.1f})")
+        layers["rs_strong"] = True
+    elif rel >= 0.5 and -1 <= chg24 <= 8:
         score += 8
         reasons.append(f"RS_BTC(+{rel:.1f})")
+        layers["rs_strong"] = True
     elif chg24 < -3 and rel > 0:
         score += 5
         reasons.append("BTC_ALTI_GUC")
@@ -2295,6 +2338,22 @@ def analyze_symbol(
         for ir in (ign.get("reasons") or [])[:2]:
             if ir not in reasons:
                 reasons.append(ir)
+
+    # Lagger: BTC yeşil, coin geride, ignition yok → ALMA (bug fix)
+    if risk_on and rel <= -3.0 and chg24 < 2.0 and not layers.get("ignition"):
+        score -= 16
+        reasons.append(f"LAGGER(BTC%{btc_change_24h:+.1f} coin%{chg24:+.1f})")
+        layers["lagger"] = True
+    elif (
+        risk_on
+        and rel <= -1.5
+        and not layers.get("ignition")
+        and not layers.get("mom_1h")
+        and not layers.get("rs_strong")
+    ):
+        score -= 8
+        reasons.append("LAGGER_SOFT")
+        layers["lagger"] = True
 
     # 9) Likidite
     if qv24 >= 1_000_000:
@@ -2402,6 +2461,9 @@ def analyze_symbol(
         elif regime.get("block_al"):
             action, phase = "İZLE", "btc_rejim_bekle"
             reasons.append("AL_ENGEL_BTC")
+        elif layers.get("lagger") and not ign_ok and not layers.get("rs_strong"):
+            action, phase = "İZLE", "lagger"
+            reasons.append("LAGGER_PAS")
 
     return Analysis(
         symbol=symbol,
