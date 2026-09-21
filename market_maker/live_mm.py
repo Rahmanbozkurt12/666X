@@ -6,17 +6,14 @@ Binance Spot Market Maker — TEK DOSYA · CANLI AL/SAT (testnet YOK)
 2) Kaydet:  live_mm.py
 3) Çalıştır:  python live_mm.py
 
-Ne yapar:
-  • Serbest USDT bakiyesini 8'e böler
-  • 8 pair'de Post-Only limit AL + SAT
-  • Spread komisyonu + min kâr altına inmez
-  • Slot zarar %5 → kill (emir iptal)
+Düzeltmeler:
+  • Spot Post-Only = LIMIT_MAKER (GTX değil — -1115 hatası giderildi)
+  • Ortak bakiye cache + yavaş poll (429 rate-limit giderildi)
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import math
 import os
@@ -24,7 +21,7 @@ import sys
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import ccxt
@@ -36,13 +33,11 @@ except ImportError:
 
 # =============================================================================
 #  >>> API KEY BURAYA (tırnak içinde, boşluksuz) <<<
-#  Binance → API Management → Enable Spot & Margin Trading AÇIK
 # =============================================================================
 BINANCE_API_KEY = "BURAYA_API_KEY"
 BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
-# 8 pair — bakiyeyi eşit paylaşır
 SYMBOLS: List[str] = [
     "BTC/USDT",
     "ETH/USDT",
@@ -56,20 +51,20 @@ SYMBOLS: List[str] = [
 BALANCE_SLOTS = 8
 QUOTE = "USDT"
 
-# Risk / spread
-MAX_INVENTORY_RATIO = 0.90          # slot'un %90'ı envanter tavanı
-MAX_DRAWDOWN_RATIO = 0.05           # slot'ta %5 zarar → kill
+MAX_INVENTORY_RATIO = 0.90
+MAX_DRAWDOWN_RATIO = 0.05
 BASE_SPREAD_TICKS = 4.0
 VOL_MULT = 4.0
-REPLACE_SEC = 12.0                  # emir yenileme min aralık
+REPLACE_SEC = 25.0          # emir yenileme (yavaş = az API)
+BOOK_REST_SEC = 3.0         # REST book aralığı (WS yoksa)
+BALANCE_CACHE_SEC = 20.0    # ortak bakiye cache
 MIN_QUOTE_FREE = 5.0
 
-# Komisyon koruması (VIP0 ~0.1% maker varsayılan; API'den güncellenir)
 MAKER_FEE = 0.001
 TAKER_FEE = 0.001
-FEE_SAFETY = 1.5                    # fee × 1.5 tampon
-MIN_EDGE_BPS = 8.0                  # round-trip sonrası min kâr (bps)
-POST_ONLY = True                    # GTX — taker olursa reddet
+FEE_SAFETY = 1.5
+MIN_EDGE_BPS = 8.0
+POST_ONLY = True            # LIMIT_MAKER (spot)
 
 # =============================================================================
 
@@ -98,10 +93,8 @@ def resolve_keys() -> Tuple[str, str]:
     if k in bad or s in bad:
         raise SystemExit(
             "\nAPI KEY BOŞ!\n"
-            "Dosyanın üstünde:\n"
             '  BINANCE_API_KEY = "gerçek_key"\n'
             '  BINANCE_API_SECRET = "gerçek_secret"\n'
-            "yaz, kaydet, tekrar çalıştır.\n"
         )
     return k, s
 
@@ -116,10 +109,11 @@ class Exchange:
             "apiKey": key,
             "secret": secret,
             "enableRateLimit": True,
+            "rateLimit": 120,
             "options": {"defaultType": "spot", "adjustForTimeDifference": True},
         }
         self.rest = ccxt.binance(opts)
-        self.rest.set_sandbox_mode(False)  # CANLI — testnet YOK
+        self.rest.set_sandbox_mode(False)
         self.ws = None
         if ccxtpro is not None:
             try:
@@ -128,6 +122,12 @@ class Exchange:
             except Exception as e:
                 log.warning("WS yok, REST: %s", e)
                 self.ws = None
+
+        self._bal: Optional[dict] = None
+        self._bal_ts = 0.0
+        self._bal_lock = asyncio.Lock()
+        self._fee_cache: Dict[str, Tuple[float, float]] = {}
+        self._order_lock = asyncio.Lock()
 
     async def run(self, fn, *a, **kw):
         loop = asyncio.get_event_loop()
@@ -144,17 +144,32 @@ class Exchange:
         except Exception:
             pass
 
-    async def balance(self):
-        try:
-            return await self.run(self.rest.fetch_balance)
-        except Exception as e:
-            log.error("balance: %s", e)
-            return None
+    async def balance(self, force: bool = False) -> Optional[dict]:
+        async with self._bal_lock:
+            now = time.time()
+            if (not force) and self._bal is not None and (now - self._bal_ts) < BALANCE_CACHE_SEC:
+                return self._bal
+            try:
+                self._bal = await self.run(self.rest.fetch_balance)
+                self._bal_ts = time.time()
+                return self._bal
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "-1003" in msg:
+                    log.warning("rate-limit balance — cache kullan / 30s bekle")
+                    await asyncio.sleep(5)
+                    return self._bal
+                log.error("balance: %s", e)
+                return self._bal
 
     async def book(self, symbol: str):
         try:
-            return await self.run(self.rest.fetch_order_book, symbol, 20)
+            return await self.run(self.rest.fetch_order_book, symbol, 10)
         except Exception as e:
+            if "429" in str(e) or "-1003" in str(e):
+                log.warning("rate-limit book %s", symbol)
+                await asyncio.sleep(3)
+                return None
             log.error("book %s: %s", symbol, e)
             return None
 
@@ -162,7 +177,7 @@ class Exchange:
         if not self.ws:
             return None
         try:
-            return await self.ws.watch_order_book(symbol, 20)
+            return await self.ws.watch_order_book(symbol, 10)
         except Exception as e:
             log.error("ws %s: %s", symbol, e)
             return None
@@ -171,25 +186,26 @@ class Exchange:
         try:
             return await self.run(self.rest.fetch_open_orders, symbol) or []
         except Exception as e:
-            log.error("open %s: %s", symbol, e)
+            if "429" in str(e):
+                await asyncio.sleep(3)
             return []
 
-    async def trades(self, symbol: str, limit: int = 30):
+    async def trades(self, symbol: str, limit: int = 20):
         try:
             return await self.run(self.rest.fetch_my_trades, symbol, None, limit) or []
         except Exception:
             return []
 
     async def fees(self, symbol: str) -> Tuple[float, float]:
+        if symbol in self._fee_cache:
+            return self._fee_cache[symbol]
         m, t = MAKER_FEE, TAKER_FEE
-        try:
-            allf = await self.run(self.rest.fetch_trading_fees)
-            if symbol in allf:
-                return float(allf[symbol].get("maker", m)), float(allf[symbol].get("taker", t))
-        except Exception:
-            pass
         mk = self.rest.markets.get(symbol) or {}
-        return float(mk.get("maker", m)), float(mk.get("taker", t))
+        m = float(mk.get("maker", m))
+        t = float(mk.get("taker", t))
+        # fetch_trading_fees her sembolde çağırma — market default yeterli
+        self._fee_cache[symbol] = (m, t)
+        return m, t
 
     def amt(self, symbol: str, x: float) -> float:
         if x <= 0:
@@ -224,6 +240,7 @@ class Exchange:
         return 0.01
 
     async def place(self, symbol: str, side: str, amount: float, price: float):
+        """Spot Post-Only: LIMIT_MAKER (GTX futures-only → -1115)."""
         amount = self.amt(symbol, amount)
         price = self.px(symbol, price)
         if amount <= 0 or price <= 0:
@@ -231,32 +248,88 @@ class Exchange:
         min_qty, min_cost = self.limits(symbol)
         if amount < min_qty or amount * price < min_cost:
             return None
+
         params: Dict[str, Any] = {"newClientOrderId": coid()}
-        if POST_ONLY:
-            params["timeInForce"] = "GTX"
-        try:
-            o = await self.run(
-                self.rest.create_order, symbol, "limit", side, amount, price, params
-            )
-            log.info("EMİR %s %s %.8f @ %.8f id=%s", side.upper(), symbol, amount, price, o.get("id"))
-            return o
-        except Exception as e:
-            msg = str(e)
-            if "Post Only" in msg or "-5022" in msg:
-                log.warning("post-only reddedildi %s %s", side, symbol)
-            else:
+        # Binance SPOT post-only = LIMIT_MAKER (GTX sadece futures → -1115)
+        order_type = "LIMIT_MAKER" if POST_ONLY else "limit"
+
+        async with self._order_lock:
+            try:
+                o = await self.run(
+                    self.rest.create_order,
+                    symbol,
+                    order_type,
+                    side,
+                    amount,
+                    price,
+                    params,
+                )
+                log.info(
+                    "EMİR %s %s %.8f @ %.8f id=%s",
+                    side.upper(),
+                    symbol,
+                    amount,
+                    price,
+                    o.get("id"),
+                )
+                return o
+            except Exception as e:
+                msg = str(e)
+                if any(
+                    x in msg
+                    for x in ("Post Only", "-5022", "would immediately", "Order would")
+                ):
+                    log.warning("post-only reddedildi %s %s", side, symbol)
+                    return None
+                # ccxt sürüm farkı: limit + postOnly
+                if POST_ONLY and ("Invalid" in msg or "-1115" in msg or "type" in msg.lower()):
+                    try:
+                        o = await self.run(
+                            self.rest.create_order,
+                            symbol,
+                            "limit",
+                            side,
+                            amount,
+                            price,
+                            {"newClientOrderId": coid(), "postOnly": True},
+                        )
+                        log.info(
+                            "EMİR(PO) %s %s %.8f @ %.8f id=%s",
+                            side.upper(),
+                            symbol,
+                            amount,
+                            price,
+                            o.get("id"),
+                        )
+                        return o
+                    except Exception as e2:
+                        log.error("order %s %s: %s", side, symbol, e2)
+                        return None
+                if "429" in msg or "-1003" in msg:
+                    log.warning("rate-limit order — 10s bekle")
+                    await asyncio.sleep(10)
+                    return None
                 log.error("order %s %s: %s", side, symbol, e)
-            return None
+                return None
 
     async def cancel_all(self, symbol: str):
-        for o in await self.open_orders(symbol):
-            oid = o.get("id")
-            if not oid:
-                continue
+        async with self._order_lock:
+            # tek çağrı tercih
             try:
-                await self.run(self.rest.cancel_order, oid, symbol)
-            except Exception as e:
-                log.error("cancel %s: %s", oid, e)
+                if hasattr(self.rest, "cancel_all_orders"):
+                    await self.run(self.rest.cancel_all_orders, symbol)
+                    return
+            except Exception:
+                pass
+            for o in await self.open_orders(symbol):
+                oid = o.get("id")
+                if not oid:
+                    continue
+                try:
+                    await self.run(self.rest.cancel_order, oid, symbol)
+                except Exception as e:
+                    if "429" not in str(e):
+                        log.error("cancel %s: %s", oid, e)
 
 
 @dataclass
@@ -288,6 +361,7 @@ class Slot:
         self.seen: set = set()
         self.kill = False
         self.running = True
+        self._last_fill_poll = 0.0
 
     def rt_fee(self) -> float:
         return max(self.maker, 0.0) * FEE_SAFETY * 2.0
@@ -338,7 +412,11 @@ class Slot:
         )
 
     async def fills(self):
-        rows = await self.ex.trades(self.symbol, 40)
+        now = time.time()
+        if now - self._last_fill_poll < 30:
+            return
+        self._last_fill_poll = now
+        rows = await self.ex.trades(self.symbol, 20)
         for t in rows:
             tid = str(t["id"])
             if tid in self.seen:
@@ -357,12 +435,12 @@ class Slot:
             else:
                 self.realized += amt * px - fee
             log.info("FILL %s %s %.6f @ %.6f", self.symbol, side, amt, px)
+            await self.ex.balance(force=True)
 
     def risk_ok(self) -> bool:
         mid = self.book.mid
         inv = abs(self.base_total) * mid if mid > 0 else 0
         if mid > 0 and inv > self.slot * MAX_INVENTORY_RATIO * 1.05:
-            log.warning("%s envanter $%.2f > limit", self.symbol, inv)
             return False
         dd = -min(0.0, self.realized)
         if self.slot > 0 and dd > self.slot * MAX_DRAWDOWN_RATIO:
@@ -393,11 +471,9 @@ class Slot:
             fee_half,
             min(VOL_MULT * vol * mid * 0.05, mid * 0.008),
         )
-        # hafif envanter skew
         skew = -self.inv_pos() * 2.0 * tick
         skew = max(-half * 0.25, min(half * 0.25, skew))
-        imb = self.book.imb * tick
-        imb = max(-half * 0.2, min(half * 0.2, imb))
+        imb = max(-half * 0.2, min(half * 0.2, self.book.imb * tick))
 
         bid = mid - half + skew - imb
         ask = mid + half + skew + imb
@@ -412,6 +488,16 @@ class Slot:
             ask = self.ex.px(self.symbol, bid + max(tick, min_full))
         if ask - bid < min_full * 0.98:
             return None
+
+        # Post-only için mid'den en az 1 tick uzak kal (hemen match olmasın)
+        if bid >= self.book.bid:
+            bid = self.ex.px(self.symbol, min(bid, self.book.bid - tick))
+        if ask <= self.book.ask:
+            ask = self.ex.px(self.symbol, max(ask, self.book.ask + tick))
+        if ask <= bid or ask - bid < min_full * 0.95:
+            half = min_full / 2.0
+            bid = self.ex.px(self.symbol, mid - half)
+            ask = self.ex.px(self.symbol, mid + half)
 
         min_qty, min_cost = self.ex.limits(self.symbol)
         target = max(min_cost * 1.05, self.slot * 0.90)
@@ -448,9 +534,10 @@ class Slot:
             return
         bid, ask, bid_sz, ask_sz = q
         await self.ex.cancel_all(self.symbol)
-        await asyncio.sleep(0.12)
+        await asyncio.sleep(0.25)
         if bid_sz > 0 and self.quote_free >= MIN_QUOTE_FREE:
             await self.ex.place(self.symbol, "buy", bid_sz, bid)
+            await asyncio.sleep(0.2)
         if ask_sz > 0 and self.base_free > 0:
             await self.ex.place(self.symbol, "sell", ask_sz, ask)
         self.last_q = time.time()
@@ -492,7 +579,7 @@ class Slot:
                     if ob:
                         self.on_book(ob)
                 else:
-                    if time.time() - last_rest >= 1.0:
+                    if time.time() - last_rest >= BOOK_REST_SEC:
                         ob = await self.ex.book(self.symbol)
                         if ob:
                             self.on_book(ob)
@@ -501,19 +588,19 @@ class Slot:
                 await self.fills()
                 self.risk_ok()
                 await self.replace()
-                if time.time() - last_print > 20:
+                if time.time() - last_print > 30:
                     print(
                         f"{self.symbol:10} mid={self.book.mid:.6f} "
                         f"base={self.base_total:.6f} rpnl=${self.realized:.2f} "
                         f"{'KILL' if self.kill else 'OK'}"
                     )
                     last_print = time.time()
-                await asyncio.sleep(0.05 if use_ws else 0.5)
+                await asyncio.sleep(0.2 if use_ws else 1.0)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 log.error("%s loop: %s", self.symbol, e)
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
         await self.ex.cancel_all(self.symbol)
         self.running = False
 
@@ -522,13 +609,14 @@ async def main_async():
     print("=" * 60)
     print("Binance Market Maker — CANLI AL/SAT (testnet YOK)")
     print(f"CCXT {ccxt.__version__} | Pro={'var' if ccxtpro else 'yok'}")
+    print("Post-Only: LIMIT_MAKER | bakiye cache | yavaş poll")
     print("=" * 60)
 
     key, secret = resolve_keys()
     ex = Exchange(key, secret)
     await ex.init()
 
-    bal = await ex.balance()
+    bal = await ex.balance(force=True)
     if not bal:
         await ex.close()
         raise SystemExit("Bakiye alınamadı — key/izin kontrol et (Spot Trade)")
@@ -543,7 +631,7 @@ async def main_async():
     print(f"USDT serbest : ${free:,.2f}")
     print(f"Slotlar      : {n} × ${slot:,.2f}")
     print(f"Pairler      : {', '.join(symbols)}")
-    print(f"Post-only    : {POST_ONLY} | kill DD%{MAX_DRAWDOWN_RATIO*100:.0f}")
+    print(f"Post-only    : LIMIT_MAKER | kill DD%{MAX_DRAWDOWN_RATIO*100:.0f}")
     print("Durdur       : Ctrl+C")
     print("=" * 60)
 
@@ -551,8 +639,9 @@ async def main_async():
         await ex.close()
         raise SystemExit(f"Slot ${slot:.2f} çok küçük — USDT ekle veya SYMBOLS azalt")
 
+    # 429 önlemi: slotları kademeli başlat
     slots = [Slot(ex, s, slot) for s in symbols]
-    tasks = [asyncio.create_task(s.run(i * 0.4)) for i, s in enumerate(slots)]
+    tasks = [asyncio.create_task(s.run(i * 2.0)) for i, s in enumerate(slots)]
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
