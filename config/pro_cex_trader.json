@@ -1,0 +1,11 @@
+{
+  "max_positions": 10,
+  "quote": "USDT",
+  "deploy_pct": 0.95,
+  "min_order_usdt": 11.0,
+  "tp1_sell_pct": 0.5,
+  "poll_seconds": 180,
+  "rest_base": "https://data-api.binance.vision",
+  "trade_base": "https://api.binance.com",
+  "recv_window": 5000
+}
