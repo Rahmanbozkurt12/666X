@@ -98,22 +98,37 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_rsi_1h": 72.0,
         "max_from_14d_low_pct": 28.0,
     },
-    # Erken gainer ateşlemesi: 24s henüz -3..+3 iken hacim+kırılım
-    # (PHA/MUBARAK tipi +30/+60’ın başlangıcı — dip şartı YOK)
+    # Erken gainer ateşlemesi + devam (biraz daha geniş pencere)
     "ignition": {
         "enabled": True,
-        "chg24_min_pct": -3.0,
-        "chg24_max_pct": 3.0,
-        "vol_mult_vs_median": 2.2,  # son 5m hacim / medyan
-        "break_lookback_5m": 12,  # son N mum high kırılımı
-        "min_green_5m": 2,  # ardışık yeşil
+        "chg24_min_pct": -4.0,
+        "chg24_max_pct": 5.0,
+        "vol_mult_vs_median": 2.0,
+        "break_lookback_5m": 12,
+        "min_green_5m": 2,
         "score_bonus": 22,
         "pump_bonus": 18,
         "promote_al": True,
-        "runner_tp_pct": 28.0,  # ignition alımlarda daha geniş hedef
+        "runner_tp_pct": 28.0,
         "keep_runner": True,
-        "relax_from_low": True,  # 14g dip şartını gevşet
+        "relax_from_low": True,
         "max_from_low_pct": 35.0,
+    },
+    # Çift oyun: yükselen momentum + dipte dönüş (ikisi de teyit şart)
+    "playbooks": {
+        "enabled": True,
+        "momentum": {
+            "enabled": True,
+            "chg24_min_pct": -1.0,
+            "chg24_max_pct": 12.0,  # yükseleni kaçırma (henüz uçmamış)
+        },
+        "dip_reversal": {
+            "enabled": True,
+            "chg24_max_pct": -3.5,  # en çok düşenler
+            "from_low_max_pct": 12.0,
+            "min_vol_rise": 2.0,
+            "require_green_5m": True,
+        },
     },
     # Anlık duyuru / haber: Binance CMS + OKX (+ Bybit dene)
     # 16 borsanın hepsinde public news API yok — listing/airdrop/delist en değerlisi
@@ -466,6 +481,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "alpha_filters",
             "ignition",
             "news_feed",
+            "playbooks",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -1149,16 +1165,31 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
     elif from_low > 12:
         score -= 8
     chg = float(r.change_24h_pct or 0)
+    pb_tag = str(layers.get("playbook") or "")
+    rising_ok = bool(
+        layers.get("mom_1h")
+        or layers.get("mom_5m")
+        or layers.get("ignition")
+        or layers.get("rs_strong")
+    )
     if -3 <= chg <= 2.5:
         score += 8
-    elif chg > 5:
+    elif 2.5 < chg <= 8 and rising_ok:
+        score += 7  # continuation / yükselen — cezalandırma
+    elif chg > 10 and not rising_ok:
         score -= 10
+    elif chg > 8 and not rising_ok:
+        score -= 6
+    elif chg <= -3.5 and (layers.get("mom_5m") or layers.get("higher_low")):
+        score += 7  # dip_reversal dönüş
     rsi_1h = layers.get("rsi_1h")
     if isinstance(rsi_1h, (int, float)):
         if 35 <= float(rsi_1h) <= 50:
             score += 8
-        elif float(rsi_1h) > 58:
+        elif float(rsi_1h) > 58 and not rising_ok:
             score -= 10
+        elif float(rsi_1h) > 62 and rising_ok:
+            score -= 4  # yükselen RSI biraz daha toleranslı
     vol0 = layers.get("vol_0_to_pos")
     if isinstance(vol0, (int, float)) and float(vol0) >= 1.5:
         score += 6
@@ -1180,6 +1211,12 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
         score += 8.0
     if layers.get("mom_1h") or layers.get("mom_5m"):
         score += 6.0
+    if pb_tag == "continuation":
+        score += 8.0
+    elif pb_tag == "momentum":
+        score += 6.0
+    elif pb_tag == "dip_reversal":
+        score += 7.0
     if layers.get("lagger"):
         score -= 14.0
     # haber / listing
@@ -1254,57 +1291,106 @@ def passes_momentum_entry(
     regime: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
     """
-    Sert giriş kapısı: düşen/dip bıçağı ALMA.
-    Sadece yukarı dönmüş + güç sinyali olan coin.
+    Kazanç odaklı çift playbook:
+      A) MOMENTUM / CONTINUATION — yükseleni yakala (henüz +12% altı)
+      B) DIP_REVERSAL — en çok düşeni, AMA dönüş mumu+hacim şart
+    İkisi de teyitsiz dip bıçağını reddeder.
     """
     wr = cfg.get("winrate") or {}
     trade = cfg.get("trade") or {}
+    pb = cfg.get("playbooks") or {}
     if not bool(wr.get("require_momentum_entry", trade.get("require_momentum_entry", True))):
         return True, "mom_off"
+
     ly = r.layers or {}
     regime = regime or {}
-
-    if bool(wr.get("block_lagger", trade.get("block_lagger", True))) and ly.get("lagger"):
-        if not (ly.get("ignition") or ly.get("rs_strong")):
-            return False, "lagger"
-
+    chg = float(r.change_24h_pct or 0)
     ret5 = ly.get("ret_5m_pct")
     ret1h = ly.get("ret_1h_pct")
-    min5 = float(wr.get("min_ret_5m_pct", trade.get("min_ret_5m_pct", 0.05)))
-    min1h = float(wr.get("min_ret_1h_pct", trade.get("min_ret_1h_pct", 0.0)))
+    vol_rise = float(ly.get("vol_rise_5m") or 0)
+    from_low = float(ly.get("from_nd_low_pct") or 99)
+    rel = ly.get("rel_vs_btc_pct")
 
-    # 1h aşağıysa (ignition hariç) alma — klasik -1% stop tuzağı
-    if isinstance(ret1h, (int, float)) and float(ret1h) < min1h:
-        if not ly.get("ignition"):
-            return False, f"1h_dusuk({ret1h})"
-    # 5m kırmızıysa alma
-    if isinstance(ret5, (int, float)) and float(ret5) < min5:
-        if not (ly.get("ignition") and ly.get("mom_1h")):
-            return False, f"5m_kirmizi({ret5})"
+    mom_cfg = (pb.get("momentum") or {}) if pb.get("enabled", True) else {}
+    dip_cfg = (pb.get("dip_reversal") or {}) if pb.get("enabled", True) else {}
+    mom_on = bool(mom_cfg.get("enabled", True))
+    dip_on = bool(dip_cfg.get("enabled", True))
 
-    quality = (
-        ly.get("ignition")
-        or ly.get("rs_strong")
-        or ly.get("mom_1h")
-        or ly.get("news_listing")
-        or ly.get("cex_lead")
-        or (ly.get("mom_5m") and float(ly.get("vol_rise_5m") or 0) >= 2.0)
+    strong_5m = (
+        bool(ly.get("mom_5m"))
+        and isinstance(ret5, (int, float))
+        and float(ret5) >= 0.12
+        and vol_rise >= 1.8
     )
-    if not quality:
-        return False, "mom_yok"
+    turning_up = (
+        isinstance(ret5, (int, float))
+        and float(ret5) > 0.05
+        and (
+            ly.get("mom_5m")
+            or "0→+" in (r.reasons or [])
+            or any(str(x).startswith("0→+") for x in (r.reasons or []))
+        )
+    )
 
-    if bool(wr.get("block_pure_dip", trade.get("block_pure_dip", True))):
-        phase = str(getattr(r, "phase", "") or "")
-        if phase in {"dip_erken", "dip_bekle_mom"} and not quality:
-            return False, "saf_dip"
+    # ----- B) DIP REVERSAL: en çok düşen ama dönmüş -----
+    if dip_on:
+        dip_chg_max = float(dip_cfg.get("chg24_max_pct") or -3.5)
+        dip_low_max = float(dip_cfg.get("from_low_max_pct") or 12.0)
+        min_vol = float(dip_cfg.get("min_vol_rise") or 2.0)
+        deep_dip = chg <= dip_chg_max or from_low <= dip_low_max
+        if deep_dip and vol_rise >= min_vol and isinstance(ret5, (int, float)) and float(ret5) >= 0.08:
+            # dönüş şart: yeşil 5m + (0→+ veya mom_5m veya higher_low)
+            if turning_up or strong_5m or ly.get("higher_low") or ly.get("ignition"):
+                # hâlâ serbest düşüş değil (1h çöküş -3'ten kötüyse pas)
+                if isinstance(ret1h, (int, float)) and float(ret1h) <= -2.5 and not strong_5m:
+                    pass  # devam eden dump
+                else:
+                    ly["playbook"] = "dip_reversal"
+                    return True, "dip_reversal"
 
-    # BTC dump değilse ve coin hâlâ BTC'den çok gerideyse pas
-    if regime.get("supportive"):
-        rel = ly.get("rel_vs_btc_pct")
-        if isinstance(rel, (int, float)) and float(rel) <= -2.5 and not ly.get("ignition"):
-            return False, f"rs_zayif({rel})"
+    # ----- A) MOMENTUM / CONTINUATION: yükselen -----
+    if mom_on:
+        lo = float(mom_cfg.get("chg24_min_pct") or -1.0)
+        hi = float(mom_cfg.get("chg24_max_pct") or 12.0)
+        in_mom_window = lo <= chg <= hi
+        quality = (
+            ly.get("ignition")
+            or ly.get("rs_strong")
+            or ly.get("mom_1h")
+            or ly.get("mom_5m")
+            or ly.get("news_listing")
+            or ly.get("cex_lead")
+            or (vol_rise >= 2.2 and isinstance(ret5, (int, float)) and float(ret5) > 0)
+        )
+        if in_mom_window and quality:
+            min5 = float(wr.get("min_ret_5m_pct", trade.get("min_ret_5m_pct", 0.05)))
+            min1h = float(wr.get("min_ret_1h_pct", trade.get("min_ret_1h_pct", 0.0)))
+            if strong_5m:
+                min1h = min(min1h, -0.70)
+            # continuation (+4..+12): 1h pozitif şart
+            if chg >= 4.0:
+                min1h = max(min1h, 0.05)
+            if isinstance(ret5, (int, float)) and float(ret5) < min5:
+                if not (ly.get("ignition") and ly.get("mom_1h")):
+                    return False, f"5m_kirmizi({ret5})"
+            if isinstance(ret1h, (int, float)) and float(ret1h) < min1h:
+                if not (ly.get("ignition") and strong_5m):
+                    return False, f"1h_dusuk({ret1h})"
+            # BTC yeşilken aşırı geride + gaz yok → lagger
+            if (
+                bool(wr.get("block_lagger", True))
+                and ly.get("lagger")
+                and not (ly.get("ignition") or strong_5m or ly.get("rs_strong"))
+            ):
+                return False, "lagger"
+            if regime.get("supportive") and isinstance(rel, (int, float)):
+                rs_cut = -4.5 if (strong_5m or ly.get("ignition")) else -2.8
+                if float(rel) <= rs_cut and chg < 3.0 and not ly.get("ignition"):
+                    return False, f"rs_zayif({rel})"
+            ly["playbook"] = "momentum" if chg < 4 else "continuation"
+            return True, ly["playbook"]
 
-    return True, "mom_ok"
+    return False, "playbook_yok"
 
 
 def passes_winrate_gates(
@@ -1340,6 +1426,10 @@ def passes_winrate_gates(
     mom_ok, mom_why = passes_momentum_entry(r, cfg, regime)
     if not mom_ok:
         return False, f"mom:{mom_why}", edge
+    layers["playbook"] = layers.get("playbook") or mom_why
+    layers["mom_gate"] = mom_why
+    is_cont = mom_why in ("momentum", "continuation")
+    is_dip_rev = mom_why == "dip_reversal"
 
     require_uc = bool(wr.get("require_uc", True))
     if require_uc and not r.is_uc:
@@ -1347,7 +1437,8 @@ def passes_winrate_gates(
             float(r.score) >= float(wr.get("strong_al_min_score") or 75)
             and float(r.pump_score) >= float(wr.get("strong_al_min_pump") or 75)
         )
-        if not ok_fb:
+        # playbook teyitliyse UÇ şartını gevşet (kazanç yolu)
+        if not ok_fb and not (is_cont or is_dip_rev or layers.get("ignition")):
             return False, "UÇ_yok", edge
 
     _cex = wr.get("require_cex_min")
@@ -1378,18 +1469,33 @@ def passes_winrate_gates(
         ig = cfg.get("ignition") or {}
         if ig.get("relax_from_low", True):
             max_low = max(max_low, float(ig.get("max_from_low_pct") or 35))
+    # Continuation yükselen: dipte olmak zorunda değil
+    if is_cont:
+        max_low = max(max_low, 32.0)
+    # Dip reversal: dip yakın olmalı ama dönüş teyidi varsa biraz tolerans
+    if is_dip_rev:
+        dip_cfg = (cfg.get("playbooks") or {}).get("dip_reversal") or {}
+        max_low = max(max_low, float(dip_cfg.get("from_low_max_pct") or 12) + 4.0)
     if from_low > max_low:
         return False, f"dip_uzak%{from_low:.1f}", edge
 
     chg = float(r.change_24h_pct or 0)
-    if chg > float(wr.get("max_24h_change_pct") or 3.5) and not layers.get("ignition"):
-        return False, f"24s_kacmis%{chg:+.1f}", edge
-    # ignition penceresi zaten -3..+3; winrate max24 biraz geniş
-    if layers.get("ignition"):
+    pb = cfg.get("playbooks") or {}
+    mom_hi = float((pb.get("momentum") or {}).get("chg24_max_pct") or 12.0)
+    wr_max24 = float(wr.get("max_24h_change_pct") or 3.5)
+    if is_cont:
+        if chg > mom_hi:
+            return False, f"24s_kacmis%{chg:+.1f}", edge
+    elif layers.get("ignition"):
         ig = cfg.get("ignition") or {}
-        if chg > float(ig.get("chg24_max_pct") or 3) + 1.5:
+        if chg > float(ig.get("chg24_max_pct") or 5) + 2.0:
             return False, f"ign_kacmis%{chg:+.1f}", edge
-    if chg < float(wr.get("min_24h_change_pct") or -12):
+    elif chg > wr_max24:
+        return False, f"24s_kacmis%{chg:+.1f}", edge
+    wr_min24 = float(wr.get("min_24h_change_pct") or -12)
+    if is_dip_rev:
+        wr_min24 = min(wr_min24, -22.0)  # en çok düşenleri kaçırma
+    if chg < wr_min24:
         return False, f"24s_cok_dusuk%{chg:+.1f}", edge
 
     rsi_1h = layers.get("rsi_1h")
@@ -1399,12 +1505,15 @@ def passes_winrate_gates(
         if chain_ok:
             rsi_hi = min(70.0, rsi_hi + 4.0)
             rsi_lo = max(18.0, rsi_lo - 3.0)
-        if layers.get("ignition"):
-            rsi_hi = min(68.0, rsi_hi + 8.0)
+        if layers.get("ignition") or is_cont:
+            rsi_hi = min(70.0, rsi_hi + 10.0)
+        if is_dip_rev:
+            rsi_lo = max(15.0, rsi_lo - 6.0)
+            rsi_hi = min(55.0, rsi_hi + 4.0)
         if float(rsi_1h) < rsi_lo or float(rsi_1h) > rsi_hi:
             return False, f"rsi_disi({rsi_1h})", edge
 
-    if wr.get("require_vol_turn", True) and not chain_ok:
+    if wr.get("require_vol_turn", True) and not chain_ok and not is_cont:
         vol0 = layers.get("vol_0_to_pos")
         vol_rise = float(layers.get("vol_rise_5m") or 0)
         ok_vol = (isinstance(vol0, (int, float)) and float(vol0) >= 1.45) or vol_rise >= 1.5
@@ -2202,9 +2311,14 @@ def analyze_symbol(
     if min_qv and qv24 < min_qv:
         return None
 
-    already_late = (
-        chg24 >= float(late.get("max_already_up_24h_pct") or 15)
-        or chg24 >= float(early.get("max_24h_change_pct") or 8) + 7
+    pb_cfg = cfg.get("playbooks") or {}
+    mom_pb = (pb_cfg.get("momentum") or {}) if pb_cfg.get("enabled", True) else {}
+    dip_pb = (pb_cfg.get("dip_reversal") or {}) if pb_cfg.get("enabled", True) else {}
+    cont_hi = float(mom_pb.get("chg24_max_pct") or 12.0)
+    # continuation penceresi (≤hi) "geç" sayılmaz — yükseleni kaçırma
+    already_late = chg24 > max(
+        float(late.get("max_already_up_24h_pct") or 15),
+        cont_hi + 0.01,
     )
 
     d5 = fetch_ohlcv(cfg, symbol, "5m", int(ohlcv_cfg.get("5m") or 48))
@@ -2489,16 +2603,81 @@ def analyze_symbol(
     min_pump = float(early.get("min_pump_score_al") or 55)
     early_rally_max = float(early.get("early_rally_max_pct") or 5.0)
 
+    ret5_v = layers.get("ret_5m_pct")
+    ret1h_v = layers.get("ret_1h_pct")
+    strong_5m = (
+        bool(layers.get("mom_5m"))
+        and isinstance(ret5_v, (int, float))
+        and float(ret5_v) >= 0.12
+        and vol_rise >= 1.8
+    )
+    turning_up = (
+        isinstance(ret5_v, (int, float))
+        and float(ret5_v) > 0.05
+        and (
+            layers.get("mom_5m")
+            or layers.get("higher_low")
+            or any(str(x).startswith("0→+") for x in reasons)
+        )
+    )
+    mom_lo = float(mom_pb.get("chg24_min_pct") or -1.0)
+    mom_hi = float(mom_pb.get("chg24_max_pct") or 12.0)
+    dip_chg_max = float(dip_pb.get("chg24_max_pct") or -3.5)
+    dip_low_max = float(dip_pb.get("from_low_max_pct") or 12.0)
+    dip_vol_min = float(dip_pb.get("min_vol_rise") or 2.0)
+
     if already_late:
         action, phase = ("GEÇ", "rally_olmus") if score >= min_izle else ("GEÇ", "asiri_uzama")
-    elif (not layers.get("ignition")) and from_low_pct > float(
-        late.get("max_from_14d_low_pct") or 28
+    elif (
+        (not layers.get("ignition"))
+        and from_low_pct > float(late.get("max_from_14d_low_pct") or 28)
+        and not (bool(mom_pb.get("enabled", True)) and mom_lo <= chg24 <= mom_hi and strong_5m)
     ):
         action, phase = ("GEÇ", "rally_olmus") if score >= min_izle else ("GEÇ", "asiri_uzama")
     elif layers.get("ignition") and ig_cfg.get("promote_al", True) and not already_late:
         # Dip şartı olmadan erken gainer ateşlemesi → AL
         action, phase = "AL", "ignition"
+        layers["playbook"] = "momentum"
         score = max(score, min_al)
+    elif (
+        bool(mom_pb.get("enabled", True))
+        and mom_lo <= chg24 <= mom_hi
+        and score >= min_izle
+        and vol_ok
+        and (
+            layers.get("mom_1h")
+            or layers.get("mom_5m")
+            or layers.get("rs_strong")
+            or strong_5m
+        )
+        and not layers.get("lagger")
+    ):
+        # Yükselen / continuation — henüz +12 altı
+        action, phase = "AL", ("continuation" if chg24 >= 4.0 else "momentum")
+        layers["playbook"] = phase
+        score = max(score, min_al)
+        if "PLAY_MOM" not in reasons:
+            reasons.append("PLAY_MOM" if chg24 < 4 else "PLAY_CONT")
+    elif (
+        bool(dip_pb.get("enabled", True))
+        and (chg24 <= dip_chg_max or from_low_pct <= dip_low_max)
+        and vol_rise >= dip_vol_min
+        and isinstance(ret5_v, (int, float))
+        and float(ret5_v) >= 0.08
+        and (turning_up or strong_5m or layers.get("higher_low"))
+        and score >= min_izle
+        and not (
+            isinstance(ret1h_v, (int, float))
+            and float(ret1h_v) <= -2.5
+            and not strong_5m
+        )
+    ):
+        # En çok düşen ama dönüş teyitli → AL (bıçak değil)
+        action, phase = "AL", "dip_reversal"
+        layers["playbook"] = "dip_reversal"
+        score = max(score, min_al)
+        if "PLAY_DIP" not in reasons:
+            reasons.append("PLAY_DIP")
     elif (
         score >= min_al
         and vol_ok
@@ -2508,6 +2687,7 @@ def analyze_symbol(
         and (layers.get("mom_1h") or layers.get("ignition") or layers.get("rs_strong"))
     ):
         action, phase = "AL", "uc_erken" if is_uc else "mom_erken"
+        layers["playbook"] = layers.get("playbook") or "momentum"
     elif (
         score >= min_al
         and vol_ok
@@ -2515,11 +2695,13 @@ def analyze_symbol(
         and not layers.get("lagger")
     ):
         action, phase = "AL", "mom_onay"
+        layers["playbook"] = layers.get("playbook") or "momentum"
     elif is_uc and pump_score >= min_pump and chg24 <= early_rally_max + 1 and (
         layers.get("mom_1h") or layers.get("ignition") or layers.get("rs_strong")
     ):
         # klasik skor biraz düşük olsa bile uç setup AL — momentum şart
         action, phase = "AL", "uc_setup"
+        layers["playbook"] = layers.get("playbook") or "momentum"
         score = max(score, min_al)
     elif score >= min_al and vol_ok and from_low_pct <= near_max * 1.25:
         # saf dip → artık İZLE (bıçak tutma yasak)
@@ -2531,22 +2713,30 @@ def analyze_symbol(
 
     if action == "AL":
         ign_ok = bool(layers.get("ignition"))
-        if not (vol_ok or (pump.get("vol_zero_to_pos") or {}).get("ok") or ign_ok):
+        pb_tag = str(layers.get("playbook") or "")
+        cont_ok = pb_tag in ("momentum", "continuation")
+        dip_ok = pb_tag == "dip_reversal"
+        if not (vol_ok or (pump.get("vol_zero_to_pos") or {}).get("ok") or ign_ok or dip_ok):
             action, phase = "İZLE", "eksik_hacim"
-        elif (not ign_ok) and from_low_pct > near_max * 1.5:
-            action, phase = "İZLE", "dip_uzak"
-        elif ign_ok and ig_cfg.get("relax_from_low", True):
+        elif cont_ok or ign_ok:
             max_ig_low = float(ig_cfg.get("max_from_low_pct") or 35)
-            if from_low_pct > max_ig_low:
+            if from_low_pct > max(max_ig_low, 32.0):
                 action, phase = "İZLE", "ign_dip_uzak"
-        elif rsi_1h is not None and rsi_1h > 60 and not ign_ok:
+        elif dip_ok:
+            if from_low_pct > dip_low_max + 6.0 and chg24 > dip_chg_max:
+                action, phase = "İZLE", "dip_uzak"
+        elif from_low_pct > near_max * 1.5:
+            action, phase = "İZLE", "dip_uzak"
+        elif rsi_1h is not None and rsi_1h > 60 and not ign_ok and not cont_ok:
             action, phase = "İZLE", "rsi_sicak"
-        elif chg24 > float(early.get("max_24h_change_pct") or 6) + 2:
+        elif cont_ok and chg24 > mom_hi:
+            action, phase = "GEÇ", "24s_kacmis"
+        elif (not cont_ok) and chg24 > float(early.get("max_24h_change_pct") or 6) + 2:
             action, phase = "GEÇ", "24s_kacmis"
         elif regime.get("block_al"):
             action, phase = "İZLE", "btc_rejim_bekle"
             reasons.append("AL_ENGEL_BTC")
-        elif layers.get("lagger") and not ign_ok and not layers.get("rs_strong"):
+        elif layers.get("lagger") and not ign_ok and not layers.get("rs_strong") and not cont_ok:
             action, phase = "İZLE", "lagger"
             reasons.append("LAGGER_PAS")
 
@@ -4934,9 +5124,20 @@ def manage_entries(
             return False
         return True
 
+    def _pb_rank(r: Analysis) -> int:
+        tag = str((r.layers or {}).get("playbook") or "")
+        if tag in ("continuation", "momentum"):
+            return 0
+        if (r.layers or {}).get("ignition"):
+            return 1
+        if tag == "dip_reversal":
+            return 2
+        return 3
+
     cands = [r for r in rows if is_buyable(r)]
     cands.sort(
         key=lambda r: (
+            _pb_rank(r),
             0 if (r.layers or {}).get("ignition") else 1,
             0 if (r.layers or {}).get("rs_strong") else 1,
             0 if (r.layers or {}).get("mom_1h") else 1,
@@ -5412,6 +5613,16 @@ def main() -> int:
             f"[ignition] erken gainer AÇIK · 24s {igc.get('chg24_min_pct')}..{igc.get('chg24_max_pct')}% · "
             f"hacim×{igc.get('vol_mult_vs_median')} + kırılım · "
             f"runnerTP%{igc.get('runner_tp_pct')}",
+            flush=True,
+        )
+    pbc = cfg.get("playbooks") or {}
+    if pbc.get("enabled", True):
+        mm = pbc.get("momentum") or {}
+        dd = pbc.get("dip_reversal") or {}
+        print(
+            f"[playbooks] MOM {mm.get('chg24_min_pct')}..{mm.get('chg24_max_pct')}% "
+            f"+ DIP≤{dd.get('chg24_max_pct')}% dönüş×{dd.get('min_vol_rise')} · "
+            f"sadece teyitli kazanç",
             flush=True,
         )
     nfc = cfg.get("news_feed") or {}
