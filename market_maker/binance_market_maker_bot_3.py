@@ -2,19 +2,21 @@ import asyncio
 import json
 import logging
 import math
+import os
+import sys
 import time
+import uuid
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
 from decimal import Decimal
-import uuid
+from typing import Dict, List, Optional, Tuple
+
 import ccxt
 try:
     import ccxt.pro as ccxtpro
 except ImportError:  # ccxt[pro] yoksa REST fallback
     ccxtpro = None  # type: ignore
-import os
-from collections import deque
 
 
 def decimal_precision_decimal(value):
@@ -42,15 +44,15 @@ class ConfigFile:
             "exchange": {
                 "api_key": "your_binance_api_key_here",
                 "api_secret": "your_binance_api_secret_here",
-                "testnet": True,
+                "testnet": False,  # GERÇEK Binance spot
                 "symbol": "BTC/USDT",
                 "base_asset": "BTC",
                 "quote_asset": "USDT"
             },
             "trading": {
-                "total_capital": 1000.0,
-                "max_inventory_ratio": 0.2,
-                "max_drawdown_ratio": 0.03,
+                "total_capital": 100.0,
+                "max_inventory_ratio": 0.15,
+                "max_drawdown_ratio": 0.05,
                 "base_spread_ticks": 3.0,
                 "volatility_multiplier": 4.0,
                 "inventory_skew_strength": 3.0,
@@ -98,7 +100,7 @@ class Config:
     # API Credentials - Now loaded from external file
     API_KEY: str = ""
     API_SECRET: str = ""
-    USE_TESTNET: bool = True
+    USE_TESTNET: bool = False  # varsayılan: GERÇEK Binance
     
     # Exchange Settings
     SYMBOL: str = "BTC/USDT"
@@ -163,9 +165,15 @@ class Config:
         
         # Load exchange settings
         exchange = config_data.get("exchange", {})
-        config.API_KEY = exchange.get("api_key", "")
-        config.API_SECRET = exchange.get("api_secret", "")
-        config.USE_TESTNET = exchange.get("testnet", True)
+        config.API_KEY = (
+            exchange.get("api_key", "")
+            or os.getenv("BINANCE_API_KEY", "")
+        ).strip()
+        config.API_SECRET = (
+            exchange.get("api_secret", "")
+            or os.getenv("BINANCE_API_SECRET", "")
+        ).strip()
+        config.USE_TESTNET = exchange.get("testnet", False)
         config.SYMBOL = exchange.get("symbol", "BTC/USDT")
         config.BASE_ASSET = exchange.get("base_asset", "BTC")
         config.QUOTE_ASSET = exchange.get("quote_asset", "USDT")
@@ -289,12 +297,12 @@ class EMA:
 # ============================================================================
 
 class BinanceCCXTClient:
-    def __init__(self, api_key: str, api_secret: str, testnet: bool = True):
+    def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
         self.api_key = api_key
         self.api_secret = api_secret
         self.testnet = testnet
         
-        # Initialize CCXT exchange
+        # Initialize CCXT exchange (sandbox=False → gerçek Binance spot)
         exchange_class = ccxt.binance
         self.exchange = exchange_class({
             'apiKey': api_key,
@@ -1758,20 +1766,19 @@ class MarketMakerBot:
 async def main():
     """Main execution function with external config file support"""
     
-    print("Binance Market Maker Bot (CCXT Edition) - ENHANCED VERSION")
+    print("Binance Market Maker Bot (CCXT) — CANLI AL/SAT")
     print("="*65)
     print()
-    print("🔧 NEW FEATURES:")
-    print("✅ External configuration file support")
-    print("✅ Realized P&L tracking and calculation")
-    print("✅ Fixed zero order size issues")
-    print("✅ Improved balance-aware order placement")
-    print("✅ FIFO-based P&L calculation")
-    print("✅ Real-time trade detection and P&L updates")
+    print("🔧 MOD:")
+    print("✅ Varsayılan: gerçek Binance spot (testnet: false)")
+    print("✅ Limit bid+ask (Avellaneda / volatilite spread)")
+    print("✅ Realized P&L + drawdown kill-switch")
+    print("✅ Env fallback: BINANCE_API_KEY / BINANCE_API_SECRET")
     print()
     
-    # FIXED: Load configuration from external file
-    config = Config.from_file("market_maker_config.json")
+    # Config: script dizinindeki dosya (cwd fark etmez)
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "market_maker_config.json")
+    config = Config.from_file(config_path)
     
     if not config:
         print("❌ Failed to load configuration file")
@@ -1779,11 +1786,15 @@ async def main():
         return
     
     # Validate API keys
-    if not config.API_KEY or config.API_KEY == "your_binance_api_key_here":
-        print("❌ ERROR: Please set your actual Binance API keys in market_maker_config.json")
-        print("🔗 Get your API keys from:")
-        print("   - Testnet: https://testnet.binance.vision/")
-        print("   - Live: https://binance.com → API Management")
+    if (
+        not config.API_KEY
+        or not config.API_SECRET
+        or config.API_KEY in ("your_binance_api_key_here", "your_actual_api_key_here")
+    ):
+        print("❌ ERROR: Canlı Binance API key/secret gerekli")
+        print("   → market_maker_config.json içine yaz VEYA")
+        print("   → export BINANCE_API_KEY=... BINANCE_API_SECRET=...")
+        print("🔗 https://www.binance.com → API Management (Spot Trade izinli)")
         return
     
     print(f"✅ Configuration loaded from market_maker_config.json")
@@ -1795,13 +1806,9 @@ async def main():
     
     if not config.USE_TESTNET:
         print("\n" + "="*50)
-        print("⚠️  WARNING: LIVE TRADING MODE")
-        print("This will use real money on Binance!")
+        print("CANLI MOD — gerçek USDT ile limit AL/SAT")
+        print("Durdurmak: Ctrl+C (açık emirler iptal edilir)")
         print("="*50)
-        confirmation = input("Type 'CONFIRM' to proceed with live trading: ")
-        if confirmation != "CONFIRM":
-            print("❌ Live trading cancelled")
-            return
     
     # Create and start bot
     bot = MarketMakerBot(config)
@@ -1835,42 +1842,46 @@ if __name__ == "__main__":
         print("📦 For WebSocket support: pip install ccxt[pro]")
         exit(1)
     
-    # Check if config file exists, create if not
-    if not os.path.exists("market_maker_config.json"):
+    # Check if config file exists, create if not (script dizininde)
+    _config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "market_maker_config.json")
+    if not os.path.exists(_config_path):
         print("📝 Creating default configuration file...")
-        ConfigFile.create_default_config()
-        print("✅ Created market_maker_config.json")
+        ConfigFile.create_default_config(_config_path)
+        print(f"✅ Created {_config_path}")
         print()
-        print("⚠️  IMPORTANT: Please edit market_maker_config.json with your settings:")
-        print("   1. Set your Binance API key and secret")
-        print("   2. Configure your trading parameters")
-        print("   3. Set testnet to false for live trading")
-        print("   4. Adjust capital and risk parameters")
+        print("⚠️  IMPORTANT: market_maker_config.json düzenle:")
+        print("   1. Gerçek Binance API key + secret (Spot Trade)")
+        print("   2. testnet: false (canlı — varsayılan)")
+        print("   3. total_capital / risk parametrelerini ayarla")
         print()
-        print("📋 Example configuration structure:")
+        print("📋 Örnek (CANLI):")
         print("""
 {
     "exchange": {
         "api_key": "your_actual_api_key_here",
         "api_secret": "your_actual_api_secret_here",
-        "testnet": true,
+        "testnet": false,
         "symbol": "BTC/USDT",
         "base_asset": "BTC",
         "quote_asset": "USDT"
     },
     "trading": {
-        "total_capital": 329.0,
-        "max_inventory_ratio": 0.2,
-        "max_drawdown_ratio": 0.03,
+        "total_capital": 100.0,
+        "max_inventory_ratio": 0.15,
+        "max_drawdown_ratio": 0.05,
         "base_spread_ticks": 3.0,
-        "min_base_balance": 0.001,
+        "min_base_balance": 0.0001,
         "min_quote_balance": 5.0
     }
 }
         """)
         exit(0)
     
-    # Run the bot
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # Run the bot (WindowsSelector sadece Windows'ta)
+    if sys.platform.startswith("win"):
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
 
     asyncio.run(main())

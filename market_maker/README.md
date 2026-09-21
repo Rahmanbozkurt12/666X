@@ -2,19 +2,28 @@
 
 Kaynak: https://github.com/yuthavithi/binance-makret-maker-bot (MIT)
 
+Varsayılan: **CANLI** Binance spot (`testnet: false`). Gerçek USDT ile limit AL+SAT.
+
 ## Kurulum
 ```bash
 cd market_maker
 pip install -r requirements.txt
 ```
 
-## Testnet (sahte para) — ÖNCE BUNU
-1. https://testnet.binance.vision → GitHub login → API Key
-2. `market_maker_config.json` içine key/secret yaz
-3. `"testnet": true` kalsın
-4. `python binance_market_maker_bot_3.py`
-
 ## Canlı (gerçek para)
-`"testnet": false` + gerçek Binance API (Spot izinli). Küçük sermaye ile dene.
+1. https://www.binance.com → API Management → Spot Trade izinli key oluştur
+2. `market_maker_config.json` içine `api_key` / `api_secret` yaz  
+   (veya `export BINANCE_API_KEY=... BINANCE_API_SECRET=...`)
+3. `"testnet": false` kalsın
+4. `total_capital` = gerçek sermayen (küçük başla, örn. 50–100 USDT)
+5. Çalıştır:
+```bash
+python binance_market_maker_bot_3.py
+```
+Durdurmak: `Ctrl+C` (açık emirler iptal edilir).
 
-Ne yapar: order book mid etrafında limit AL+SAT (spread). Trend tahmin etmez.
+## Testnet (sahte para)
+`"testnet": true` + https://testnet.binance.vision API key.
+
+## Ne yapar
+Order book mid etrafında Avellaneda–Stoikov / volatilite spread ile limit bid+ask. Trend tahmin etmez; envanter + drawdown kill-switch var.
