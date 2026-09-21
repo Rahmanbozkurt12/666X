@@ -564,10 +564,10 @@ def process_wallet(
     state: dict[str, Any],
     pending: list[PendingSignal],
 ) -> None:
-    api = chain_cfg.get("explorer_api")
-    if not api:
+    rows, err = fetch_tokentx(chain_cfg, w.address, offset=40)
+    if err == "rate_limit":
+        print(f"  · rate_limit {w.label} — tur atlandı", flush=True)
         return
-    rows = fetch_tokentx(str(api), w.address, offset=50)
     if not rows:
         return
 
@@ -622,11 +622,11 @@ def process_wallet(
 
 def still_holding(
     w_addr: str, token: str, chain_cfg: dict[str, Any], side: str
-) -> bool:
-    api = chain_cfg.get("explorer_api")
-    if not api:
-        return True
-    rows = fetch_tokentx(str(api), w_addr, offset=30)
+) -> bool | None:
+    """True/False hold; None = API hatası (ertele)."""
+    rows, err = fetch_tokentx(chain_cfg, w_addr, offset=25)
+    if err == "rate_limit" or (not rows and err):
+        return None
     if not rows:
         return True
     token = token.lower()
@@ -660,7 +660,14 @@ def flush_pending(
             keep.append(sig)
             continue
         chain_cfg = chains.get(sig.chain) or {}
-        if not still_holding(sig.wallet, sig.token_contract, chain_cfg, sig.side):
+        hold = still_holding(sig.wallet, sig.token_contract, chain_cfg, sig.side)
+        if hold is None:
+            # rate limit — 20 sn sonra tekrar dene
+            sig.execute_at = now + 20
+            keep.append(sig)
+            print(f"  · hold check ertelendi (429) {sig.symbol}", flush=True)
+            continue
+        if not hold:
             msg = f"SKIP hold yok | {sig.side} {sig.symbol} | {sig.label}"
             print(f"  × {msg}", flush=True)
             append_signal(
@@ -698,6 +705,199 @@ def flush_pending(
         )
         telegram_send(msg)
     return keep
+
+
+COPY_STATE_PATH = ROOT / "output" / "mev_copy_state.json"
+_PENDING: list[PendingSignal] = []
+
+
+def try_account_copy(
+    account: Any,
+    side: str,
+    symbol_base: str,
+    settings: dict[str, Any],
+    positions: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None]:
+    """allbinancee BinanceAccount ile gerçek AL/SAT. (note, new_pos_or_none)"""
+    pair = binance_pair(symbol_base)
+    if not pair:
+        return f"skip_bad_symbol:{symbol_base}", None
+
+    base = pair.replace("USDT", "")
+    max_usd = float(settings.get("max_copy_usd") or 50)
+    pct = float(settings.get("copy_pct_of_free_usdt") or 0.10)
+    min_cost = float(settings.get("min_usd_notional") or 8)
+    usdt = float(account.free_usdt())
+    quote = min(max_usd, usdt * pct)
+    if quote < min_cost and side == "BUY":
+        return f"skip_small_balance usdt={usdt:.2f}", None
+
+    hard_stop = float(settings.get("hard_stop_pct") or 1.5)
+    quick_tp = float(settings.get("quick_tp_pct") or 2.5)
+
+    # Binance'te yoksa filters'ta olmaz
+    filters = getattr(account, "filters", None) or {}
+    if filters and pair not in filters:
+        return f"skip_not_listed:{pair}", None
+
+    try:
+        if side == "BUY":
+            if base in positions:
+                return f"skip_already_open:{base}", None
+            use_limit = bool(settings.get("use_limit_orders", True))
+            order = account.smart_buy_quote(
+                pair, quote, use_limit=use_limit, wait_sec=float(settings.get("limit_wait_sec") or 2)
+            )
+            fill_quote = float(order.get("cummulativeQuoteQty") or quote)
+            fill_qty = float(order.get("executedQty") or 0)
+            px = float(order.get("price") or 0)
+            if fill_qty <= 0 and px > 0:
+                fill_qty = fill_quote / px
+            if fill_qty <= 0:
+                return "buy_fill0", None
+            entry = fill_quote / fill_qty
+            pos = {
+                "symbol": pair,
+                "entry": entry,
+                "peak": entry,
+                "qty": fill_qty,
+                "stop": round(entry * (1.0 - hard_stop / 100.0), 10),
+                "tp1": round(entry * (1.0 + quick_tp / 100.0), 10),
+                "tp2": round(entry * (1.0 + max(quick_tp * 2, 5) / 100.0), 10),
+                "score": 70,
+                "pump_score": 60,
+                "edge_score": 70,
+                "is_uc": False,
+                "ignition": False,
+                "keep_runner": False,
+                "cex_count": 0,
+                "sector": "copy",
+                "source": "wallet_copy",
+                "sold_tp1": False,
+                "runner": False,
+                "breakeven": False,
+                "opened_at": now_iso(),
+            }
+            return f"BOT BUY {pair} ${fill_quote:.2f} qty={fill_qty}", pos
+
+        # SELL
+        qty = 0.0
+        if base in positions:
+            qty = float(positions[base].get("qty") or 0)
+        free = float(account.free_asset(base) or 0) if hasattr(account, "free_asset") else 0.0
+        if free > 0:
+            qty = free if qty <= 0 else min(qty, free)
+        if qty <= 0:
+            return f"skip_no_base:{base}", None
+        order = account.market_sell_qty(pair, qty)
+        fill_qty = float(order.get("executedQty") or qty)
+        return f"BOT SELL {pair} qty={fill_qty}", {"_close": base}
+    except Exception as e:  # noqa: BLE001
+        return f"account_err:{type(e).__name__}:{e}", None
+
+
+def run_wallet_copy_cycle(account: Any, bot_state: dict[str, Any], wc: dict[str, Any]) -> list[str]:
+    """
+    allbinancee her trade turunda çağırır.
+    İzlenen cüzdan AL/SAT → 60sn hold → account ile Binance emir + positions güncelle.
+    """
+    notes: list[str] = []
+    if not wc.get("enabled", True):
+        return notes
+
+    # ayarları gömülü CONFIG ile birleştir
+    base_cfg = merge_config()
+    settings = dict(base_cfg.get("settings") or {})
+    settings.update({k: v for k, v in wc.items() if k not in ("wallets", "enabled", "chains")})
+    if isinstance(wc.get("chains"), dict):
+        settings["chains"] = wc["chains"]
+    wallets_cfg = {"wallets": wc.get("wallets") or base_cfg.get("wallets") or []}
+    watched = load_watched(wallets_cfg)
+    if not watched:
+        notes.append("wallet_copy: izlenecek cüzdan yok")
+        return notes
+
+    chains = settings.get("chains") or {}
+    state = load_json(COPY_STATE_PATH) if COPY_STATE_PATH.exists() else {}
+    global _PENDING
+    pending = _PENDING
+    positions: dict[str, Any] = bot_state.setdefault("positions", {})
+
+    live = bool(getattr(account, "live", True)) and bool(settings.get("trade_enabled", True))
+    notes.append(
+        f"wallet_copy: {len(watched)} cüzdan · delay={settings.get('copy_delay_seconds')}s · "
+        f"{'CANLI' if live else 'DRY'}"
+    )
+
+    for w in watched:
+        chain_cfg = chains.get(w.chain) or {}
+        if chain_cfg.get("enabled") is False:
+            continue
+        try:
+            process_wallet(w, settings, chain_cfg, state, pending)
+        except Exception as e:  # noqa: BLE001
+            notes.append(f"wallet_copy scan {w.label}: {e}")
+        time.sleep(float(settings.get("wallet_pause_sec") or 2.5))
+
+    # due signals → account emir
+    now = time.time()
+    keep: list[PendingSignal] = []
+    for sig in pending:
+        if now < sig.execute_at:
+            keep.append(sig)
+            continue
+        chain_cfg = chains.get(sig.chain) or {}
+        hold = still_holding(sig.wallet, sig.token_contract, chain_cfg, sig.side)
+        if hold is None:
+            sig.execute_at = now + 20
+            keep.append(sig)
+            notes.append(f"hold ertelendi 429 · {sig.symbol}")
+            continue
+        if not hold:
+            notes.append(f"SKIP hold yok · {sig.side} {sig.symbol} · {sig.label}")
+            append_signal(
+                {
+                    "ts": now_iso(),
+                    "action": "SKIP_NO_HOLD",
+                    "side": sig.side,
+                    "symbol": sig.symbol,
+                    "label": sig.label,
+                    "tx": sig.tx_hash,
+                }
+            )
+            continue
+
+        if live:
+            exec_note, extra = try_account_copy(
+                account, sig.side, sig.symbol, settings, positions
+            )
+            if extra and sig.side == "BUY" and "symbol" in extra:
+                positions[extra["symbol"].replace("USDT", "")] = extra
+            if extra and sig.side == "SELL" and extra.get("_close"):
+                positions.pop(str(extra["_close"]), None)
+        else:
+            exec_note = "DRY_RUN"
+
+        notes.append(f"COPY {sig.side} {sig.symbol} · {sig.label} · {exec_note}")
+        append_signal(
+            {
+                "ts": now_iso(),
+                "action": "COPY",
+                "side": sig.side,
+                "symbol": sig.symbol,
+                "label": sig.label,
+                "exec": exec_note,
+                "via": "allbinancee",
+                "tx": sig.tx_hash,
+                "live": live,
+            }
+        )
+        telegram_send(f"COPY {sig.side} {sig.symbol} | {sig.label} | {exec_note}")
+
+    _PENDING = keep
+    bot_state["positions"] = positions
+    save_json(COPY_STATE_PATH, state)
+    return notes
 
 
 def run_loop(*, once: bool, force_dry: bool) -> int:
@@ -762,7 +962,8 @@ def run_loop(*, once: bool, force_dry: bool) -> int:
                 process_wallet(w, settings, chain_cfg, state, pending)
             except Exception as e:  # noqa: BLE001
                 print(f"  ! {w.label} {e}", flush=True)
-            time.sleep(1.1)
+            pause = float(settings.get("wallet_pause_sec") or 3.0)
+            time.sleep(pause)
 
         pending[:] = flush_pending(pending, settings, chains, live=do_live)
         save_json(STATE_PATH, state)

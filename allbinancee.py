@@ -130,6 +130,64 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "require_green_5m": True,
         },
     },
+    # MEV/sniper cüzdan kopya → aynı bot hesabıyla Binance AL/SAT
+    "wallet_copy": {
+        "enabled": True,
+        "copy_delay_seconds": 60,
+        "wallet_pause_sec": 3.0,
+        "max_copy_usd": 50.0,
+        "copy_pct_of_free_usdt": 0.10,
+        "min_usd_notional": 8.0,
+        "trade_enabled": True,
+        "use_limit_orders": True,
+        "limit_wait_sec": 2.0,
+        "hard_stop_pct": 1.5,
+        "quick_tp_pct": 2.5,
+        "wallets": [
+            {
+                "address": "0x1f2F10D1C40777AE1Da742455c65828FF36Df387",
+                "label": "jaredfromsubway 2.0",
+                "kind": "mev_sandwich",
+                "chain": "ethereum",
+                "enabled": True,
+            },
+            {
+                "address": "0xae2Fc483527b8ef99eb5d9b44875f005ba1FaE13",
+                "label": "jared EOA",
+                "kind": "mev_caller",
+                "chain": "ethereum",
+                "enabled": True,
+            },
+            {
+                "address": "0x278d858f05b94576C1E6f73285886876ff6eF8D2",
+                "label": "UniV4 MEV executor",
+                "kind": "mev_arb",
+                "chain": "ethereum",
+                "enabled": True,
+            },
+            {
+                "address": "0xEff6cb8b614999d130E537751Ee99724D01aA167",
+                "label": "MEV Bot Eff6",
+                "kind": "mev_arb",
+                "chain": "ethereum",
+                "enabled": True,
+            },
+            {
+                "address": "0x7976Da39D375dCaE90b9dE1B88C13a38F40E47Be",
+                "label": "Avalanche Blackhole HF",
+                "kind": "hf_mm",
+                "chain": "avalanche",
+                "enabled": True,
+            },
+            {
+                "address": "0x3328F7f4A1D1C57c35df56bBf0c9dCAFCA309C49",
+                "label": "Banana Gun related (ETH)",
+                "kind": "sniper",
+                "chain": "ethereum",
+                "enabled": True,
+            },
+        ],
+    },
     # Anlık duyuru / haber: Binance CMS + OKX (+ Bybit dene)
     # 16 borsanın hepsinde public news API yok — listing/airdrop/delist en değerlisi
     "news_feed": {
@@ -482,10 +540,15 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "ignition",
             "news_feed",
             "playbooks",
+            "wallet_copy",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
-                merged.update(raw[k])
+                if k == "wallet_copy" and isinstance(raw[k].get("wallets"), list):
+                    merged.update({x: y for x, y in raw[k].items() if x != "wallets"})
+                    merged["wallets"] = raw[k]["wallets"]
+                else:
+                    merged.update(raw[k])
                 cfg[k] = merged
         return cfg, str(path)
     print(
@@ -5441,6 +5504,19 @@ def run_trade_cycle(
         print(" ", note)
     save_positions(state)
 
+    # Cüzdan kopya (MEV/sniper) → aynı hesapla Binance AL/SAT
+    wc = cfg.get("wallet_copy") or {}
+    if wc.get("enabled", True):
+        print("\n[wallet_copy] izlenen cüzdan → Binance…", flush=True)
+        try:
+            from mev_copy_trader import run_wallet_copy_cycle
+
+            for note in run_wallet_copy_cycle(account, state, wc):
+                print(" ", note)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! wallet_copy hata: {exc}", flush=True)
+        save_positions(state)
+
     free = account.free_usdt()
     max_pos = max_positions_for_balance(free, cfg.get("trade") or {})
     print_portfolio(account, state, max_pos=max(max_pos, len(state.get("positions") or {})))
@@ -5623,6 +5699,15 @@ def main() -> int:
             f"[playbooks] MOM {mm.get('chg24_min_pct')}..{mm.get('chg24_max_pct')}% "
             f"+ DIP≤{dd.get('chg24_max_pct')}% dönüş×{dd.get('min_vol_rise')} · "
             f"sadece teyitli kazanç",
+            flush=True,
+        )
+    wcc = cfg.get("wallet_copy") or {}
+    if wcc.get("enabled", True):
+        n = len([w for w in (wcc.get("wallets") or []) if w.get("enabled", True) and w.get("address")])
+        print(
+            f"[wallet_copy] AÇIK · {n} cüzdan · delay={wcc.get('copy_delay_seconds')}s · "
+            f"max${wcc.get('max_copy_usd')} · aynı Binance hesaba AL/SAT "
+            f"(mev_copy_trader.py gerekli)",
             flush=True,
         )
     nfc = cfg.get("news_feed") or {}
