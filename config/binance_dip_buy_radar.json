@@ -170,6 +170,19 @@
     "promote_izle_if_hot": true,
     "inflow_change_1d_min": 3.0
   },
+  "order_book": {
+    "enabled": true,
+    "depth_limit": 20,
+    "look_ahead_pct": 2.5,
+    "look_below_pct": 1.2,
+    "ask_wall_mult": 3.0,
+    "ask_wall_quote_min": 12000,
+    "max_ask_share": 0.40,
+    "min_bid_ask_ratio": 0.70,
+    "block_on_ask_wall": true,
+    "require_bid_support": false,
+    "pause_sec": 0.15
+  },
   "stable_bases": [
     "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR", "USD1", "BFUSD",
     "RLUSD", "USDE", "XUSD", "U", "USD0", "USDD"

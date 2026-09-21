@@ -257,6 +257,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "promote_izle_if_hot": True,
         "inflow_change_1d_min": 3.0,  # zincir DEX hacmi +%3 = inflow
     },
+    # Emir defteri derinlik — %2 TP yolunda satış duvarı varsa pas geç
+    "order_book": {
+        "enabled": True,
+        "depth_limit": 20,
+        "look_ahead_pct": 2.5,  # TP bölgesine kadar ask tara
+        "look_below_pct": 1.2,  # stop bölgesinde bid destek
+        "ask_wall_mult": 3.0,  # seviye ≥ medyan×3 → duvar adayı
+        "ask_wall_quote_min": 12000,  # USDT cinsinden min duvar
+        "max_ask_share": 0.40,  # penceredeki ask'ın %40+ tek seviyede → engel
+        "min_bid_ask_ratio": 0.70,  # yakın bid/ask dengesizliği
+        "block_on_ask_wall": True,
+        "require_bid_support": False,  # opsiyonel — false = sadece ask duvarı keser
+        "pause_sec": 0.15,
+    },
     "stable_bases": [
         "USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "EUR", "AEUR",
         "USD1", "BFUSD", "RLUSD", "USDE", "XUSD", "U", "USD0", "USDD",
@@ -358,6 +372,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "trade",
             "winrate",
             "chain_flow",
+            "order_book",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -1044,7 +1059,155 @@ def passes_winrate_gates(
     if spread_pct is not None and spread_pct > float(wr.get("max_spread_pct") or 0.12):
         return False, f"spread%{spread_pct:.2f}", edge
 
+    # order book duvarı (önceden layers'a yazıldıysa)
+    if layers.get("ob_blocked"):
+        return False, str(layers.get("ob_reason") or "ask_duvar"), edge
+
     return True, "OK", edge
+
+
+def fetch_order_book(
+    rest_base: str,
+    symbol: str,
+    *,
+    limit: int = 20,
+) -> dict[str, Any] | None:
+    """Binance spot depth (bids/asks)."""
+    try:
+        data = get_json_failover(
+            "/api/v3/depth",
+            {"symbol": symbol, "limit": int(limit)},
+            prefer=rest_base,
+            timeout=15,
+        )
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def analyze_order_book_path(
+    book: dict[str, Any],
+    price: float,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    %2 TP yolunda büyük ask duvarı var mı?
+    Dönüş: ok=False → alımı kes (önü tıkalı).
+    """
+    ob = cfg.get("order_book") or {}
+    if not ob.get("enabled", True) or price <= 0:
+        return {"ok": True, "skipped": True}
+
+    ahead = float(ob.get("look_ahead_pct") or 2.5) / 100.0
+    below = float(ob.get("look_below_pct") or 1.2) / 100.0
+    wall_mult = float(ob.get("ask_wall_mult") or 3.0)
+    wall_min = float(ob.get("ask_wall_quote_min") or 12000)
+    max_share = float(ob.get("max_ask_share") or 0.40)
+    min_imbal = float(ob.get("min_bid_ask_ratio") or 0.70)
+    block_wall = bool(ob.get("block_on_ask_wall", True))
+    need_bid = bool(ob.get("require_bid_support", False))
+
+    top = price * (1.0 + ahead)
+    bot = price * (1.0 - below)
+
+    asks_raw = book.get("asks") or []
+    bids_raw = book.get("bids") or []
+    asks: list[tuple[float, float, float]] = []  # px, qty, quote
+    bids: list[tuple[float, float, float]] = []
+    for row in asks_raw:
+        try:
+            px, qty = float(row[0]), float(row[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if px <= 0 or qty <= 0:
+            continue
+        if price < px <= top:
+            asks.append((px, qty, px * qty))
+    for row in bids_raw:
+        try:
+            px, qty = float(row[0]), float(row[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if px <= 0 or qty <= 0:
+            continue
+        if bot <= px < price:
+            bids.append((px, qty, px * qty))
+
+    near_ask = sum(q for _p, _q, q in asks)
+    near_bid = sum(q for _p, _q, q in bids)
+    imbalance = (near_bid / near_ask) if near_ask > 0 else 9.0
+
+    # medyan ask quote (duvar eşiği)
+    ask_quotes = sorted(q for _p, _q, q in asks)
+    median_ask = ask_quotes[len(ask_quotes) // 2] if ask_quotes else 0.0
+
+    wall_px = None
+    wall_usdt = 0.0
+    wall_share = 0.0
+    for px, _qty, quote in asks:
+        share = (quote / near_ask) if near_ask > 0 else 0.0
+        is_wall = quote >= wall_min and (
+            (median_ask > 0 and quote >= median_ask * wall_mult) or share >= max_share
+        )
+        if is_wall and quote >= wall_usdt:
+            wall_px = px
+            wall_usdt = quote
+            wall_share = share
+
+    wall_pct = ((wall_px / price) - 1.0) * 100.0 if wall_px else None
+    blocked = bool(block_wall and wall_px is not None)
+    bid_ok = near_bid >= wall_min * 0.25 if need_bid else True
+    if need_bid and near_bid < wall_min * 0.25:
+        blocked = True
+
+    # dengesizlik: aşırı ask ağırlıklı tahta → cezalı
+    thin_bid = imbalance < min_imbal and near_ask >= wall_min * 0.5
+
+    reason = "TEMİZ_TAHTA"
+    if blocked and wall_px is not None:
+        reason = f"ASK_DUVAR(+%{wall_pct:.2f} ${wall_usdt:.0f})"
+    elif need_bid and not bid_ok:
+        reason = "BID_ZAYIF"
+    elif thin_bid:
+        reason = f"ASK_AGIR(imb={imbalance:.2f})"
+        # soft: engelleme, sadece uyarı — %2 scalp'te duvar kadar kritik değil
+        # blocked kalmaz
+
+    return {
+        "ok": not blocked,
+        "ask_wall": wall_px is not None,
+        "ask_wall_pct": round(wall_pct, 3) if wall_pct is not None else None,
+        "ask_wall_usdt": round(wall_usdt, 0),
+        "ask_wall_share": round(wall_share, 3),
+        "near_ask_usdt": round(near_ask, 0),
+        "near_bid_usdt": round(near_bid, 0),
+        "imbalance": round(imbalance, 3),
+        "thin_bid": thin_bid,
+        "reason": reason,
+    }
+
+
+def check_order_book_for_buy(
+    account: "BinanceAccount",
+    symbol: str,
+    price: float,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Alım öncesi depth kontrolü (sadece adaylarda — rate-limit dostu)."""
+    ob = cfg.get("order_book") or {}
+    if not ob.get("enabled", True):
+        return {"ok": True, "skipped": True, "reason": "ob_off"}
+    limit = int(ob.get("depth_limit") or 20)
+    book = fetch_order_book(account.rest_base, symbol, limit=limit)
+    pause = float(ob.get("pause_sec") or 0.15)
+    if pause > 0:
+        time.sleep(pause)
+    if not book:
+        # API fail → engelleme (kaçırma yerine izin)
+        return {"ok": True, "skipped": True, "reason": "ob_fetch_fail"}
+    return analyze_order_book_path(book, price, cfg)
 
 
 def calc_risk_levels(
@@ -3251,6 +3414,61 @@ def manage_entries(
         trial_sec[sec] = trial_sec.get(sec, 0) + 1
     cands = picked
 
+    # Emir defteri: %2 yolunda ask duvarı varsa pas geç (sadece final adaylar)
+    if cands and (cfg.get("order_book") or {}).get("enabled", True):
+        clean: list[Analysis] = []
+        blocked_bases = {r.base for r in cands}
+        for r in cands:
+            ob = check_order_book_for_buy(account, r.symbol, float(r.price), cfg)
+            r.layers["ob_reason"] = ob.get("reason")
+            r.layers["ob_blocked"] = not bool(ob.get("ok", True))
+            r.layers["ob_ask_wall_pct"] = ob.get("ask_wall_pct")
+            r.layers["ob_imbalance"] = ob.get("imbalance")
+            if not ob.get("ok", True):
+                notes.append(f"🧱 tahta duvar: {r.base} {ob.get('reason')} → pas")
+                continue
+            if ob.get("reason") == "TEMİZ_TAHTA":
+                r.score = min(100.0, round(float(r.score) + 3, 1))
+                if "TEMİZ_TAHTA" not in r.reasons:
+                    r.reasons.append("TEMİZ_TAHTA")
+            clean.append(r)
+
+        # duvarlı elendi → aynı turda temiz tahtalı yedek ara
+        need = min(slots, max_buy) - len(clean)
+        if need > 0:
+            used_sec = {coin_sector(x.base) for x in clean}
+            used_base = {x.base for x in clean} | blocked_bases
+            pool = [
+                r
+                for r in rows
+                if r.action == "AL"
+                and r.base not in used_base
+                and r.base not in positions
+            ]
+            pool.sort(
+                key=lambda r: -float(
+                    (r.layers or {}).get("edge_score") or compute_edge_score(r, regime)
+                )
+            )
+            for r in pool:
+                if len(clean) >= min(slots, max_buy):
+                    break
+                sec = coin_sector(r.base)
+                if sec in used_sec and max_sector <= 1:
+                    continue
+                if not is_buyable(r):
+                    continue
+                ob = check_order_book_for_buy(account, r.symbol, float(r.price), cfg)
+                r.layers["ob_reason"] = ob.get("reason")
+                r.layers["ob_blocked"] = not bool(ob.get("ok", True))
+                if not ob.get("ok", True):
+                    notes.append(f"🧱 yedek duvar: {r.base} {ob.get('reason')}")
+                    continue
+                clean.append(r)
+                used_sec.add(sec)
+                notes.append(f"📋 yedek temiz tahta: {r.base}")
+        cands = clean
+
     if not cands:
         notes.append("alım yok — winrate/edge/onay filtresinden geçen aday yok")
         near = sorted(
@@ -3308,6 +3526,11 @@ def manage_entries(
             max_sp = float(wr.get("max_spread_pct") or 0.12) if wr.get("enabled", True) else 9.0
             if sp > max_sp:
                 notes.append(f"spread%{sp:.2f} > %{max_sp:.2f} → {sig.base} iptal")
+                continue
+            # son bir kez tahta (duvar kaymış olabilir)
+            ob2 = check_order_book_for_buy(account, symbol, float(sig.price), cfg)
+            if not ob2.get("ok", True):
+                notes.append(f"🧱 alım anı duvar: {sig.base} {ob2.get('reason')} → iptal")
                 continue
             tp_need = max(quick_tp, min_profit_after_fees_pct(trade_cfg, bnb_discount=bnb_ok, spread_pct=sp))
             order = account.smart_buy_quote(
@@ -3584,6 +3807,13 @@ def main() -> int:
             f"[chain] DefiLlama+DexScreener AÇIK · "
             f"{len(cf.get('chains') or [])} zincir · "
             f"DEX aday kontrol≤{cf.get('candidate_dex_check')}"
+        )
+    obc = cfg.get("order_book") or {}
+    if obc.get("enabled", True):
+        print(
+            f"[tahta] order-book duvar filtresi AÇIK · "
+            f"look+%{obc.get('look_ahead_pct')} · "
+            f"ask_wall≥${obc.get('ask_wall_quote_min')}"
         )
     mc = cfg.get("multi_cex") or {}
     if mc.get("enabled", True):
