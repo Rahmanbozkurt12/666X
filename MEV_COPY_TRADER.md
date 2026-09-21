@@ -1,14 +1,19 @@
-# Tek dosya copy trader (canlı Binance)
+# Wallet copy + ana bot
 
-`mev_copy_trader.py` içinde config + bot birleşik.
+## Ana bot (`allbinancee.py`)
+Aynı klasöre **ikisini birden** koy:
+- `allbinancee.py`
+- `mev_copy_trader.py`
 
-1. Dosya başında `BINANCE_API_KEY` / `BINANCE_API_SECRET` doldur  
-2. `pip install ccxt requests`  
-3. `python mev_copy_trader.py` → **CANLI** al-sat  
+Trade açıkken her turda `[wallet_copy]` çalışır → 60 sn hold → Binance AL/SAT → `positions.json`.
 
-Test: `python mev_copy_trader.py --dry-run`
+```bash
+python allbinancee.py
+```
 
-- Sadece Binance USDT listeli coin  
-- Max `$max_copy_usd` (50)  
-- 60 sn delay + hold filtresi  
-- MEV aynı-tx gir-çık → skip  
+Kapat: `wallet_copy.enabled = false`
+
+## Sadece copy
+```bash
+python mev_copy_trader.py
+```
