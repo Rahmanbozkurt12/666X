@@ -4,9 +4,9 @@
     "copy_delay_seconds": 60,
     "hold_confirm_seconds": 60,
     "atomic_window_seconds": 12,
-    "min_usd_notional": 80,
-    "max_copy_usd": 50,
-    "copy_pct_of_signal": 0.05,
+    "min_usd_notional": 8.0,
+    "max_copy_usd": 50.0,
+    "copy_pct_of_free_usdt": 0.10,
     "dry_run": false,
     "trade_enabled": true,
     "prefer_binance_if_listed": true,
@@ -34,8 +34,7 @@
       "label": "jaredfromsubway 2.0",
       "kind": "mev_sandwich",
       "chain": "ethereum",
-      "enabled": true,
-      "note": "Aynı blok al-sat → çoğu sinyal hold filtresinde düşer (bilinçli)"
+      "enabled": true
     },
     {
       "address": "0xae2Fc483527b8ef99eb5d9b44875f005ba1FaE13",
@@ -63,32 +62,14 @@
       "label": "Avalanche Blackhole HF",
       "kind": "hf_mm",
       "chain": "avalanche",
-      "enabled": true,
-      "note": "USDC/WAVAX MM — yönsel tutma nadir"
+      "enabled": true
     },
     {
       "address": "0x3328F7f4A1D1C57c35df56bBf0c9dCAFCA309C49",
       "label": "Banana Gun related (ETH)",
       "kind": "sniper",
       "chain": "ethereum",
-      "enabled": true,
-      "note": "Entity banana-gun — Arkham'dan ek adres ekle"
-    },
-    {
-      "address": "",
-      "label": "MaestroBots (adres ekle)",
-      "kind": "sniper",
-      "chain": "ethereum",
-      "enabled": false,
-      "note": "https://intel.arkm.com/explorer/entity/maestrobots — login ile adres yapıştır"
-    },
-    {
-      "address": "",
-      "label": "rsync-builder",
-      "kind": "builder",
-      "chain": "ethereum",
-      "enabled": false,
-      "note": "Block builder — token al-sat stratejisi değil, kopyalama anlamsız"
+      "enabled": true
     }
   ]
 }

@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
 """
-Gecikmeli smart-copy bot (varsayılan 60 sn).
-
-Ne yapar:
-  - Verdiğin cüzdanların ERC20 transferlerini izler
-  - AL / SAT sinyali üretir
-  - copy_delay_seconds sonra hâlâ tutuyor mu bakar (hold confirm)
-  - Aynı blok / ~12 sn içinde gir-çık MEV atomik trade'leri ATLAR
-  - Varsayılan: trade_enabled=true → Binance key varsa GERÇEK market emir
-  - --dry-run ile kağıt moduna düşer (emir yok)
-  - Token Binance USDT'te listeliyse bakiyene göre küçük market AL/SAT
-
-ÖNEMLİ:
-  Jared / UniV4 / Eff6 tipi MEV botlar çoğu alımı aynı tx'te satar.
-  60 sn sonra kopyalamak genelde ZARAR eder — hold filtresi bu yüzden var.
-  Asıl işe yarayan: sniper / smart-money cüzdanları (dakikalarca tutanlar).
+TEK DOSYA — gecikmeli cüzdan kopya + Binance GERÇEK al-sat.
 
 Kullanım:
-  python mev_copy_trader.py                 # CANLI al-sat (key gerekir)
-  python mev_copy_trader.py --dry-run       # sadece sinyal, emir yok
-  python mev_copy_trader.py --once --dry-run
+  1) Aşağıya BINANCE_API_KEY / BINANCE_API_SECRET yaz (veya env koy)
+  2) python mev_copy_trader.py
 
-Env:
-  BINANCE_API_KEY, BINANCE_API_SECRET       # zorunlu (canlı için)
-  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID      # opsiyonel
+Kağıt test:
+  python mev_copy_trader.py --dry-run
+
+Ne yapar:
+  - Listedeki cüzdanların token transferini izler
+  - 60 sn sonra hâlâ tutuyorsa Binance USDT market AL/SAT
+  - Aynı tx'te gir-çık MEV atomik trade → atlar
 """
 
 from __future__ import annotations
@@ -33,17 +22,105 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
 
+# =============================================================================
+# ANAHTARLAR — buraya yaz VEYA ortam değişkeni kullan
+# =============================================================================
+BINANCE_API_KEY = ""  # örn: "abc..."
+BINANCE_API_SECRET = ""  # örn: "xyz..."
+TELEGRAM_BOT_TOKEN = ""  # opsiyonel
+TELEGRAM_CHAT_ID = ""  # opsiyonel
+
+# =============================================================================
+# AYAR + CÜZDANLAR (tek dosya — ayrı json gerekmez)
+# =============================================================================
+CONFIG: dict[str, Any] = {
+    "settings": {
+        "poll_seconds": 15,
+        "copy_delay_seconds": 60,
+        "min_usd_notional": 8.0,
+        "max_copy_usd": 50.0,
+        "copy_pct_of_free_usdt": 0.10,  # serbest USDT'nin %10'u, max_copy_usd tavan
+        "dry_run": False,
+        "trade_enabled": True,
+        "prefer_binance_if_listed": True,
+        "stable_symbols": [
+            "USDT", "USDC", "USD1", "DAI", "FDUSD", "BUSD", "TUSD", "USDe", "USDE",
+        ],
+        "quote_symbols": ["WETH", "ETH", "WBTC", "BTC", "WAVAX", "AVAX"],
+        "skip_spam_decimals_zero": True,
+        "chains": {
+            "ethereum": {
+                "explorer_api": "https://eth.blockscout.com/api",
+                "explorer_tx": "https://etherscan.io/tx/",
+                "enabled": True,
+            },
+            "avalanche": {
+                "explorer_api": (
+                    "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api"
+                ),
+                "explorer_tx": "https://snowtrace.io/tx/",
+                "enabled": True,
+            },
+        },
+    },
+    "wallets": [
+        {
+            "address": "0x1f2F10D1C40777AE1Da742455c65828FF36Df387",
+            "label": "jaredfromsubway 2.0",
+            "kind": "mev_sandwich",
+            "chain": "ethereum",
+            "enabled": True,
+        },
+        {
+            "address": "0xae2Fc483527b8ef99eb5d9b44875f005ba1FaE13",
+            "label": "jared EOA",
+            "kind": "mev_caller",
+            "chain": "ethereum",
+            "enabled": True,
+        },
+        {
+            "address": "0x278d858f05b94576C1E6f73285886876ff6eF8D2",
+            "label": "UniV4 MEV executor",
+            "kind": "mev_arb",
+            "chain": "ethereum",
+            "enabled": True,
+        },
+        {
+            "address": "0xEff6cb8b614999d130E537751Ee99724D01aA167",
+            "label": "MEV Bot Eff6",
+            "kind": "mev_arb",
+            "chain": "ethereum",
+            "enabled": True,
+        },
+        {
+            "address": "0x7976Da39D375dCaE90b9dE1B88C13a38F40E47Be",
+            "label": "Avalanche Blackhole HF",
+            "kind": "hf_mm",
+            "chain": "avalanche",
+            "enabled": True,
+        },
+        {
+            "address": "0x3328F7f4A1D1C57c35df56bBf0c9dCAFCA309C49",
+            "label": "Banana Gun related (ETH)",
+            "kind": "sniper",
+            "chain": "ethereum",
+            "enabled": True,
+        },
+    ],
+}
+
 ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = ROOT / "config" / "mev_copy_wallets.json"
 STATE_PATH = ROOT / "output" / "mev_copy_state.json"
 SIGNALS_PATH = ROOT / "output" / "mev_copy_signals.jsonl"
+# İsteğe bağlı dış config (varsa üstüne yazar)
+EXTERNAL_CONFIG = ROOT / "config" / "mev_copy_wallets.json"
 
 
 @dataclass
@@ -52,39 +129,36 @@ class Watched:
     label: str
     kind: str
     chain: str
-    enabled: bool = True
 
 
 @dataclass
 class PendingSignal:
     key: str
-    side: str  # BUY | SELL
+    side: str
     wallet: str
     label: str
     kind: str
     chain: str
-    token: str
     symbol: str
     amount: float
     tx_hash: str
     seen_at: float
     execute_at: float
     token_contract: str = ""
-    usd_hint: float | None = None
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def env(name: str, default: str | None = None) -> str | None:
-    v = os.environ.get(name, default)
-    return v.strip() if isinstance(v, str) and v.strip() else default
-
-
-def load_json(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
+def pick_env(*names: str, hardcoded: str = "") -> str | None:
+    if hardcoded and hardcoded.strip():
+        return hardcoded.strip()
+    for n in names:
+        v = os.environ.get(n)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
 
 
 def save_json(path: Path, data: Any) -> None:
@@ -94,10 +168,33 @@ def save_json(path: Path, data: Any) -> None:
         f.write("\n")
 
 
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
 def append_signal(row: dict[str, Any]) -> None:
     SIGNALS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with SIGNALS_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def merge_config() -> dict[str, Any]:
+    cfg = json.loads(json.dumps(CONFIG))  # deep copy
+    if EXTERNAL_CONFIG.exists():
+        try:
+            raw = load_json(EXTERNAL_CONFIG)
+            if isinstance(raw.get("settings"), dict):
+                cfg["settings"].update(raw["settings"])
+                # nested chains
+                if isinstance(raw["settings"].get("chains"), dict):
+                    cfg["settings"]["chains"] = raw["settings"]["chains"]
+            if isinstance(raw.get("wallets"), list) and raw["wallets"]:
+                cfg["wallets"] = raw["wallets"]
+            print(f"[cfg] dış config yüklendi: {EXTERNAL_CONFIG}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[cfg] dış config okunamadı, gömülü kullanılıyor: {e}", flush=True)
+    return cfg
 
 
 def load_watched(cfg: dict[str, Any]) -> list[Watched]:
@@ -106,16 +203,14 @@ def load_watched(cfg: dict[str, Any]) -> list[Watched]:
         if row.get("enabled") is False:
             continue
         addr = (row.get("address") or "").strip()
-        if not addr or not addr.startswith("0x") or len(addr) < 42:
+        if not addr.startswith("0x") or len(addr) < 42:
             continue
-        chain = (row.get("chain") or "ethereum").lower()
         out.append(
             Watched(
                 address=addr.lower(),
                 label=str(row.get("label") or addr[:10]),
                 kind=str(row.get("kind") or "unknown"),
-                chain=chain,
-                enabled=True,
+                chain=str(row.get("chain") or "ethereum").lower(),
             )
         )
     return out
@@ -125,15 +220,12 @@ def explorer_get(api: str, params: dict[str, Any], timeout: float = 25.0) -> Any
     r = requests.get(api, params=params, timeout=timeout)
     r.raise_for_status()
     data = r.json()
-    # etherscan-style
     if isinstance(data, dict) and "result" in data:
         return data.get("result")
     return data
 
 
-def fetch_tokentx(
-    api: str, address: str, *, page: int = 1, offset: int = 40
-) -> list[dict[str, Any]]:
+def fetch_tokentx(api: str, address: str, *, offset: int = 40) -> list[dict[str, Any]]:
     try:
         result = explorer_get(
             api,
@@ -141,7 +233,7 @@ def fetch_tokentx(
                 "module": "account",
                 "action": "tokentx",
                 "address": address,
-                "page": page,
+                "page": 1,
                 "offset": offset,
                 "sort": "desc",
             },
@@ -152,9 +244,7 @@ def fetch_tokentx(
     if isinstance(result, str):
         print(f"  ! tokentx msg {address[:10]}… {result[:120]}", flush=True)
         return []
-    if not isinstance(result, list):
-        return []
-    return result
+    return result if isinstance(result, list) else []
 
 
 def is_stable_or_quote(symbol: str, settings: dict[str, Any]) -> bool:
@@ -176,7 +266,6 @@ def parse_amount(row: dict[str, Any]) -> float:
 def classify_leg(
     row: dict[str, Any], wallet: str, settings: dict[str, Any]
 ) -> tuple[str | None, str, str, float]:
-    """Return (side_hint, symbol, token_addr, amount). side_hint: IN/OUT for wallet."""
     fr = (row.get("from") or "").lower()
     to = (row.get("to") or "").lower()
     sym = str(row.get("tokenSymbol") or "?")
@@ -202,14 +291,13 @@ def group_by_tx(
         tx = (row.get("hash") or "").lower()
         if not tx:
             continue
-        ts = int(row.get("timeStamp") or 0)
         grouped.setdefault(tx, []).append(
             {
                 "side": side,
                 "symbol": sym,
                 "token": token,
                 "amount": amt,
-                "ts": ts,
+                "ts": int(row.get("timeStamp") or 0),
                 "hash": tx,
             }
         )
@@ -219,16 +307,11 @@ def group_by_tx(
 def infer_trade(
     legs: list[dict[str, Any]], settings: dict[str, Any], kind: str
 ) -> dict[str, Any] | None:
-    """
-    Tek tx içindeki token bacaklarından yönsel AL/SAT çıkar.
-    Aynı tx'te hem altcoin IN hem OUT → atomik MEV → None.
-    """
     alt_in = [x for x in legs if x["side"] == "IN" and not is_stable_or_quote(x["symbol"], settings)]
     alt_out = [x for x in legs if x["side"] == "OUT" and not is_stable_or_quote(x["symbol"], settings)]
     quote_out = [x for x in legs if x["side"] == "OUT" and is_stable_or_quote(x["symbol"], settings)]
     quote_in = [x for x in legs if x["side"] == "IN" and is_stable_or_quote(x["symbol"], settings)]
 
-    # Atomik sandwich/arb: aynı tx'te altcoin girip çıkmış
     if alt_in and alt_out:
         return {"skip": "atomic_mev_in_out", "kind": kind}
 
@@ -256,8 +339,8 @@ def infer_trade(
 
 
 def telegram_send(text: str) -> None:
-    token = env("TELEGRAM_BOT_TOKEN")
-    chat = env("TELEGRAM_CHAT_ID")
+    token = pick_env("TELEGRAM_BOT_TOKEN", hardcoded=TELEGRAM_BOT_TOKEN)
+    chat = pick_env("TELEGRAM_CHAT_ID", hardcoded=TELEGRAM_CHAT_ID)
     if not token or not chat:
         return
     try:
@@ -270,11 +353,46 @@ def telegram_send(text: str) -> None:
         print(f"  ! telegram {e}", flush=True)
 
 
-def binance_symbol(base: str) -> str | None:
-    base = base.upper().replace("WETH", "ETH").replace("WBTC", "BTC")
-    if base in {"USDT", "USDC", "ETH", "BTC", "BNB"}:
+_EX: Any = None
+
+
+def get_binance():
+    global _EX
+    if _EX is not None:
+        return _EX
+    try:
+        import ccxt  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("ccxt yok: pip install ccxt") from e
+    key = pick_env("BINANCE_API_KEY", "API_KEY", hardcoded=BINANCE_API_KEY)
+    secret = pick_env("BINANCE_API_SECRET", "API_SECRET", hardcoded=BINANCE_API_SECRET)
+    if not key or not secret:
+        raise RuntimeError("BINANCE_API_KEY / BINANCE_API_SECRET eksik")
+    _EX = ccxt.binance(
+        {
+            "apiKey": key,
+            "secret": secret,
+            "enableRateLimit": True,
+            "options": {"defaultType": "spot", "recvWindow": 60000},
+        }
+    )
+    _EX.load_markets()
+    return _EX
+
+
+def binance_pair(base: str) -> str | None:
+    b = (base or "").upper().replace("WETH", "ETH").replace("WBTC", "BTC")
+    # on-chain sembol ≠ binance (PEPE ok, SKY vs MKR vs vs)
+    aliases = {
+        "WETH": "ETH",
+        "WBTC": "BTC",
+        "WBNB": "BNB",
+        "WAVAX": "AVAX",
+    }
+    b = aliases.get(b, b)
+    if b in {"USDT", "USDC", "FDUSD", "DAI", "BUSD", "TUSD"}:
         return None
-    return f"{base}USDT"
+    return f"{b}USDT"
 
 
 def try_binance_copy(
@@ -284,55 +402,80 @@ def try_binance_copy(
     *,
     live: bool,
 ) -> str:
-    if not live or not settings.get("prefer_binance_if_listed", True):
-        return "skip_not_live"
-    key = env("BINANCE_API_KEY") or env("API_KEY")
-    secret = env("BINANCE_API_SECRET") or env("API_SECRET")
-    if not key or not secret:
-        return "skip_no_binance_keys"
-    pair = binance_symbol(symbol_base)
+    if not live:
+        return "DRY_RUN (emir yok)"
+    if not settings.get("prefer_binance_if_listed", True):
+        return "skip_binance_off"
+    pair = binance_pair(symbol_base)
     if not pair:
-        return "skip_bad_symbol"
+        return f"skip_bad_symbol:{symbol_base}"
     try:
-        import ccxt  # type: ignore
-    except ImportError:
-        return "skip_no_ccxt"
+        ex = get_binance()
+    except Exception as e:  # noqa: BLE001
+        return f"binance_init_err:{e}"
+
+    if pair not in ex.markets:
+        return f"skip_not_listed:{pair}"
+
+    market = ex.markets[pair]
+    min_cost = float(settings.get("min_usd_notional") or 8)
+    # market limits
     try:
-        ex = ccxt.binance(
-            {
-                "apiKey": key,
-                "secret": secret,
-                "enableRateLimit": True,
-                "options": {"defaultType": "spot"},
-            }
-        )
-        markets = ex.load_markets()
-        if pair not in markets:
-            return f"skip_not_listed:{pair}"
-        quote = float(settings.get("max_copy_usd") or 50)
+        lim = (market.get("limits") or {}).get("cost") or {}
+        if lim.get("min"):
+            min_cost = max(min_cost, float(lim["min"]))
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
         bal = ex.fetch_balance()
         usdt = float((bal.get("USDT") or {}).get("free") or 0)
-        quote = min(quote, max(0.0, usdt * float(settings.get("copy_pct_of_signal") or 0.05) * 20))
-        # basit tavan: max_copy_usd
-        quote = min(quote, float(settings.get("max_copy_usd") or 50))
-        if quote < 6:
-            return f"skip_small_balance usdt={usdt:.2f}"
+        max_usd = float(settings.get("max_copy_usd") or 50)
+        pct = float(settings.get("copy_pct_of_free_usdt") or 0.10)
+        quote = min(max_usd, usdt * pct)
+        if quote < min_cost:
+            return f"skip_small_balance usdt={usdt:.2f} need≥{min_cost}"
+
         ticker = ex.fetch_ticker(pair)
-        px = float(ticker.get("last") or 0) or 0.0
+        px = float(ticker.get("last") or ticker.get("ask") or 0)
         if px <= 0:
             return "skip_no_price"
+
         if side == "BUY":
-            amt = quote / px
-            order = ex.create_market_buy_order(pair, amt)
-            return f"BINANCE BUY {pair} ~${quote:.2f} amt={amt} id={order.get('id')}"
-        base_free = float((bal.get(symbol_base.upper()) or {}).get("free") or 0)
-        if base_free <= 0:
-            return f"skip_no_base {symbol_base}"
-        amt = min(base_free, quote / px)
-        order = ex.create_market_sell_order(pair, amt)
+            # Binance spot: quoteOrderQty ile market buy — LOT_SIZE hatasını azaltır
+            quote = float(ex.cost_to_precision(pair, quote))
+            if quote < min_cost:
+                return f"skip_quote_low {quote}"
+            order = ex.create_order(
+                pair,
+                "market",
+                "buy",
+                None,
+                None,
+                {"quoteOrderQty": quote},
+            )
+            return f"BINANCE BUY {pair} ${quote} id={order.get('id')}"
+
+        # SELL
+        base = symbol_base.upper().replace("WETH", "ETH").replace("WBTC", "BTC")
+        free = float((bal.get(base) or {}).get("free") or 0)
+        if free <= 0:
+            # bazen market base farklı
+            free = float((bal.get(pair.replace("USDT", "")) or {}).get("free") or 0)
+        if free <= 0:
+            return f"skip_no_base:{base}"
+        max_amt = quote / px
+        amt = min(free, max_amt)
+        amt = float(ex.amount_to_precision(pair, amt))
+        if amt <= 0:
+            return "skip_amt0"
+        notional = amt * px
+        if notional < min_cost:
+            return f"skip_sell_dust ${notional:.4f}"
+        order = ex.create_order(pair, "market", "sell", amt)
         return f"BINANCE SELL {pair} amt={amt} id={order.get('id')}"
     except Exception as e:  # noqa: BLE001
-        return f"binance_err:{e}"
+        return f"binance_err:{type(e).__name__}:{e}"
 
 
 def process_wallet(
@@ -345,14 +488,13 @@ def process_wallet(
     api = chain_cfg.get("explorer_api")
     if not api:
         return
-    rows = fetch_tokentx(api, w.address, offset=50)
+    rows = fetch_tokentx(str(api), w.address, offset=50)
     if not rows:
         return
 
     seen_key = f"{w.chain}:{w.address}"
     seen: set[str] = set(state.setdefault("seen_tx", {}).setdefault(seen_key, []))
     boot = seen_key not in state.setdefault("bootstrapped", [])
-
     grouped = group_by_tx(rows, w.address, settings)
     new_keys: list[str] = []
 
@@ -361,73 +503,55 @@ def process_wallet(
             continue
         new_keys.append(tx)
         if boot:
-            continue  # ilk turda spam yok, sadece seed
+            continue
         trade = infer_trade(legs, settings, w.kind)
         if not trade:
             continue
         if trade.get("skip"):
-            print(
-                f"  · skip {w.label} {tx[:10]}… {trade['skip']}",
-                flush=True,
-            )
+            print(f"  · skip {w.label} {tx[:10]}… {trade['skip']}", flush=True)
             continue
-        side = trade["side"]
         delay = float(settings.get("copy_delay_seconds") or 60)
         sig = PendingSignal(
-            key=f"{w.chain}:{tx}:{side}:{trade['token']}",
-            side=side,
+            key=f"{w.chain}:{tx}:{trade['side']}:{trade['token']}",
+            side=str(trade["side"]),
             wallet=w.address,
             label=w.label,
             kind=w.kind,
             chain=w.chain,
-            token=trade["symbol"],
-            symbol=trade["symbol"],
+            symbol=str(trade["symbol"]),
             amount=float(trade["amount"]),
-            tx_hash=trade["hash"],
+            tx_hash=str(trade["hash"]),
             seen_at=time.time(),
             execute_at=time.time() + delay,
-            token_contract=trade["token"],
+            token_contract=str(trade["token"]),
         )
-        # aynı sinyal kuyrukta varsa ekleme
         if any(p.key == sig.key for p in pending):
             continue
         pending.append(sig)
         print(
-            f"  → QUEUE {side} {sig.symbol} from {w.label} "
-            f"delay={int(delay)}s tx={tx[:12]}… kind={w.kind}",
+            f"  → QUEUE {sig.side} {sig.symbol} | {w.label} | +{int(delay)}s | {tx[:12]}…",
             flush=True,
         )
 
-    # seen güncelle (son 400 tut)
     for tx in new_keys:
         seen.add(tx)
-    trimmed = list(seen)[-400:]
-    state["seen_tx"][seen_key] = trimmed
+    state["seen_tx"][seen_key] = list(seen)[-400:]
     if boot:
         state.setdefault("bootstrapped", []).append(seen_key)
-        print(f"  seed {w.label} ({len(trimmed)} tx)", flush=True)
+        print(f"  seed {w.label} ({len(state['seen_tx'][seen_key])} tx)", flush=True)
 
 
 def still_holding(
-    w_addr: str,
-    token: str,
-    chain_cfg: dict[str, Any],
-    side: str,
-    settings: dict[str, Any],
+    w_addr: str, token: str, chain_cfg: dict[str, Any], side: str
 ) -> bool:
-    """
-    Delay sonrası kaba hold kontrolü:
-    son transferlerde token hâlâ cüzdanda görünüyor mu / yeni OUT var mı.
-    """
     api = chain_cfg.get("explorer_api")
     if not api:
         return True
-    rows = fetch_tokentx(api, w_addr, offset=30)
+    rows = fetch_tokentx(str(api), w_addr, offset=30)
     if not rows:
         return True
     token = token.lower()
-    last_in = 0
-    last_out = 0
+    last_in = last_out = 0
     for row in rows:
         if (row.get("contractAddress") or "").lower() != token:
             continue
@@ -438,13 +562,8 @@ def still_holding(
             last_in = max(last_in, ts)
         if fr == w_addr:
             last_out = max(last_out, ts)
-    if side == "BUY":
-        # sattıysa kopyalama
-        if last_out and last_out >= last_in:
-            return False
-        return True
-    if side == "SELL":
-        return True
+    if side == "BUY" and last_out and last_out >= last_in:
+        return False
     return True
 
 
@@ -462,14 +581,8 @@ def flush_pending(
             keep.append(sig)
             continue
         chain_cfg = chains.get(sig.chain) or {}
-        ok_hold = still_holding(
-            sig.wallet, sig.token_contract, chain_cfg, sig.side, settings
-        )
-        if not ok_hold:
-            msg = (
-                f"SKIP hold yok | {sig.side} {sig.symbol} | {sig.label} | "
-                f"tx={sig.tx_hash[:14]}… (MEV/hızlı çıkış)"
-            )
+        if not still_holding(sig.wallet, sig.token_contract, chain_cfg, sig.side):
+            msg = f"SKIP hold yok | {sig.side} {sig.symbol} | {sig.label}"
             print(f"  × {msg}", flush=True)
             append_signal(
                 {
@@ -478,22 +591,15 @@ def flush_pending(
                     "side": sig.side,
                     "symbol": sig.symbol,
                     "label": sig.label,
-                    "kind": sig.kind,
                     "tx": sig.tx_hash,
                 }
             )
             continue
 
-        exec_note = "DRY_RUN"
-        if live and settings.get("trade_enabled"):
-            exec_note = try_binance_copy(sig.side, sig.symbol, settings, live=True)
-        else:
-            exec_note = try_binance_copy(sig.side, sig.symbol, settings, live=False)
-
+        exec_note = try_binance_copy(sig.side, sig.symbol, settings, live=live)
         msg = (
-            f"COPY {sig.side} {sig.symbol} amt≈{sig.amount:.6g} | "
-            f"{sig.label} ({sig.kind}) | +{int(settings.get('copy_delay_seconds') or 60)}s | "
-            f"{exec_note} | {sig.tx_hash}"
+            f"COPY {sig.side} {sig.symbol} | {sig.label} | "
+            f"+{int(settings.get('copy_delay_seconds') or 60)}s | {exec_note}"
         )
         print(f"  ✓ {msg}", flush=True)
         append_signal(
@@ -508,48 +614,60 @@ def flush_pending(
                 "chain": sig.chain,
                 "tx": sig.tx_hash,
                 "exec": exec_note,
-                "live": bool(live and settings.get("trade_enabled")),
+                "live": live,
             }
         )
         telegram_send(msg)
     return keep
 
 
-def run_loop(*, once: bool, live: bool, force_dry: bool, config_path: Path) -> int:
-    cfg = load_json(config_path)
+def run_loop(*, once: bool, force_dry: bool) -> int:
+    cfg = merge_config()
     settings = dict(cfg.get("settings") or {})
-    # Config varsayılan canlı; --live zorla açar; --dry-run kağıt moda düşürür
-    if live:
-        settings["trade_enabled"] = True
-        settings["dry_run"] = False
     if force_dry:
         settings["trade_enabled"] = False
         settings["dry_run"] = True
 
-    do_live = bool(settings.get("trade_enabled")) and not bool(settings.get("dry_run"))
-    chains = settings.get("chains") or {}
-    watched = load_watched(cfg)
-    if not watched:
-        print("izlenecek cüzdan yok — config/mev_copy_wallets.json", file=sys.stderr)
-        return 1
-
-    if do_live and not (env("BINANCE_API_KEY") or env("API_KEY")):
+    do_live = bool(settings.get("trade_enabled", True)) and not bool(
+        settings.get("dry_run", False)
+    )
+    key_ok = bool(
+        pick_env("BINANCE_API_KEY", "API_KEY", hardcoded=BINANCE_API_KEY)
+        and pick_env("BINANCE_API_SECRET", "API_SECRET", hardcoded=BINANCE_API_SECRET)
+    )
+    if do_live and not key_ok:
         print(
-            "[UYARI] trade_enabled=true ama BINANCE_API_KEY yok — emir gidemez, sinyal yazar",
+            "[HATA] Canlı mod açık ama API key yok.\n"
+            "  Dosyanın başındaki BINANCE_API_KEY / BINANCE_API_SECRET doldur\n"
+            "  veya: set BINANCE_API_KEY=... & set BINANCE_API_SECRET=...",
             flush=True,
         )
-        do_live = False
+        return 2
 
+    if do_live:
+        try:
+            ex = get_binance()
+            bal = ex.fetch_balance()
+            usdt = float((bal.get("USDT") or {}).get("free") or 0)
+            print(f"[binance] bağlandı · serbest USDT={usdt:.2f}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[HATA] Binance bağlanamadı: {e}", flush=True)
+            return 3
+
+    watched = load_watched(cfg)
+    if not watched:
+        print("izlenecek cüzdan yok", file=sys.stderr)
+        return 1
+
+    chains = settings.get("chains") or {}
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {}
     pending: list[PendingSignal] = []
-    # restore pending keys lightly skipped (process restart = drop queue — güvenli)
 
-    mode = "CANLI AL-SAT" if do_live else "DRY (emir yok)"
+    mode = "CANLI AL-SAT (Binance)" if do_live else "DRY (emir yok)"
     print(
         f"[mev-copy] mode={mode} wallets={len(watched)} "
         f"delay={settings.get('copy_delay_seconds')}s "
-        f"max_copy_usd={settings.get('max_copy_usd')} "
-        f"trade={settings.get('trade_enabled')} dry_run={settings.get('dry_run')}",
+        f"max_copy_usd={settings.get('max_copy_usd')}",
         flush=True,
     )
     for w in watched:
@@ -571,7 +689,7 @@ def run_loop(*, once: bool, live: bool, force_dry: bool, config_path: Path) -> i
         save_json(STATE_PATH, state)
 
         if once:
-            print(f"[done] pending_left={len(pending)} signals→{SIGNALS_PATH}", flush=True)
+            print(f"[done] pending={len(pending)} → {SIGNALS_PATH}", flush=True)
             return 0
 
         sleep_for = max(3.0, float(settings.get("poll_seconds") or 15) - (time.time() - t0))
@@ -579,25 +697,11 @@ def run_loop(*, once: bool, live: bool, force_dry: bool, config_path: Path) -> i
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="60s delayed wallet copy trader (live by default)")
-    p.add_argument("--config", default=str(CONFIG_PATH))
+    p = argparse.ArgumentParser(description="Tek dosya: 60s copy → Binance canlı al-sat")
     p.add_argument("--once", action="store_true")
-    p.add_argument("--dry-run", action="store_true", help="force paper mode (no orders)")
-    p.add_argument(
-        "--live",
-        action="store_true",
-        help="force live even if config dry (keys required)",
-    )
+    p.add_argument("--dry-run", action="store_true", help="emir gönderme")
     args = p.parse_args()
-    if args.live and args.dry_run:
-        print("--live ve --dry-run birlikte olmaz", file=sys.stderr)
-        return 2
-    return run_loop(
-        once=args.once,
-        live=bool(args.live),
-        force_dry=bool(args.dry_run),
-        config_path=Path(args.config),
-    )
+    return run_loop(once=args.once, force_dry=bool(args.dry_run))
 
 
 if __name__ == "__main__":

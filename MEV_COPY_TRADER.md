@@ -1,35 +1,14 @@
-# Gecikmeli cüzdan kopya botu (`mev_copy_trader.py`)
+# Tek dosya copy trader (canlı Binance)
 
-60 sn (ayarlanabilir) gecikmeli copy-trade: izlenen cüzdan AL/SAT → sinyal → hold kontrolü → (opsiyonel) Binance.
+`mev_copy_trader.py` içinde config + bot birleşik.
 
-## Gerçekçi uyarı
+1. Dosya başında `BINANCE_API_KEY` / `BINANCE_API_SECRET` doldur  
+2. `pip install ccxt requests`  
+3. `python mev_copy_trader.py` → **CANLI** al-sat  
 
-Jared / UniV4 / Eff6 tipi **MEV** botlar çoğu trade’i **aynı blokta** alıp satar.  
-60 sn sonra kopyalamak genelde **zarar**dır. Bot bu yüzden:
+Test: `python mev_copy_trader.py --dry-run`
 
-- aynı tx içinde altcoin IN+OUT → **atomic_mev** skip
-- delay sonunda token satılmışsa → **SKIP_NO_HOLD**
-
-Asıl işe yarayan hedef: **dakikalarca tutan** sniper / smart-money cüzdanları.  
-`rsync-builder` kapalı (builder, trader değil). Maestro adresini Arkham’dan elle ekle.
-
-## Çalıştır (varsayılan = GERÇEK al-sat)
-
-```bash
-export BINANCE_API_KEY=...
-export BINANCE_API_SECRET=...
-python mev_copy_trader.py
-```
-
-Kağıt mod (emir yok):
-
-```bash
-python mev_copy_trader.py --dry-run
-python mev_copy_trader.py --once --dry-run
-```
-
-Sadece Binance’te USDT listeli coinler; max `$max_copy_usd` (config, varsayılan 50).
-
-Config: `config/mev_copy_wallets.json`  
-Log: `output/mev_copy_signals.jsonl`  
-State: `output/mev_copy_state.json`
+- Sadece Binance USDT listeli coin  
+- Max `$max_copy_usd` (50)  
+- 60 sn delay + hold filtresi  
+- MEV aynı-tx gir-çık → skip  
