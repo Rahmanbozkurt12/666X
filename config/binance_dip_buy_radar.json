@@ -30,6 +30,21 @@
     "max_rsi_1h": 72.0,
     "max_from_14d_low_pct": 28.0
   },
+  "ignition": {
+    "enabled": true,
+    "chg24_min_pct": -3.0,
+    "chg24_max_pct": 3.0,
+    "vol_mult_vs_median": 2.2,
+    "break_lookback_5m": 12,
+    "min_green_5m": 2,
+    "score_bonus": 22,
+    "pump_bonus": 18,
+    "promote_al": true,
+    "runner_tp_pct": 28.0,
+    "keep_runner": true,
+    "relax_from_low": true,
+    "max_from_low_pct": 35.0
+  },
   "pump_upside": {
     "enabled": true,
     "target_low_pct": 40.0,

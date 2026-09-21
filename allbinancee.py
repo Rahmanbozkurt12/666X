@@ -97,6 +97,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_rsi_1h": 72.0,
         "max_from_14d_low_pct": 28.0,
     },
+    # Erken gainer ateşlemesi: 24s henüz -3..+3 iken hacim+kırılım
+    # (PHA/MUBARAK tipi +30/+60’ın başlangıcı — dip şartı YOK)
+    "ignition": {
+        "enabled": True,
+        "chg24_min_pct": -3.0,
+        "chg24_max_pct": 3.0,
+        "vol_mult_vs_median": 2.2,  # son 5m hacim / medyan
+        "break_lookback_5m": 12,  # son N mum high kırılımı
+        "min_green_5m": 2,  # ardışık yeşil
+        "score_bonus": 22,
+        "pump_bonus": 18,
+        "promote_al": True,
+        "runner_tp_pct": 28.0,  # ignition alımlarda daha geniş hedef
+        "keep_runner": True,
+        "relax_from_low": True,  # 14g dip şartını gevşet
+        "max_from_low_pct": 35.0,
+    },
     "pump_upside": {
         "enabled": True,
         "target_low_pct": 40.0,
@@ -414,6 +431,7 @@ def load_config(cli_path: str | None = None) -> tuple[dict[str, Any], str]:
             "chain_flow",
             "order_book",
             "alpha_filters",
+            "ignition",
         ):
             if isinstance(raw.get(k), dict):
                 merged = dict(DEFAULT_CONFIG.get(k) or {})
@@ -660,6 +678,118 @@ def fetch_open_interest(cfg: dict[str, Any], symbol: str) -> float | None:
         return float(row.get("openInterest") or 0)
     except Exception:  # noqa: BLE001
         return None
+
+
+def detect_price_ignition(
+    c5: dict[str, list[float]],
+    c15: dict[str, list[float]] | None,
+    *,
+    chg24: float,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    +30/+60 gainer'ların erken fazı: 24s hâlâ yatay (-3..+3) iken
+    5m hacim patlaması + range kırılımı + yeşil mum zinciri.
+    Dip yakınlığı şart değil.
+    """
+    ig = cfg.get("ignition") or {}
+    out: dict[str, Any] = {
+        "ok": False,
+        "score": 0.0,
+        "reasons": [],
+        "vol_mult": 0.0,
+        "broke_high": False,
+        "green_streak": 0,
+        "window_ok": False,
+    }
+    if not ig.get("enabled", True):
+        return out
+    lo = float(ig.get("chg24_min_pct") or -3.0)
+    hi = float(ig.get("chg24_max_pct") or 3.0)
+    if not (lo <= chg24 <= hi):
+        return out
+    out["window_ok"] = True
+
+    closes = c5.get("c") or []
+    opens = c5.get("o") or []
+    highs = c5.get("h") or []
+    vols = c5.get("v") or []
+    if len(closes) < 16 or len(vols) < 16:
+        return out
+
+    score = 0.0
+    reasons: list[str] = []
+
+    # 1) Hacim: son bar / medyan (sessiz taban üstü patlama)
+    look_v = vols[-20:-1] if len(vols) >= 21 else vols[:-1]
+    med = sorted(look_v)[len(look_v) // 2] if look_v else 0.0
+    last_v = float(vols[-1] or 0)
+    vol_mult = (last_v / med) if med > 0 else 0.0
+    out["vol_mult"] = round(vol_mult, 2)
+    need_v = float(ig.get("vol_mult_vs_median") or 2.2)
+    if vol_mult >= need_v * 1.4:
+        score += 14
+        reasons.append(f"IGN_HACIM×{vol_mult:.1f}")
+    elif vol_mult >= need_v:
+        score += 10
+        reasons.append(f"IGN_HACIM×{vol_mult:.1f}")
+    else:
+        return out  # hacim yoksa ignition değil
+
+    # 2) Kırılım: son N mumun high üstü kapanış
+    n = int(ig.get("break_lookback_5m") or 12)
+    n = min(n, len(highs) - 2)
+    prior_high = max(highs[-(n + 1) : -1]) if n >= 3 else max(highs[:-1])
+    broke = closes[-1] > prior_high * 1.001
+    out["broke_high"] = broke
+    if broke:
+        score += 12
+        reasons.append("IGN_KIRILIM_5m")
+    else:
+        # 15m kırılım yedek
+        if c15 and len(c15.get("h") or []) >= 10 and len(c15.get("c") or []) >= 3:
+            ph = max(c15["h"][-8:-1])
+            if c15["c"][-1] > ph * 1.001:
+                broke = True
+                out["broke_high"] = True
+                score += 10
+                reasons.append("IGN_KIRILIM_15m")
+    if not broke:
+        # kırılım yoksa en az güçlü yeşil + hacim şart
+        body = closes[-1] - opens[-1]
+        if body <= 0 or (closes[-1] / opens[-1] - 1.0) < 0.004:
+            return out
+        score += 4
+        reasons.append("IGN_YESIL_GUCLU")
+
+    # 3) Ardışık yeşil 5m
+    need_g = int(ig.get("min_green_5m") or 2)
+    streak = 0
+    for i in range(1, min(6, len(closes))):
+        if closes[-i] > opens[-i]:
+            streak += 1
+        else:
+            break
+    out["green_streak"] = streak
+    if streak >= need_g:
+        score += 8
+        reasons.append(f"IGN_YESIL×{streak}")
+    elif streak >= 1:
+        score += 3
+
+    # 4) 24s pencere bonus
+    if -2.0 <= chg24 <= 2.0:
+        score += 10
+        reasons.append(f"IGN_PENCERE(%{chg24:+.1f})")
+    else:
+        score += 5
+        reasons.append(f"IGN_PENCERE(%{chg24:+.1f})")
+
+    out["score"] = score
+    out["reasons"] = reasons
+    # minimum: hacim + (kırılım veya 2 yeşil)
+    out["ok"] = score >= 22 and vol_mult >= need_v and (broke or streak >= need_g)
+    return out
 
 
 def analyze_volume_bottom(vols: list[float], mult: float) -> tuple[bool, float]:
@@ -950,6 +1080,9 @@ def compute_edge_score(r: Analysis, regime: dict[str, Any] | None = None) -> flo
         score += 4.0
     # alpha: taker / basis / lead-lag (layers doldurulmuşsa)
     score += float(layers.get("alpha_edge_bonus") or 0)
+    # ignition erken gainer
+    if layers.get("ignition"):
+        score += 10.0
     if regime.get("supportive"):
         score += 6
     elif regime.get("hostile") or regime.get("block_al"):
@@ -1067,12 +1200,22 @@ def passes_winrate_gates(
     max_low = float(wr.get("max_from_low_pct") or 8)
     if chain_ok:
         max_low = max_low + 4.0
+    # Ignition: dip şartı gevşek (gainer çoğu zaman 14g dipte başlamaz)
+    if layers.get("ignition"):
+        ig = cfg.get("ignition") or {}
+        if ig.get("relax_from_low", True):
+            max_low = max(max_low, float(ig.get("max_from_low_pct") or 35))
     if from_low > max_low:
         return False, f"dip_uzak%{from_low:.1f}", edge
 
     chg = float(r.change_24h_pct or 0)
-    if chg > float(wr.get("max_24h_change_pct") or 3.5):
+    if chg > float(wr.get("max_24h_change_pct") or 3.5) and not layers.get("ignition"):
         return False, f"24s_kacmis%{chg:+.1f}", edge
+    # ignition penceresi zaten -3..+3; winrate max24 biraz geniş
+    if layers.get("ignition"):
+        ig = cfg.get("ignition") or {}
+        if chg > float(ig.get("chg24_max_pct") or 3) + 1.5:
+            return False, f"ign_kacmis%{chg:+.1f}", edge
     if chg < float(wr.get("min_24h_change_pct") or -12):
         return False, f"24s_cok_dusuk%{chg:+.1f}", edge
 
@@ -1083,6 +1226,8 @@ def passes_winrate_gates(
         if chain_ok:
             rsi_hi = min(70.0, rsi_hi + 4.0)
             rsi_lo = max(18.0, rsi_lo - 3.0)
+        if layers.get("ignition"):
+            rsi_hi = min(68.0, rsi_hi + 8.0)
         if float(rsi_1h) < rsi_lo or float(rsi_1h) > rsi_hi:
             return False, f"rsi_disi({rsi_1h})", edge
 
@@ -2045,6 +2190,24 @@ def analyze_symbol(
         reasons.append(f"24s_KACMIS(%{chg24:+.1f})")
         already_late = True
 
+    # 8b) IGNITION — gainer ateşlemesi (-3..+3 + hacim + kırılım)
+    ign = detect_price_ignition(c5, c15, chg24=chg24, cfg=cfg)
+    layers["ignition"] = bool(ign.get("ok"))
+    layers["ignition_score"] = round(float(ign.get("score") or 0), 1)
+    layers["ignition_vol_mult"] = ign.get("vol_mult")
+    if ign.get("ok"):
+        ig_cfg = cfg.get("ignition") or {}
+        score += float(ig_cfg.get("score_bonus") or 22)
+        for ir in ign.get("reasons") or []:
+            if ir not in reasons:
+                reasons.append(ir)
+        reasons.append("IGNITION")
+    elif ign.get("window_ok") and float(ign.get("score") or 0) >= 14:
+        score += 6
+        for ir in (ign.get("reasons") or [])[:2]:
+            if ir not in reasons:
+                reasons.append(ir)
+
     # 9) Likidite
     if qv24 >= 1_000_000:
         score += 5
@@ -2069,6 +2232,14 @@ def analyze_symbol(
     pump_score = float(pump["pump_score"])
     upside_est = float(pump["upside_est_pct"])
     is_uc = bool(pump["is_uc"])
+    # Ignition → uç benzeri erken gainer setup
+    ig_cfg = cfg.get("ignition") or {}
+    if layers.get("ignition") and ig_cfg.get("enabled", True):
+        pump_score = min(100.0, pump_score + float(ig_cfg.get("pump_bonus") or 18))
+        upside_est = max(upside_est, float(ig_cfg.get("runner_tp_pct") or 28))
+        is_uc = True
+        if "UC_IGNITION" not in reasons:
+            reasons.append("UC_IGNITION")
     layers["pump_score"] = pump_score
     layers["upside_est_pct"] = upside_est
     layers["room_30d_pct"] = pump.get("room_30d_pct")
@@ -2097,8 +2268,16 @@ def analyze_symbol(
     min_pump = float(early.get("min_pump_score_al") or 55)
     early_rally_max = float(early.get("early_rally_max_pct") or 5.0)
 
-    if already_late or from_low_pct > float(late.get("max_from_14d_low_pct") or 28):
+    if already_late:
         action, phase = ("GEÇ", "rally_olmus") if score >= min_izle else ("GEÇ", "asiri_uzama")
+    elif (not layers.get("ignition")) and from_low_pct > float(
+        late.get("max_from_14d_low_pct") or 28
+    ):
+        action, phase = ("GEÇ", "rally_olmus") if score >= min_izle else ("GEÇ", "asiri_uzama")
+    elif layers.get("ignition") and ig_cfg.get("promote_al", True) and not already_late:
+        # Dip şartı olmadan erken gainer ateşlemesi → AL
+        action, phase = "AL", "ignition"
+        score = max(score, min_al)
     elif (
         score >= min_al
         and vol_ok
@@ -2119,11 +2298,16 @@ def analyze_symbol(
         action, phase = "YOK", "sinyal_yok"
 
     if action == "AL":
-        if not (vol_ok or (pump.get("vol_zero_to_pos") or {}).get("ok")):
+        ign_ok = bool(layers.get("ignition"))
+        if not (vol_ok or (pump.get("vol_zero_to_pos") or {}).get("ok") or ign_ok):
             action, phase = "İZLE", "eksik_hacim"
-        elif from_low_pct > near_max * 1.5:
+        elif (not ign_ok) and from_low_pct > near_max * 1.5:
             action, phase = "İZLE", "dip_uzak"
-        elif rsi_1h is not None and rsi_1h > 60:
+        elif ign_ok and ig_cfg.get("relax_from_low", True):
+            max_ig_low = float(ig_cfg.get("max_from_low_pct") or 35)
+            if from_low_pct > max_ig_low:
+                action, phase = "İZLE", "ign_dip_uzak"
+        elif rsi_1h is not None and rsi_1h > 60 and not ign_ok:
             action, phase = "İZLE", "rsi_sicak"
         elif chg24 > float(early.get("max_24h_change_pct") or 6) + 2:
             action, phase = "GEÇ", "24s_kacmis"
@@ -2177,12 +2361,13 @@ def format_report(rows: list[Analysis], top: int, regime: dict[str, Any] | None 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     als = [r for r in rows if r.action == "AL"]
     ucs = [r for r in als if r.is_uc]
+    igns = [r for r in als if (r.layers or {}).get("ignition")]
     izles = [r for r in rows if r.action == "İZLE"]
     gec = [r for r in rows if r.action == "GEÇ"]
     lines = [
         f"BINANCE DİP AL RADARI v2.1 · {now}",
         f"Tarama: {len(rows)} aday | 🟢AL={len(als)} 🚀UÇ={len(ucs)} "
-        f"🟡İZLE={len(izles)} 🔴GEÇ={len(gec)}",
+        f"⚡IGN={len(igns)} 🟡İZLE={len(izles)} 🔴GEÇ={len(gec)}",
     ]
     if regime:
         lines.append(
@@ -3744,7 +3929,9 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             pos["peak"] = peak
         pnl_pct = (price / entry - 1.0) * 100.0
         peak_gain = (peak / entry - 1.0) * 100.0
-        is_runner = bool(pos.get("runner") or pos.get("sold_tp1")) and keep_runner
+        # ignition pozisyonları kendi keep_runner bayrağını taşır
+        pos_keep = bool(pos.get("keep_runner", keep_runner))
+        is_runner = bool(pos.get("runner") or pos.get("sold_tp1")) and pos_keep
         trail = dynamic_trail_pct(trade_cfg, peak_gain, runner=is_runner)
         from_peak_pct = (price / peak - 1.0) * 100.0 if peak > 0 else 0.0
 
@@ -3824,7 +4011,7 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
 
         # ========== 4) SCALP: trail zirve-%1 + TP +%2 (runner kapalı) ==========
         # kâr ≥ trail_activate olduktan sonra zirveden -trail sat
-        if (not keep_runner) and peak_gain >= trail_activate and from_peak_pct <= -trail:
+        if (not pos_keep) and peak_gain >= trail_activate and from_peak_pct <= -trail:
             do_sell(
                 base,
                 pos,
@@ -3840,7 +4027,7 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
             (not pos.get("sold_tp1"))
             and pnl_pct >= tp_bank
             and 0 < partial_frac < 0.999
-            and keep_runner
+            and pos_keep
         ):
             do_sell(
                 base,
@@ -3849,6 +4036,23 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                 f"🎯 TP1 banka%{partial_frac*100:.0f} +%{pnl_pct:.2f} → runner kalır",
                 "SELL_TP1",
                 frac=partial_frac,
+            )
+            continue
+
+        # Ignition: +2 banka → %40 sat, kalanı runner (%28 hedef)
+        if (
+            pos_keep
+            and pos.get("ignition")
+            and (not pos.get("sold_tp1"))
+            and pnl_pct >= tp_bank
+        ):
+            do_sell(
+                base,
+                pos,
+                price,
+                f"🎯 IGN TP1%40 +%{pnl_pct:.2f} → runner~%{pos.get('runner_tp_pct', runner_tp)}",
+                "SELL_TP1",
+                frac=0.40,
             )
             continue
 
@@ -4194,12 +4398,20 @@ def manage_entries(
             runner_tp_pct = float(
                 (trade_cfg.get("runner_tp_pct") or wr.get("runner_tp_pct") or 40.0)
             )
-            # UÇ tahmini varsa runner hedefini ona çek (en az %15)
+            # UÇ / ignition tahmini varsa runner hedefini ona çek
             if sig.upside_est_pct and float(sig.upside_est_pct) >= 15:
                 runner_tp_pct = max(runner_tp_pct, float(sig.upside_est_pct))
+            ig_cfg = cfg.get("ignition") or {}
+            if (sig.layers or {}).get("ignition"):
+                runner_tp_pct = max(
+                    runner_tp_pct, float(ig_cfg.get("runner_tp_pct") or 28)
+                )
             tp2 = round(entry * (1.0 + runner_tp_pct / 100.0), 10)
             edge = float((sig.layers or {}).get("edge_score") or compute_edge_score(sig, regime))
             ly = sig.layers or {}
+            keep_run = bool(trade_cfg.get("keep_runner", False))
+            if ly.get("ignition") and ig_cfg.get("keep_runner", True):
+                keep_run = True
             positions[sig.base] = {
                 "symbol": symbol,
                 "entry": entry,
@@ -4213,6 +4425,8 @@ def manage_entries(
                 "pump_score": sig.pump_score,
                 "edge_score": edge,
                 "is_uc": sig.is_uc,
+                "ignition": bool(ly.get("ignition")),
+                "keep_runner": keep_run,
                 "cex_count": int(ly.get("cex_count") or 0),
                 "sector": coin_sector(sig.base),
                 "spread_pct": round(sp, 3),
