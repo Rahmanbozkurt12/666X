@@ -473,12 +473,14 @@ def get_json(url: str, params: dict[str, Any] | None = None, timeout: int = 30) 
     return r.json()
 
 
-# data-api.binance.vision bazen 418 (IP/WAF) döner → resmi API'ye düş
+# data-api.binance.vision bazen 418 (IP/WAF) döner → diğer host'lara düş
 BINANCE_PUBLIC_BASES: list[str] = [
     "https://data-api.binance.vision",
     "https://api.binance.com",
     "https://api1.binance.com",
     "https://api2.binance.com",
+    "https://api3.binance.com",
+    "https://api4.binance.com",
 ]
 
 
@@ -489,8 +491,9 @@ def get_json_failover(
     bases: list[str] | None = None,
     timeout: int = 30,
     prefer: str | None = None,
+    retries: int = 2,
 ) -> Any:
-    """Public GET: 418/429/5xx olursa diğer Binance host'una geç."""
+    """Public GET: 418/429/5xx olursa diğer Binance host'una geç + kısa bekle."""
     ordered: list[str] = []
     if prefer:
         ordered.append(prefer.rstrip("/"))
@@ -499,27 +502,39 @@ def get_json_failover(
         if b not in ordered:
             ordered.append(b)
     last_exc: Exception | None = None
-    for base in ordered:
-        url = f"{base}{path}"
-        try:
-            r = HTTP.get(url, params=params or {}, timeout=timeout)
-            if r.status_code in {418, 429, 403, 451} or r.status_code >= 500:
-                last_exc = RuntimeError(f"{r.status_code} {base}")
-                print(f"[api] {r.status_code} {base} → yedek deneniyor…", file=sys.stderr)
-                time.sleep(0.4)
+    for attempt in range(max(1, retries)):
+        if attempt > 0:
+            wait = 2.5 * attempt
+            print(f"[api] 418/ban → {wait:.0f}s bekleyip yeniden…", file=sys.stderr)
+            time.sleep(wait)
+        for base in ordered:
+            url = f"{base}{path}"
+            try:
+                r = HTTP.get(url, params=params or {}, timeout=timeout)
+                if r.status_code in {418, 429, 403, 451} or r.status_code >= 500:
+                    last_exc = RuntimeError(f"{r.status_code} {base}")
+                    print(f"[api] {r.status_code} {base} → yedek deneniyor…", file=sys.stderr)
+                    time.sleep(0.6 + 0.3 * attempt)
+                    continue
+                r.raise_for_status()
+                if attempt > 0 or base != (prefer or "").rstrip("/"):
+                    print(f"[api] OK {base}{path}", flush=True)
+                return r.json()
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                print(f"[api] hata {base}: {exc.__class__.__name__} → yedek…", file=sys.stderr)
+                time.sleep(0.5)
                 continue
-            r.raise_for_status()
-            return r.json()
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
-            print(f"[api] hata {base}: {exc.__class__.__name__} → yedek…", file=sys.stderr)
-            time.sleep(0.4)
-            continue
-    raise RuntimeError(f"Binance public API başarısız ({path}): {last_exc}")
+    raise RuntimeError(
+        f"Binance public API başarısız ({path}): {last_exc}\n"
+        "  → 418 = IP geçici ban / WAF (çok istek).\n"
+        "  → 3–10 dk bekle veya WiFi/VPN değiştir, botu tekrar aç.\n"
+        "  → Çok fazla bot/tarayıcı aynı anda Binance’e vuruyor olabilir."
+    )
 
 
 def pick_working_rest_base(prefer: str | None = None) -> str:
-    """Çalışan public base seç (exchangeInfo ile test)."""
+    """Çalışan public base seç (ping + hafif exchangeInfo)."""
     ordered: list[str] = []
     if prefer:
         ordered.append(prefer.rstrip("/"))
@@ -529,7 +544,11 @@ def pick_working_rest_base(prefer: str | None = None) -> str:
     for base in ordered:
         try:
             r = HTTP.get(f"{base}/api/v3/ping", timeout=10)
-            if r.status_code == 200:
+            if r.status_code != 200:
+                continue
+            # exchangeInfo ağır — sadece time ile doğrula
+            r2 = HTTP.get(f"{base}/api/v3/time", timeout=10)
+            if r2.status_code == 200:
                 if base != (prefer or "").rstrip("/"):
                     print(f"[api] rest_base → {base}", flush=True)
                 return base
@@ -3744,7 +3763,31 @@ def signed_request(
 
 
 def load_lot_filters(rest_base: str) -> dict[str, dict[str, float]]:
-    info = get_json_failover("/api/v3/exchangeInfo", prefer=rest_base)
+    """exchangeInfo — 418 olursa birkaç tur bekleyip yeniden dener."""
+    info = None
+    last_err: Exception | None = None
+    for i in range(3):
+        try:
+            info = get_json_failover(
+                "/api/v3/exchangeInfo", prefer=rest_base, retries=2, timeout=45
+            )
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            wait = 5 * (i + 1)
+            print(
+                f"[api] exchangeInfo fail ({exc.__class__.__name__}) → {wait}s bekleniyor…",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+    if info is None:
+        raise RuntimeError(
+            "exchangeInfo alınamadı (418 IP ban olası).\n"
+            "  1) 5–15 dakika bekle\n"
+            "  2) VPN / mobil hotspot dene\n"
+            "  3) Aynı anda birden fazla bot çalıştırma\n"
+            f"  Son hata: {last_err}"
+        ) from last_err
     out: dict[str, dict[str, float]] = {}
     for s in info.get("symbols", []):
         sym = s["symbol"]
