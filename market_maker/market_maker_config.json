@@ -1,0 +1,29 @@
+{
+    "exchange": {
+        "api_key": "",
+        "api_secret": "",
+        "testnet": true,
+        "symbol": "BTC/USDT",
+        "base_asset": "BTC",
+        "quote_asset": "USDT"
+    },
+    "trading": {
+        "total_capital": 500.0,
+        "max_inventory_ratio": 0.2,
+        "max_drawdown_ratio": 0.03,
+        "base_spread_ticks": 3.0,
+        "volatility_multiplier": 4.0,
+        "inventory_skew_strength": 3.0,
+        "min_order_lifetime": 10.0,
+        "max_order_replace_freq": 30,
+        "min_base_balance": 0.0001,
+        "min_quote_balance": 5.0,
+        "allow_short_selling": false
+    },
+    "risk": {
+        "risk_aversion": 0.1,
+        "market_impact": 0.01,
+        "time_horizon": 1.0,
+        "use_avellaneda": true
+    }
+}
