@@ -4913,6 +4913,11 @@ def manage_entries(
         r.layers["winrate_gate"] = why
         if not ok:
             return False
+        mom_ok, mom_why = passes_momentum_entry(r, cfg, regime)
+        r.layers["mom_gate"] = mom_why
+        if not mom_ok:
+            r.layers["winrate_gate"] = f"mom:{mom_why}"
+            return False
         if not wr.get("enabled", True):
             # klasik UÇ fallback
             if require_uc and not r.is_uc:
@@ -5372,7 +5377,8 @@ def main() -> int:
             f"[scalp] ON · TP≥%{wr.get('quick_tp_pct')} · STOP%-{wr.get('hard_stop_pct')} · "
             f"TRAIL%-{wr.get('peak_trail_pct')} · edge≥{wr.get('min_edge_score')} · "
             f"CEX≥{wr.get('require_cex_min')} · confirm≥{wr.get('confirm_cycles')} · "
-            f"time≤{wr.get('time_stop_minutes')}dk · poll={cfg.get('poll_seconds')}s"
+            f"time≤{wr.get('time_stop_minutes')}dk · poll={cfg.get('poll_seconds')}s · "
+            f"mom_entry={'ON' if wr.get('require_momentum_entry', True) else 'OFF'}"
         )
     cf = cfg.get("chain_flow") or {}
     if cf.get("enabled", True):
