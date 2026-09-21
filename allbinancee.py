@@ -9,9 +9,8 @@ Binance Dip AL Radar + GERÇEK al/sat (tek dosya).
 Kurallar (SCALP / hızlı kâr):
   • 16 CEX hacim + Binance derin analiz
   • DefiLlama zincir para akışı + DexScreener hot token / DEX hacim
-  • Hedef: ~45 dk içinde net ≈+%2.5 kâr (fee üstü)
-  • Entry -%1.2 → STOP | +%1.5 sonrası trail | +%2.5 → TP
-  • Time-stop sadece fee üstü kârda satar (düz/zararda fee yakmaz)
+  • Hedef: ~+%2 TP · stop −%1 · trail · max tutma 60 dk
+  • Entry -%1 → STOP | zirve trail | +%2 → TP | 1 saat dolunca ZORLA sat
   • Tarama ~180s (ban/rate-limit koruması)
 """
 
@@ -128,85 +127,85 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tp2_pct": 14.0,
         "use_pump_tp": True,
     },
-    # SCALP fee-safe: az işlem · TP fee üstü · erken trail/time-stop fee yakmaz
+    # SCALP hızlı al-sat · max tutma 60 dk
     "winrate": {
         "enabled": True,
-        "min_edge_score": 62.0,
-        "min_score": 60.0,
-        "min_pump_score": 52.0,
+        "min_edge_score": 55.0,
+        "min_score": 55.0,
+        "min_pump_score": 48.0,
         "require_uc": False,
         "strong_al_fallback": True,
-        "strong_al_min_score": 65.0,
-        "strong_al_min_pump": 55.0,
+        "strong_al_min_score": 60.0,
+        "strong_al_min_pump": 50.0,
         "require_cex_min": 0,
-        "max_spread_pct": 0.18,  # geniş spread = fee+kayma
-        "max_from_low_pct": 14.0,
-        "max_24h_change_pct": 5.0,
-        "min_24h_change_pct": -15.0,
-        "rsi_min": 25.0,
-        "rsi_max": 58.0,
-        "require_vol_turn": True,  # boş scalp azalt
+        "max_spread_pct": 0.22,
+        "max_from_low_pct": 16.0,
+        "max_24h_change_pct": 6.0,
+        "min_24h_change_pct": -16.0,
+        "rsi_min": 24.0,
+        "rsi_max": 60.0,
+        "require_vol_turn": False,
         "require_btc_supportive": True,
-        "min_quote_volume_usdt": 600000,
+        "min_quote_volume_usdt": 500000,
         "confirm_cycles": 1,
-        "max_buy_per_cycle": 1,  # gece fee birikmesin
+        "max_buy_per_cycle": 2,
         "max_per_sector": 1,
-        "max_positions": 2,
-        "deploy_pct": 0.85,
+        "max_positions": 3,
+        "deploy_pct": 0.90,
         "partial_tp_frac": 1.0,
-        "breakeven_after_pct": 1.20,  # erken BE = fee kaybı
-        "hard_stop_pct": 1.2,
-        "max_loss_pct": 1.2,
-        "quick_tp_pct": 2.5,  # net hedef fee sonrası ~+%2+
-        "min_net_tp_pct": 2.20,
+        "breakeven_after_pct": 0.80,
+        "hard_stop_pct": 1.0,
+        "max_loss_pct": 1.0,
+        "quick_tp_pct": 2.0,
+        "min_net_tp_pct": 1.80,
         "keep_runner": False,
         "runner_trail_pct": 1.0,
         "runner_trail_tight_pct": 1.0,
         "runner_tighten_after_pct": 3.0,
         "runner_tp_pct": 8.0,
         "runner_time_stop_minutes": 60,
-        "peak_trail_pct": 0.80,
-        "peak_trail_tight_pct": 0.60,
-        "trail_tighten_after_pct": 3.0,
-        "trail_activate_pct": 1.50,  # +%0.5'te trail = kârı keser
-        "time_stop_minutes": 45,
-        "time_stop_min_pnl_pct": 0.40,  # fee üstü değilse TIME satma
+        "peak_trail_pct": 1.0,
+        "peak_trail_tight_pct": 0.80,
+        "trail_tighten_after_pct": 2.5,
+        "trail_activate_pct": 0.80,
+        "time_stop_minutes": 60,  # 1 saatten fazla tutma → zorla sat
+        "time_stop_min_pnl_pct": -99.0,  # süre dolunca PnL bakmadan çık
     },
     "trade": {
         "enabled": True,
-        "max_positions": 2,
-        "deploy_pct": 0.85,
-        "min_order_usdt": 15.0,
+        "max_positions": 3,
+        "deploy_pct": 0.90,
+        "min_order_usdt": 12.0,
         "tp1_sell_pct": 1.0,
         "prefer_uc": False,
         "also_buy_izle": False,
         "require_uc": False,
         "require_cex_min": 0,
-        "izle_min_score": 60.0,
-        "izle_min_pump": 50.0,
-        "izle_max_24h_pct": 5.0,
+        "izle_min_score": 55.0,
+        "izle_min_pump": 45.0,
+        "izle_max_24h_pct": 6.0,
         "trade_base": "https://api.binance.com",
         "recv_window": 60000,
         "fee_rate_pct": 0.10,
         "bnb_fee_discount": True,
-        "fee_buffer_pct": 0.25,
-        "hard_stop_pct": 1.2,
-        "max_loss_pct": 1.2,
-        "peak_trail_pct": 0.80,
-        "peak_trail_tight_pct": 0.60,
-        "trail_tighten_after_pct": 3.0,
-        "trail_activate_pct": 1.50,
-        "quick_tp_pct": 2.5,
-        "min_net_tp_pct": 2.20,
-        "time_stop_minutes": 45,
-        "time_stop_min_pnl_pct": 0.40,
-        "max_buy_per_cycle": 1,
+        "fee_buffer_pct": 0.20,
+        "hard_stop_pct": 1.0,
+        "max_loss_pct": 1.0,
+        "peak_trail_pct": 1.0,
+        "peak_trail_tight_pct": 0.80,
+        "trail_tighten_after_pct": 2.5,
+        "trail_activate_pct": 0.80,
+        "quick_tp_pct": 2.0,
+        "min_net_tp_pct": 1.80,
+        "time_stop_minutes": 60,
+        "time_stop_min_pnl_pct": -99.0,
+        "max_buy_per_cycle": 2,
         "max_per_sector": 1,
         "use_limit_orders": True,
-        "limit_wait_sec": 2.5,
+        "limit_wait_sec": 2.0,
         "spread_tp_boost": True,
         "partial_tp_frac": 1.0,
-        "breakeven_after_pct": 1.20,
+        "breakeven_after_pct": 0.80,
         "keep_runner": False,
         "runner_trail_pct": 1.0,
         "runner_trail_tight_pct": 1.0,
@@ -3022,12 +3021,12 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                     age_m = (now - datetime.fromisoformat(str(opened))).total_seconds() / 60.0
                 except ValueError:
                     age_m = 0.0
-                if age_m >= runner_time_m and pnl_pct < max(8.0, tp_bank * 3):
+                if age_m >= runner_time_m:
                     do_sell(
                         base,
                         pos,
                         price,
-                        f"⏱ RUNNER TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f}",
+                        f"⏱ RUNNER MAX1H {age_m:.0f}dk PnL%{pnl_pct:+.2f}",
                         "SELL_TIME",
                         force_all=True,
                     )
@@ -3081,40 +3080,17 @@ def manage_exits(account: BinanceAccount, state: dict[str, Any], cfg: dict[str, 
                 age_m = (now - datetime.fromisoformat(str(opened))).total_seconds() / 60.0
             except ValueError:
                 age_m = 0.0
+            # 1 saat+ → PnL'e bakmadan coinden çık (hızlı al-sat)
             if age_m >= time_stop_m:
-                # FEE-SAFE: düz/zararda TIME satma → komisyon yakma
-                # sadece fee+buffer üstü kârda veya stop'a çok yakınsa çık
-                time_min = float(
-                    trade_cfg.get("time_stop_min_pnl_pct")
-                    if trade_cfg.get("time_stop_min_pnl_pct") is not None
-                    else min_gross
+                do_sell(
+                    base,
+                    pos,
+                    price,
+                    f"⏱ MAX1H {age_m:.0f}dk PnL%{pnl_pct:+.2f} → zorla çık",
+                    "SELL_TIME",
+                    force_all=True,
                 )
-                time_min = max(time_min, min_gross * 0.5)
-                near_stop = pnl_pct <= -(hard_stop * 0.85)
-                if pnl_pct >= time_min:
-                    do_sell(
-                        base,
-                        pos,
-                        price,
-                        f"⏱ TIME {age_m:.0f}dk PnL%{pnl_pct:+.2f} (≥fee%{time_min:.2f})",
-                        "SELL_TIME",
-                        force_all=True,
-                    )
-                    continue
-                if near_stop:
-                    do_sell(
-                        base,
-                        pos,
-                        price,
-                        f"⏱ TIME+STOPYAKIN {age_m:.0f}dk PnL%{pnl_pct:+.2f}",
-                        "SELL_TIME",
-                        force_all=True,
-                    )
-                    continue
-                notes.append(
-                    f"⏳ {base} TIME {age_m:.0f}dk ama PnL%{pnl_pct:+.2f}<fee%{time_min:.2f} "
-                    "→ tut (fee yakma)"
-                )
+                continue
 
     for b in closed:
         positions.pop(b, None)
