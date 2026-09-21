@@ -1,0 +1,52 @@
+{
+  "rest_base": "https://data-api.binance.vision",
+  "futures_base": "https://fapi.binance.com",
+  "quote": "USDT",
+  "workers": 16,
+  "poll_seconds": 180,
+  "min_quote_volume_usdt": 500000,
+  "max_binance_symbols": 250,
+  "cex_ids": [
+    "binance",
+    "okx",
+    "bybit",
+    "bitget",
+    "gate",
+    "kucoin",
+    "mexc",
+    "coinbase"
+  ],
+  "cex_max_symbols": 50,
+  "cex_ohlcv_limit": 28,
+  "cex_workers": 8,
+  "min_cex_confluence": 3,
+  "core": {
+    "near_low_days": 14,
+    "near_low_max_pct": 8.0,
+    "min_24h_pct": -15.0,
+    "max_24h_pct": 5.0,
+    "vol_quiet_bars": 14,
+    "vol_turn_mult": 1.7,
+    "vol_rise_mult": 1.4
+  },
+  "confirm": {
+    "rsi_min": 30.0,
+    "rsi_max": 55.0,
+    "btc_dump_pct": -3.0,
+    "max_funding": 0.0003
+  },
+  "late": {
+    "max_24h_pct": 12.0,
+    "max_from_low_pct": 20.0
+  },
+  "risk": {
+    "stop_buffer_pct": 1.5,
+    "tp1_pct": 8.0,
+    "tp2_pct": 25.0,
+    "account_risk_pct": 1.0
+  },
+  "skip_bases": [
+    "WBTC", "WETH", "BTCB", "WBETH", "BETH", "RLUSD", "USDC", "FDUSD",
+    "TUSD", "DAI", "BUSD", "USDP", "EUR", "U", "USD0", "USDD", "XAUT", "PAXG"
+  ]
+}
