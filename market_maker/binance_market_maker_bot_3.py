@@ -34,6 +34,20 @@ def get_client_id():
 # EXTERNAL CONFIG FILE HANDLER
 # ============================================================================
 
+# Varsayılan: bakiyeyi 8'e böl, 8 likit USDT pair'de al/sat
+DEFAULT_SYMBOLS = [
+    "BTC/USDT",
+    "ETH/USDT",
+    "BNB/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT",
+    "ADA/USDT",
+    "AVAX/USDT",
+]
+DEFAULT_BALANCE_SLOTS = 8
+
+
 class ConfigFile:
     """Handler for external configuration file"""
     
@@ -46,18 +60,21 @@ class ConfigFile:
                 "api_secret": "your_binance_api_secret_here",
                 "testnet": False,  # GERÇEK Binance spot
                 "symbol": "BTC/USDT",
+                "symbols": DEFAULT_SYMBOLS,
                 "base_asset": "BTC",
                 "quote_asset": "USDT"
             },
             "trading": {
-                "total_capital": 100.0,
-                "max_inventory_ratio": 0.15,
+                "total_capital": 0.0,
+                "balance_slots": DEFAULT_BALANCE_SLOTS,
+                "split_live_balance": True,
+                "max_inventory_ratio": 0.9,
                 "max_drawdown_ratio": 0.05,
                 "base_spread_ticks": 3.0,
                 "volatility_multiplier": 4.0,
                 "inventory_skew_strength": 3.0,
                 "min_order_lifetime": 10.0,
-                "min_base_balance": 0.001,
+                "min_base_balance": 0.0001,
                 "min_quote_balance": 5.0,
                 "allow_short_selling": False
             },
@@ -104,6 +121,7 @@ class Config:
     
     # Exchange Settings
     SYMBOL: str = "BTC/USDT"
+    SYMBOLS: List[str] = None  # type: ignore
     BASE_ASSET: str = "BTC"
     QUOTE_ASSET: str = "USDT"
     TICK_SIZE: float = 0.01
@@ -112,9 +130,11 @@ class Config:
     LOT_SIZE: float = 0.00001
     
     # Capital & Risk Management
-    TOTAL_CAPITAL: float = 329.0
-    MAX_INVENTORY_RATIO: float = 0.2
-    MAX_DRAWDOWN_RATIO: float = 0.03
+    TOTAL_CAPITAL: float = 0.0  # 0 = canlı bakiyeden hesapla
+    BALANCE_SLOTS: int = DEFAULT_BALANCE_SLOTS
+    SPLIT_LIVE_BALANCE: bool = True
+    MAX_INVENTORY_RATIO: float = 0.9
+    MAX_DRAWDOWN_RATIO: float = 0.05
     LIQUIDATION_BUFFER: float = 0.2
     
     # Strategy Parameters
@@ -135,7 +155,7 @@ class Config:
     QUEUE_AHEAD: bool = False
     
     # Position Management
-    MIN_BASE_BALANCE: float = 0.001
+    MIN_BASE_BALANCE: float = 0.0001
     MIN_QUOTE_BALANCE: float = 5.0
     ALLOW_SHORT_SELLING: bool = False
     
@@ -153,6 +173,10 @@ class Config:
     MAKER_FEE_RATE: float = 0.001
     TAKER_FEE_RATE: float = 0.001
     FEE_CURRENCY: str = ""
+
+    def __post_init__(self):
+        if self.SYMBOLS is None:
+            self.SYMBOLS = list(DEFAULT_SYMBOLS)
 
     @classmethod
     def from_file(cls, filename: str = "market_maker_config.json"):
@@ -175,20 +199,27 @@ class Config:
         ).strip()
         config.USE_TESTNET = exchange.get("testnet", False)
         config.SYMBOL = exchange.get("symbol", "BTC/USDT")
+        symbols = exchange.get("symbols")
+        if isinstance(symbols, list) and symbols:
+            config.SYMBOLS = [str(s).strip() for s in symbols if str(s).strip()]
+        else:
+            config.SYMBOLS = [config.SYMBOL]
         config.BASE_ASSET = exchange.get("base_asset", "BTC")
         config.QUOTE_ASSET = exchange.get("quote_asset", "USDT")
         
         # Load trading settings
         trading = config_data.get("trading", {})
-        config.TOTAL_CAPITAL = trading.get("total_capital", 329.0)
-        config.MAX_INVENTORY_RATIO = trading.get("max_inventory_ratio", 0.2)
-        config.MAX_DRAWDOWN_RATIO = trading.get("max_drawdown_ratio", 0.03)
+        config.TOTAL_CAPITAL = float(trading.get("total_capital", 0.0) or 0.0)
+        config.BALANCE_SLOTS = int(trading.get("balance_slots", DEFAULT_BALANCE_SLOTS) or DEFAULT_BALANCE_SLOTS)
+        config.SPLIT_LIVE_BALANCE = bool(trading.get("split_live_balance", True))
+        config.MAX_INVENTORY_RATIO = trading.get("max_inventory_ratio", 0.9)
+        config.MAX_DRAWDOWN_RATIO = trading.get("max_drawdown_ratio", 0.05)
         config.BASE_SPREAD_TICKS = trading.get("base_spread_ticks", 3.0)
         config.VOLATILITY_MULTIPLIER = trading.get("volatility_multiplier", 4.0)
         config.INVENTORY_SKEW_STRENGTH = trading.get("inventory_skew_strength", 3.0)
         config.MIN_ORDER_LIFETIME = trading.get("min_order_lifetime", 10.0)
         config.MAX_ORDER_REPLACE_FREQ = trading.get("max_order_replace_freq", 10.0)
-        config.MIN_BASE_BALANCE = trading.get("min_base_balance", 0.001)
+        config.MIN_BASE_BALANCE = trading.get("min_base_balance", 0.0001)
         config.MIN_QUOTE_BALANCE = trading.get("min_quote_balance", 5.0)
         config.ALLOW_SHORT_SELLING = trading.get("allow_short_selling", False)
         
@@ -200,6 +231,53 @@ class Config:
         config.USE_AVELLANEDA = risk.get("use_avellaneda", True)
         
         return config
+
+    def for_symbol(self, symbol: str, slot_capital: float) -> "Config":
+        """Clone config for one slot/symbol with allocated USDT."""
+        base = symbol.split("/")[0] if "/" in symbol else symbol.replace("USDT", "")
+        quote = symbol.split("/")[1] if "/" in symbol else self.QUOTE_ASSET
+        return Config(
+            API_KEY=self.API_KEY,
+            API_SECRET=self.API_SECRET,
+            USE_TESTNET=self.USE_TESTNET,
+            SYMBOL=symbol,
+            SYMBOLS=[symbol],
+            BASE_ASSET=base,
+            QUOTE_ASSET=quote,
+            TICK_SIZE=self.TICK_SIZE,
+            MIN_NOTIONAL=self.MIN_NOTIONAL,
+            MIN_QTY=self.MIN_QTY,
+            LOT_SIZE=self.LOT_SIZE,
+            TOTAL_CAPITAL=float(slot_capital),
+            BALANCE_SLOTS=1,
+            SPLIT_LIVE_BALANCE=False,
+            MAX_INVENTORY_RATIO=self.MAX_INVENTORY_RATIO,
+            MAX_DRAWDOWN_RATIO=self.MAX_DRAWDOWN_RATIO,
+            LIQUIDATION_BUFFER=self.LIQUIDATION_BUFFER,
+            BASE_SPREAD_TICKS=self.BASE_SPREAD_TICKS,
+            VOLATILITY_MULTIPLIER=self.VOLATILITY_MULTIPLIER,
+            INVENTORY_SKEW_STRENGTH=self.INVENTORY_SKEW_STRENGTH,
+            IMBALANCE_SKEW_STRENGTH=self.IMBALANCE_SKEW_STRENGTH,
+            RISK_AVERSION=self.RISK_AVERSION,
+            MARKET_IMPACT=self.MARKET_IMPACT,
+            TIME_HORIZON=self.TIME_HORIZON,
+            USE_AVELLANEDA=self.USE_AVELLANEDA,
+            MIN_ORDER_LIFETIME=self.MIN_ORDER_LIFETIME,
+            MAX_ORDER_REPLACE_FREQ=self.MAX_ORDER_REPLACE_FREQ,
+            QUEUE_AHEAD=self.QUEUE_AHEAD,
+            MIN_BASE_BALANCE=self.MIN_BASE_BALANCE,
+            MIN_QUOTE_BALANCE=self.MIN_QUOTE_BALANCE,
+            ALLOW_SHORT_SELLING=self.ALLOW_SHORT_SELLING,
+            WS_RECONNECT_DELAY=self.WS_RECONNECT_DELAY,
+            API_TIMEOUT=self.API_TIMEOUT,
+            RATE_LIMIT_BUFFER=self.RATE_LIMIT_BUFFER,
+            PRICE_HISTORY_SIZE=self.PRICE_HISTORY_SIZE,
+            TRADE_HISTORY_SIZE=self.TRADE_HISTORY_SIZE,
+            VOLATILITY_WINDOW=self.VOLATILITY_WINDOW,
+            MAKER_FEE_RATE=self.MAKER_FEE_RATE,
+            TAKER_FEE_RATE=self.TAKER_FEE_RATE,
+            FEE_CURRENCY=self.FEE_CURRENCY,
+        )
     
     @property
     def max_inventory_usd(self) -> float:
@@ -739,9 +817,10 @@ class WebSocketManager:
 # ============================================================================
 
 class MarketMakerBot:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, client: Optional[BinanceCCXTClient] = None, owns_client: bool = True):
         self.config = config
-        self.client = BinanceCCXTClient(config.API_KEY, config.API_SECRET, testnet=config.USE_TESTNET)
+        self.owns_client = owns_client and client is None
+        self.client = client or BinanceCCXTClient(config.API_KEY, config.API_SECRET, testnet=config.USE_TESTNET)
         self.ws_manager = None
         
         # Market State
@@ -753,6 +832,7 @@ class MarketMakerBot:
         self.position = Position(config.SYMBOL)
         self.balance = Balance()
         self.starting_balance = config.TOTAL_CAPITAL
+        self.slot_capital = float(config.TOTAL_CAPITAL)  # bu pair için ayrılan USDT (bakiye/8)
         self.max_drawdown = 0.0
         self.kill_switch_active = False
         
@@ -783,7 +863,7 @@ class MarketMakerBot:
         
         # Logging
         logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(f"{__name__}.{config.SYMBOL}")
     
     async def initialize_fees(self):
         """Initialize fee information from exchange"""
@@ -819,13 +899,14 @@ class MarketMakerBot:
             except Exception as e:
                 self.logger.error(f"Error refreshing fees: {e}")
 
-    async def start(self):
+    async def start(self, initialize_client: bool = True):
         """Start the market maker bot"""
-        self.logger.info("Starting Binance Market Maker Bot with CCXT")
+        self.logger.info(f"Starting MM {self.config.SYMBOL} | slot=${self.slot_capital:.2f}")
         
-        if not await self.client.initialize():
-            self.logger.error("Failed to initialize CCXT client")
-            return
+        if initialize_client:
+            if not await self.client.initialize():
+                self.logger.error("Failed to initialize CCXT client")
+                return
         
         await self.load_market_info()
         await self.initialize_market_data()
@@ -839,8 +920,6 @@ class MarketMakerBot:
     async def load_market_info(self):
         """Load market information from exchange"""
         try:
-            await asyncio.sleep(1)
-            
             symbol_formats = [
                 self.config.SYMBOL,
                 f"{self.config.BASE_ASSET}/{self.config.QUOTE_ASSET}",
@@ -1048,8 +1127,12 @@ class MarketMakerBot:
 
     
     def can_place_buy_order(self, order_size: float, price: float) -> bool:
-        """Check if we can place a buy order"""
+        """Check if we can place a buy order (slot bütçesi ile sınırlı)"""
         required_quote = order_size * price * 1.01
+        slot_budget = max(self.slot_capital, self.config.TOTAL_CAPITAL)
+        
+        if required_quote > slot_budget * 1.05:
+            return False
         
         if self.balance.quote_free < required_quote:
             return False
@@ -1431,7 +1514,7 @@ class MarketMakerBot:
     # The problem is in calculate_order_sizes() method - it's too restrictive with balance checks
 
     def calculate_order_sizes(self) -> Tuple[float, float]:
-        """Calculate order sizes based on capital, risk, and available balance - FIXED"""
+        """Her pair için slot sermayesi = toplam bakiye / 8 — o tutarla al/sat."""
         if self.market_state.mid_price <= 0:
             self.logger.warning("Invalid mid price for size calculation")
             return 0.0, 0.0
@@ -1441,78 +1524,56 @@ class MarketMakerBot:
             min_notional = float(self.min_notional)
             min_qty = float(self.min_qty)
             
-            # Calculate base order size - make it more aggressive for small accounts
-            total_capital = float(self.config.TOTAL_CAPITAL)
+            # Slot = bu coin için ayrılan USDT (bakiye/8)
+            slot_usdt = float(self.slot_capital or self.config.TOTAL_CAPITAL)
+            if slot_usdt <= 0:
+                slot_usdt = float(self.balance.quote_free) / max(1, self.config.BALANCE_SLOTS)
             
-            # Use a higher percentage of capital per order for better liquidity provision
-            base_notional = max(min_notional * 2.0, total_capital * 0.01)  # 1% of capital or 2x min notional
-            base_size = base_notional / mid_price
+            # Emir notional ≈ slot'un ~90%'ı (min notional üstü)
+            target_notional = max(min_notional * 1.05, slot_usdt * 0.90)
+            base_size = target_notional / mid_price
             
-            # Ensure minimum size requirements
-            base_size = max(base_size, max(base_notional / mid_price, min_qty))  
-            
-            # Apply inventory factor but don't make it too restrictive
-            max_inventory_usd = float(self.config.max_inventory_usd)
-            max_inventory = max_inventory_usd / mid_price
-            current_inventory = abs(float(self.position.quantity))
-            
-            # Less restrictive inventory factor
-            inventory_factor = max(0.3, 1.0 - (current_inventory / max_inventory * 0.5)) if max_inventory > 0 else 0.8
-            
-            base_size = base_size * inventory_factor
-            
-            # Apply position skew but keep it reasonable
+            # Envanter skew (hafif)
             inventory_pos = self.get_inventory_position()
-            bid_size = base_size * max(0.5, 1.0 + float(inventory_pos) * 0.2)  # Don't go below 50% of base size
-            ask_size = base_size * max(0.5, 1.0 - float(inventory_pos) * 0.2)
+            bid_size = base_size * max(0.5, 1.0 + float(inventory_pos) * 0.15)
+            ask_size = base_size * max(0.5, 1.0 - float(inventory_pos) * 0.15)
             
-            # Check balance availability - but be less restrictive
-            max_buy_notional = self.balance.quote_free * 0.8  # Use 80% instead of 95%
-            max_buy_size = max_buy_notional / mid_price if mid_price > 0 else 0
-            
-            if max_buy_size > min_qty:  # Only limit if we have reasonable balance
+            # AL: slot + serbest USDT ile sınırla
+            max_buy_notional = min(float(self.balance.quote_free) * 0.95, slot_usdt)
+            max_buy_size = max_buy_notional / mid_price if mid_price > 0 else 0.0
+            if max_buy_size >= min_qty and max_buy_notional >= min_notional:
                 bid_size = min(bid_size, max_buy_size)
-            elif max_buy_size > 0:
-                bid_size = max_buy_size  # Use whatever we have if it's above minimum
             else:
                 bid_size = 0.0
             
-            max_sell_size = self.balance.base_free * 0.8  # Use 80% instead of 95%
-            if max_sell_size > min_qty:
+            # SAT: eldeki base (slot kadar USDT değerine kadar)
+            max_sell_notional = slot_usdt
+            max_sell_by_budget = max_sell_notional / mid_price if mid_price > 0 else 0.0
+            max_sell_size = min(float(self.balance.base_free) * 0.95, max_sell_by_budget)
+            if max_sell_size >= min_qty and (max_sell_size * mid_price) >= min_notional:
                 ask_size = min(ask_size, max_sell_size)
-            elif max_sell_size > 0:
-                ask_size = max_sell_size
+            elif max_sell_size > 0 and float(self.balance.base_free) >= min_qty:
+                # Min notional altındaysa satılabilir kadar koy (bakiye varsa)
+                ask_size = max_sell_size if (max_sell_size * mid_price) >= min_notional else 0.0
             else:
                 ask_size = 0.0
             
-            # Final minimum notional check - but don't zero out sizes
-            bid_notional = bid_size * mid_price
-            ask_notional = ask_size * mid_price
-            
-            if bid_size > 0 and bid_notional < min_notional:
-                required_size = min_notional / mid_price
-                if self.balance.quote_free >= min_notional * 1.1:
-                    bid_size = required_size
-                # Don't zero out - keep the size we calculated
-            
-            if ask_size > 0 and ask_notional < min_notional:
-                required_size = min_notional / mid_price
-                if self.balance.base_free >= required_size:
-                    ask_size = required_size
-                # Don't zero out - keep the size we calculated
-            
-            # Round to lot size
             bid_size = self.round_to_lot_size(bid_size) if bid_size > 0 else 0.0
             ask_size = self.round_to_lot_size(ask_size) if ask_size > 0 else 0.0
             
-            # Ensure we have reasonable sizes
-            bid_size = max(0.0, float(bid_size))
-            ask_size = max(0.0, float(ask_size))
+            # Son min-notional kontrolü
+            if bid_size > 0 and bid_size * mid_price < min_notional:
+                bid_size = 0.0
+            if ask_size > 0 and ask_size * mid_price < min_notional:
+                ask_size = 0.0
             
-            self.logger.debug(f"Calculated sizes: bid={bid_size:.8f}, ask={ask_size:.8f}, "
-                            f"bid_notional=${bid_size * mid_price:.2f}, ask_notional=${ask_size * mid_price:.2f}")
+            self.logger.debug(
+                f"[{self.config.SYMBOL}] slot=${slot_usdt:.2f} "
+                f"bid={bid_size:.8f} (${bid_size * mid_price:.2f}) "
+                f"ask={ask_size:.8f} (${ask_size * mid_price:.2f})"
+            )
             
-            return bid_size, ask_size
+            return max(0.0, float(bid_size)), max(0.0, float(ask_size))
             
         except Exception as e:
             self.logger.error(f"Error calculating order sizes: {e}")
@@ -1695,16 +1756,17 @@ class MarketMakerBot:
     
     async def shutdown(self):
         """Gracefully shutdown the bot"""
-        self.logger.info("Shutting down market maker bot...")
+        self.logger.info(f"Shutting down {self.config.SYMBOL}...")
         
         await self.cancel_all_orders()
         
         if self.ws_manager:
             self.ws_manager.running = False
         
-        await self.client.close()
+        if self.owns_client:
+            await self.client.close()
         
-        self.logger.info("Bot shutdown complete")
+        self.logger.info(f"{self.config.SYMBOL} shutdown complete")
     
     async def print_status(self):
         """Print current status to console - ENHANCED WITH REALIZED P&L"""
@@ -1763,17 +1825,95 @@ class MarketMakerBot:
 # MAIN EXECUTION WITH CONFIG FILE SUPPORT
 # ============================================================================
 
+async def resolve_slot_capitals(client: BinanceCCXTClient, config: Config) -> Tuple[float, float, List[str]]:
+    """Canlı USDT bakiyesini balance_slots'a böl; symbols listesini döndür."""
+    symbols = list(config.SYMBOLS or [config.SYMBOL])
+    slots = max(1, int(config.BALANCE_SLOTS or len(symbols) or DEFAULT_BALANCE_SLOTS))
+    # Slot sayısı = min(8, symbols) — fazla coin varsa ilk N
+    if len(symbols) > slots:
+        symbols = symbols[:slots]
+    elif len(symbols) < slots and len(symbols) == 1:
+        # Tek symbol verilmişse DEFAULT_SYMBOLS ile doldur
+        symbols = list(DEFAULT_SYMBOLS[:slots])
+
+    quote = config.QUOTE_ASSET or "USDT"
+    live_quote = 0.0
+    bal = await client.get_account_balance()
+    if bal:
+        live_quote = float(bal.get("free", {}).get(quote, 0.0) or 0.0)
+
+    if config.SPLIT_LIVE_BALANCE and live_quote > 0:
+        total = live_quote
+    elif config.TOTAL_CAPITAL and config.TOTAL_CAPITAL > 0:
+        total = float(config.TOTAL_CAPITAL)
+    else:
+        total = live_quote
+
+    slot = total / max(1, len(symbols))
+    return total, slot, symbols
+
+
+async def run_multi_market_maker(config: Config):
+    """8 (veya config.symbols) pair — bakiyeyi eşit böl, paralel al/sat."""
+    client = BinanceCCXTClient(config.API_KEY, config.API_SECRET, testnet=config.USE_TESTNET)
+    if not await client.initialize():
+        print("❌ Exchange bağlantısı kurulamadı")
+        return
+
+    total, slot, symbols = await resolve_slot_capitals(client, config)
+    if slot <= 0:
+        print("❌ USDT bakiyesi / total_capital yok — slot sermayesi 0")
+        await client.close()
+        return
+
+    print(f"💰 Toplam USDT: ${total:,.2f}")
+    print(f"🧩 Slotlar: {len(symbols)} × ${slot:,.2f} (= bakiye/{len(symbols)})")
+    print(f"📊 Pairler: {', '.join(symbols)}")
+
+    bots: List[MarketMakerBot] = []
+    for sym in symbols:
+        # Slot min notional altındaysa yine de dene (emir aşamasında filtrelenir)
+        cfg = config.for_symbol(sym, slot_capital=slot)
+        bot = MarketMakerBot(cfg, client=client, owns_client=False)
+        bots.append(bot)
+
+    async def _run_one(bot: MarketMakerBot, delay: float):
+        await asyncio.sleep(delay)
+        await bot.start(initialize_client=False)
+
+    try:
+        tasks = [
+            asyncio.create_task(_run_one(bot, i * 0.4))
+            for i, bot in enumerate(bots)
+        ]
+        await asyncio.gather(*tasks)
+    except KeyboardInterrupt:
+        print("\n🛑 Shutting down all slots...")
+    except Exception as e:
+        print(f"❌ Multi-MM error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        for bot in bots:
+            try:
+                await bot.shutdown()
+            except Exception:
+                pass
+        await client.close()
+        print("✅ Tüm slotlar kapatıldı")
+
+
 async def main():
     """Main execution function with external config file support"""
     
-    print("Binance Market Maker Bot (CCXT) — CANLI AL/SAT")
+    print("Binance Market Maker Bot (CCXT) — CANLI AL/SAT × 8 SLOT")
     print("="*65)
     print()
     print("🔧 MOD:")
-    print("✅ Varsayılan: gerçek Binance spot (testnet: false)")
-    print("✅ Limit bid+ask (Avellaneda / volatilite spread)")
+    print("✅ Tüm USDT bakiyesi 8'e bölünür")
+    print("✅ 8 likit pair'de paralel limit AL/SAT")
     print("✅ Realized P&L + drawdown kill-switch")
-    print("✅ Env fallback: BINANCE_API_KEY / BINANCE_API_SECRET")
+    print("✅ Env: BINANCE_API_KEY / BINANCE_API_SECRET")
     print()
     
     # Config: script dizinindeki dosya (cwd fark etmez)
@@ -1799,31 +1939,23 @@ async def main():
     
     print(f"✅ Configuration loaded from market_maker_config.json")
     print(f"🚀 Starting bot with {'TESTNET' if config.USE_TESTNET else 'LIVE TRADING'}")
-    print(f"💰 Capital: ${config.TOTAL_CAPITAL:,.2f}")
-    print(f"📊 Symbol: {config.SYMBOL}")
-    print(f"📈 Max Inventory: {config.MAX_INVENTORY_RATIO*100:.1f}%")
-    print(f"⚠️  Max Drawdown: {config.MAX_DRAWDOWN_RATIO*100:.1f}%")
+    print(f"📈 Max Inventory/slot: {config.MAX_INVENTORY_RATIO*100:.1f}%")
+    print(f"⚠️  Max Drawdown/slot: {config.MAX_DRAWDOWN_RATIO*100:.1f}%")
     
     if not config.USE_TESTNET:
         print("\n" + "="*50)
-        print("CANLI MOD — gerçek USDT ile limit AL/SAT")
+        print("CANLI MOD — bakiyeyi 8'e böl, gerçek AL/SAT")
         print("Durdurmak: Ctrl+C (açık emirler iptal edilir)")
         print("="*50)
     
-    # Create and start bot
-    bot = MarketMakerBot(config)
-    
     try:
-        await bot.start()
+        await run_multi_market_maker(config)
     except KeyboardInterrupt:
-        print("\n🛑 Shutting down bot...")
-        await bot.shutdown()
-        print("✅ Bot stopped successfully")
+        print("\n🛑 Durduruldu")
     except Exception as e:
         print(f"❌ Bot error: {e}")
         import traceback
         traceback.print_exc()
-        await bot.shutdown()
 
 if __name__ == "__main__":
     # Installation check
@@ -1851,27 +1983,24 @@ if __name__ == "__main__":
         print()
         print("⚠️  IMPORTANT: market_maker_config.json düzenle:")
         print("   1. Gerçek Binance API key + secret (Spot Trade)")
-        print("   2. testnet: false (canlı — varsayılan)")
-        print("   3. total_capital / risk parametrelerini ayarla")
+        print("   2. testnet: false (canlı)")
+        print("   3. symbols / balance_slots=8 (bakiye eşit bölünür)")
         print()
-        print("📋 Örnek (CANLI):")
+        print("📋 Örnek (CANLI × 8):")
         print("""
 {
     "exchange": {
-        "api_key": "your_actual_api_key_here",
-        "api_secret": "your_actual_api_secret_here",
+        "api_key": "...",
+        "api_secret": "...",
         "testnet": false,
-        "symbol": "BTC/USDT",
-        "base_asset": "BTC",
-        "quote_asset": "USDT"
+        "quote_asset": "USDT",
+        "symbols": ["BTC/USDT","ETH/USDT","BNB/USDT","SOL/USDT","XRP/USDT","DOGE/USDT","ADA/USDT","AVAX/USDT"]
     },
     "trading": {
-        "total_capital": 100.0,
-        "max_inventory_ratio": 0.15,
-        "max_drawdown_ratio": 0.05,
-        "base_spread_ticks": 3.0,
-        "min_base_balance": 0.0001,
-        "min_quote_balance": 5.0
+        "balance_slots": 8,
+        "split_live_balance": true,
+        "max_inventory_ratio": 0.9,
+        "max_drawdown_ratio": 0.05
     }
 }
         """)

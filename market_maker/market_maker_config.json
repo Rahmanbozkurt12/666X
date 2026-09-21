@@ -4,12 +4,24 @@
         "api_secret": "",
         "testnet": false,
         "symbol": "BTC/USDT",
+        "symbols": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "DOGE/USDT",
+            "ADA/USDT",
+            "AVAX/USDT"
+        ],
         "base_asset": "BTC",
         "quote_asset": "USDT"
     },
     "trading": {
-        "total_capital": 100.0,
-        "max_inventory_ratio": 0.15,
+        "total_capital": 0.0,
+        "balance_slots": 8,
+        "split_live_balance": true,
+        "max_inventory_ratio": 0.9,
         "max_drawdown_ratio": 0.05,
         "base_spread_ticks": 3.0,
         "volatility_multiplier": 4.0,
