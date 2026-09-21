@@ -192,22 +192,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "deploy_pct": 0.95,
         "partial_tp_frac": 1.0,
         "breakeven_after_pct": 0.80,
-        "hard_stop_pct": 1.0,
-        "max_loss_pct": 1.0,
-        "quick_tp_pct": 2.0,
-        "min_net_tp_pct": 1.80,
+        "hard_stop_pct": 1.5,
+        "max_loss_pct": 1.5,
+        "quick_tp_pct": 2.5,
+        "min_net_tp_pct": 2.0,
         "keep_runner": False,
         "runner_trail_pct": 1.0,
         "runner_trail_tight_pct": 1.0,
         "runner_tighten_after_pct": 3.0,
         "runner_tp_pct": 8.0,
         "runner_time_stop_minutes": 60,
-        "peak_trail_pct": 1.0,
-        "peak_trail_tight_pct": 0.80,
+        "peak_trail_pct": 1.2,
+        "peak_trail_tight_pct": 0.90,
         "trail_tighten_after_pct": 2.5,
-        "trail_activate_pct": 0.80,
+        "trail_activate_pct": 1.0,
         "time_stop_minutes": 60,  # 1 saatten fazla tutma → zorla sat
         "time_stop_min_pnl_pct": -99.0,  # süre dolunca PnL bakmadan çık
+        # Sadece yukarı teyitli giriş (dip bıçağı yasak)
+        "require_momentum_entry": True,
+        "min_ret_5m_pct": 0.05,
+        "min_ret_1h_pct": 0.0,
+        "block_lagger": True,
+        "block_pure_dip": True,
     },
     "trade": {
         "enabled": True,
@@ -227,14 +233,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "fee_rate_pct": 0.10,
         "bnb_fee_discount": False,  # USDT ile devam — BNB fee indirimi yok
         "fee_buffer_pct": 0.20,
-        "hard_stop_pct": 1.0,
-        "max_loss_pct": 1.0,
-        "peak_trail_pct": 1.0,
-        "peak_trail_tight_pct": 0.80,
+        "hard_stop_pct": 1.5,
+        "max_loss_pct": 1.5,
+        "peak_trail_pct": 1.2,
+        "peak_trail_tight_pct": 0.90,
         "trail_tighten_after_pct": 2.5,
-        "trail_activate_pct": 0.80,
-        "quick_tp_pct": 2.0,
-        "min_net_tp_pct": 1.80,
+        "trail_activate_pct": 1.0,
+        "quick_tp_pct": 2.5,
+        "min_net_tp_pct": 2.0,
         "time_stop_minutes": 60,
         "time_stop_min_pnl_pct": -99.0,
         "max_buy_per_cycle": 8,
@@ -245,6 +251,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "partial_tp_frac": 1.0,
         "breakeven_after_pct": 0.80,
         "keep_runner": False,
+        "require_momentum_entry": True,
+        "min_ret_5m_pct": 0.05,
+        "min_ret_1h_pct": 0.0,
+        "block_lagger": True,
+        "block_pure_dip": True,
         "runner_trail_pct": 1.0,
         "runner_trail_tight_pct": 1.0,
         "runner_tighten_after_pct": 3.0,
@@ -1237,6 +1248,65 @@ def apply_winrate_trade_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
+def passes_momentum_entry(
+    r: Analysis,
+    cfg: dict[str, Any],
+    regime: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """
+    Sert giriş kapısı: düşen/dip bıçağı ALMA.
+    Sadece yukarı dönmüş + güç sinyali olan coin.
+    """
+    wr = cfg.get("winrate") or {}
+    trade = cfg.get("trade") or {}
+    if not bool(wr.get("require_momentum_entry", trade.get("require_momentum_entry", True))):
+        return True, "mom_off"
+    ly = r.layers or {}
+    regime = regime or {}
+
+    if bool(wr.get("block_lagger", trade.get("block_lagger", True))) and ly.get("lagger"):
+        if not (ly.get("ignition") or ly.get("rs_strong")):
+            return False, "lagger"
+
+    ret5 = ly.get("ret_5m_pct")
+    ret1h = ly.get("ret_1h_pct")
+    min5 = float(wr.get("min_ret_5m_pct", trade.get("min_ret_5m_pct", 0.05)))
+    min1h = float(wr.get("min_ret_1h_pct", trade.get("min_ret_1h_pct", 0.0)))
+
+    # 1h aşağıysa (ignition hariç) alma — klasik -1% stop tuzağı
+    if isinstance(ret1h, (int, float)) and float(ret1h) < min1h:
+        if not ly.get("ignition"):
+            return False, f"1h_dusuk({ret1h})"
+    # 5m kırmızıysa alma
+    if isinstance(ret5, (int, float)) and float(ret5) < min5:
+        if not (ly.get("ignition") and ly.get("mom_1h")):
+            return False, f"5m_kirmizi({ret5})"
+
+    quality = (
+        ly.get("ignition")
+        or ly.get("rs_strong")
+        or ly.get("mom_1h")
+        or ly.get("news_listing")
+        or ly.get("cex_lead")
+        or (ly.get("mom_5m") and float(ly.get("vol_rise_5m") or 0) >= 2.0)
+    )
+    if not quality:
+        return False, "mom_yok"
+
+    if bool(wr.get("block_pure_dip", trade.get("block_pure_dip", True))):
+        phase = str(getattr(r, "phase", "") or "")
+        if phase in {"dip_erken", "dip_bekle_mom"} and not quality:
+            return False, "saf_dip"
+
+    # BTC dump değilse ve coin hâlâ BTC'den çok gerideyse pas
+    if regime.get("supportive"):
+        rel = ly.get("rel_vs_btc_pct")
+        if isinstance(rel, (int, float)) and float(rel) <= -2.5 and not ly.get("ignition"):
+            return False, f"rs_zayif({rel})"
+
+    return True, "mom_ok"
+
+
 def passes_winrate_gates(
     r: Analysis,
     *,
@@ -1266,6 +1336,10 @@ def passes_winrate_gates(
         layers.get("ignition") or layers.get("rs_strong") or layers.get("news_listing")
     ):
         return False, "lagger_btc_arkasi", edge
+
+    mom_ok, mom_why = passes_momentum_entry(r, cfg, regime)
+    if not mom_ok:
+        return False, f"mom:{mom_why}", edge
 
     require_uc = bool(wr.get("require_uc", True))
     if require_uc and not r.is_uc:
@@ -2431,14 +2505,25 @@ def analyze_symbol(
         and from_low_pct <= near_max * 1.35
         and chg24 <= float(early.get("max_24h_change_pct") or 6) + 0.5
         and (is_uc or pump_score >= min_pump * 0.85)
+        and (layers.get("mom_1h") or layers.get("ignition") or layers.get("rs_strong"))
     ):
-        action, phase = "AL", "uc_erken" if is_uc else "dip_erken"
-    elif score >= min_al and vol_ok and from_low_pct <= near_max * 1.25:
-        action, phase = "AL", "dip_erken"
-    elif is_uc and pump_score >= min_pump and chg24 <= early_rally_max + 1:
-        # klasik skor biraz düşük olsa bile uç setup AL
+        action, phase = "AL", "uc_erken" if is_uc else "mom_erken"
+    elif (
+        score >= min_al
+        and vol_ok
+        and (layers.get("mom_1h") or layers.get("rs_strong") or layers.get("mom_5m"))
+        and not layers.get("lagger")
+    ):
+        action, phase = "AL", "mom_onay"
+    elif is_uc and pump_score >= min_pump and chg24 <= early_rally_max + 1 and (
+        layers.get("mom_1h") or layers.get("ignition") or layers.get("rs_strong")
+    ):
+        # klasik skor biraz düşük olsa bile uç setup AL — momentum şart
         action, phase = "AL", "uc_setup"
         score = max(score, min_al)
+    elif score >= min_al and vol_ok and from_low_pct <= near_max * 1.25:
+        # saf dip → artık İZLE (bıçak tutma yasak)
+        action, phase = "İZLE", "dip_bekle_mom"
     elif score >= min_izle and (vol_ok or from_low_pct <= near_max or pump_score >= 50):
         action, phase = "İZLE", "gelisiyor"
     else:
@@ -4847,6 +4932,11 @@ def manage_entries(
     cands = [r for r in rows if is_buyable(r)]
     cands.sort(
         key=lambda r: (
+            0 if (r.layers or {}).get("ignition") else 1,
+            0 if (r.layers or {}).get("rs_strong") else 1,
+            0 if (r.layers or {}).get("mom_1h") else 1,
+            0 if (r.layers or {}).get("news_listing") else 1,
+            1 if (r.layers or {}).get("lagger") else 0,
             -float((r.layers or {}).get("edge_score") or 0),
             0 if (r.layers or {}).get("dex_hot") else 1,
             0 if (r.layers or {}).get("dex_surge") else 1,
