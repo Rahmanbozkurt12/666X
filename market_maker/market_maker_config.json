@@ -3,7 +3,7 @@
         "api_key": "",
         "api_secret": "",
         "testnet": false,
-        "symbol": "BTC/USDT",
+        "quote_asset": "USDT",
         "symbols": [
             "BTC/USDT",
             "ETH/USDT",
@@ -13,9 +13,7 @@
             "DOGE/USDT",
             "ADA/USDT",
             "AVAX/USDT"
-        ],
-        "base_asset": "BTC",
-        "quote_asset": "USDT"
+        ]
     },
     "trading": {
         "total_capital": 0.0,
@@ -23,20 +21,18 @@
         "split_live_balance": true,
         "max_inventory_ratio": 0.9,
         "max_drawdown_ratio": 0.05,
-        "base_spread_ticks": 3.0,
+        "base_spread_ticks": 4.0,
         "volatility_multiplier": 4.0,
-        "inventory_skew_strength": 3.0,
-        "min_order_lifetime": 10.0,
-        "max_order_replace_freq": 15,
-        "min_base_balance": 0.0001,
-        "min_quote_balance": 5.0,
-        "allow_short_selling": false
+        "inventory_skew_strength": 2.0,
+        "imbalance_skew_strength": 1.0,
+        "min_order_lifetime": 8.0,
+        "max_order_replace_freq": 12.0,
+        "min_quote_balance": 5.0
     },
     "risk": {
-        "risk_aversion": 0.1,
-        "market_impact": 0.01,
-        "time_horizon": 1.0,
-        "use_avellaneda": true
+        "use_avellaneda": true,
+        "risk_aversion": 0.05,
+        "time_horizon": 0.5
     },
     "fees": {
         "maker_fee_rate": 0.001,

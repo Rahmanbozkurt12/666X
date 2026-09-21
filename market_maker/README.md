@@ -1,42 +1,37 @@
-# Binance Market Maker Bot (açık kaynak)
+# Binance Spot Market Maker — CANLI
 
-Kaynak: https://github.com/yuthavithi/binance-makret-maker-bot (MIT)
+**Testnet yok.** Gerçek Binance spot AL/SAT.
 
-**Varsayılan:** canlı Binance spot + **USDT bakiyesini 8'e böl** → 8 likit pair'de paralel limit AL/SAT.
+## Ne yapar
+1. Serbest USDT bakiyesini **8’e böler**
+2. 8 pair’de limit **bid + ask** koyar (Post-Only / GTX)
+3. Spread ≥ komisyon×2×safety + min edge — fee’ye ezilmez
+4. Slot drawdown `%5` → kill switch (emirler iptal)
 
-**Komisyon koruması:** spread ≥ 2×maker×safety + min edge; emirler **Post-Only (GTX)** — taker ücrete düşmez.
+Varsayılan pairler: BTC ETH BNB SOL XRP DOGE ADA AVAX /USDT
 
-## Kurulum
-```bash
+## Kurulum (Windows)
+```powershell
 cd market_maker
 pip install -r requirements.txt
 ```
 
-## Canlı (8 slot)
-1. Binance API (Spot Trade) key/secret → `market_maker_config.json` veya env
-2. `"testnet": false`, `"balance_slots": 8`, `"split_live_balance": true`
-3. Pair listesi (`symbols`) — varsayılan:
-   `BTC ETH BNB SOL XRP DOGE ADA AVAX` /USDT
-4. Çalıştır:
-```bash
+`market_maker_config.json` düzenle:
+```json
+"api_key": "GERCEK_KEY",
+"api_secret": "GERCEK_SECRET",
+"testnet": false
+```
+
+Çalıştır:
+```powershell
 python binance_market_maker_bot_3.py
 ```
 
-Örnek: 800 USDT serbest → her coin **~100 USDT** slot ile AL (limit) / elinde base varsa SAT.
+Doğru banner: `Binance Market Maker — CANLI AL/SAT (testnet YOK)`
 
-Durdurmak: `Ctrl+C` (tüm açık emirler iptal).
+Durdur: `Ctrl+C`
 
-## Pair değiştir
-`market_maker_config.json` → `exchange.symbols` listesini düzenle (en fazla `balance_slots` kadar kullanılır).
-
-## Fees
-```json
-"fees": {
-  "maker_fee_rate": 0.001,
-  "taker_fee_rate": 0.001,
-  "fee_safety_mult": 1.5,
-  "min_edge_bps": 8.0,
-  "post_only": true
-}
-```
-VIP/BNB ile maker düşükse API rates güncellenir; `fee_safety_mult` tampon bırakır.
+## İndir
+https://github.com/Rahmanbozkurt12/666X/archive/refs/heads/cursor/mev-copy-delayed-d7b1.zip  
+→ içinden `market_maker` klasörünü kullan.
