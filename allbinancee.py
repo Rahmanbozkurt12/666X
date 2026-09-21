@@ -130,9 +130,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # SCALP hızlı al-sat · max tutma 60 dk
     "winrate": {
         "enabled": True,
-        "min_edge_score": 55.0,
-        "min_score": 55.0,
-        "min_pump_score": 48.0,
+        "min_edge_score": 50.0,
+        "min_score": 50.0,
+        "min_pump_score": 42.0,
         "require_uc": False,
         "strong_al_fallback": True,
         "strong_al_min_score": 60.0,
@@ -148,10 +148,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "require_btc_supportive": True,
         "min_quote_volume_usdt": 500000,
         "confirm_cycles": 1,
-        "max_buy_per_cycle": 2,
-        "max_per_sector": 1,
-        "max_positions": 3,
-        "deploy_pct": 0.90,
+        "max_buy_per_cycle": 8,
+        "max_per_sector": 4,
+        "max_positions": 10,
+        "deploy_pct": 0.95,
         "partial_tp_frac": 1.0,
         "breakeven_after_pct": 0.80,
         "hard_stop_pct": 1.0,
@@ -173,9 +173,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "trade": {
         "enabled": True,
-        "max_positions": 3,
-        "deploy_pct": 0.90,
-        "min_order_usdt": 12.0,
+        "max_positions": 10,
+        "deploy_pct": 0.95,
+        "min_order_usdt": 5.5,
         "tp1_sell_pct": 1.0,
         "prefer_uc": False,
         "also_buy_izle": False,
@@ -199,8 +199,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_net_tp_pct": 1.80,
         "time_stop_minutes": 60,
         "time_stop_min_pnl_pct": -99.0,
-        "max_buy_per_cycle": 2,
-        "max_per_sector": 1,
+        "max_buy_per_cycle": 8,
+        "max_per_sector": 4,
         "use_limit_orders": True,
         "limit_wait_sec": 2.0,
         "spread_tp_boost": True,
@@ -289,17 +289,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "edge_bonus_strong": 10,
             "score_bonus_hot": 5,
             "score_bonus_strong": 8,
-            "block_ratio_max": 0.38,  # aşırı satıcı baskısı → kes
+            "block_ratio_max": 0.22,  # sadece aşırı satıcı baskısı → kes
         },
         "basis": {
             "enabled": True,
             "premium_min_pct": 0.08,  # perp > spot
             "premium_strong_pct": 0.20,
-            "discount_cut_pct": -0.15,  # perp < spot → scalp kes/sertleştir
+            "discount_cut_pct": -0.25,  # sert discount’ta ceza
             "edge_bonus_premium": 5,
             "edge_bonus_strong": 9,
-            "edge_penalty_discount": 8,
-            "block_on_discount": True,
+            "edge_penalty_discount": 6,
+            "block_on_discount": False,  # çoklu scalp: kesme, sadece puan düş
         },
         "lead_lag": {
             "enabled": True,
@@ -3513,7 +3513,7 @@ def dynamic_trail_pct(
 
 def max_positions_for_balance(usdt: float, trade_cfg: dict[str, Any]) -> int:
     hard = int(trade_cfg.get("max_positions") or 10)
-    min_order = float(trade_cfg.get("min_order_usdt") or 12)
+    min_order = float(trade_cfg.get("min_order_usdt") or 5.5)
     deploy = float(trade_cfg.get("deploy_pct") or 0.95)
     n = int((usdt * deploy) // max(min_order, 1))
     return max(1, min(hard, max(n, 1 if usdt >= min_order else 0)))
@@ -3899,13 +3899,25 @@ def manage_entries(
     trade_cfg = cfg.get("trade") or {}
     wr = cfg.get("winrate") or {}
     regime = regime or {}
-    min_order = float(trade_cfg.get("min_order_usdt") or 12)
+    min_order = float(trade_cfg.get("min_order_usdt") or 5.5)
     deploy = float(trade_cfg.get("deploy_pct") or 0.95)
     require_uc = bool(trade_cfg.get("require_uc", True))
-    require_cex = int(trade_cfg.get("require_cex_min") or 2)
+    # 0 geçerli değer — `or 2` CEX≥2’ye zorluyordu
+    _rcx = trade_cfg.get("require_cex_min")
+    if _rcx is None:
+        _rcx = (wr.get("require_cex_min") if wr else None)
+    require_cex = int(0 if _rcx is None else _rcx)
     also_izle = bool(trade_cfg.get("also_buy_izle", False))
-    max_buy = int(trade_cfg.get("max_buy_per_cycle") or 3)
-    max_sector = int(trade_cfg.get("max_per_sector") or 2)
+    max_buy = int(
+        trade_cfg.get("max_buy_per_cycle")
+        or wr.get("max_buy_per_cycle")
+        or 8
+    )
+    max_sector = int(
+        trade_cfg.get("max_per_sector")
+        or wr.get("max_per_sector")
+        or 4
+    )
     hard_stop = float(trade_cfg.get("hard_stop_pct") or 0.50)
     quick_tp = float(trade_cfg.get("quick_tp_pct") or 1.20)
     use_limit = bool(trade_cfg.get("use_limit_orders", True))
@@ -4538,11 +4550,19 @@ def main() -> int:
         try:
             bal = account.free_usdt()
             print(f"[account] USDT free ≈ {bal:.2f}")
-            if trade_live and bal < float(trade_cfg.get("min_order_usdt") or 11):
+            if trade_live and bal < float(trade_cfg.get("min_order_usdt") or 5.5):
                 print(
                     f"[uyarı] USDT bakiyesi düşük ({bal:.2f}) — "
-                    "min ~11 USDT spot serbest bakiye gerekir",
+                    f"min ~{float(trade_cfg.get('min_order_usdt') or 5.5):.0f} USDT / coin · "
+                    f"8–10 coin için ~{float(trade_cfg.get('min_order_usdt') or 5.5) * 10:.0f}+ USDT gerekir",
                     file=sys.stderr,
+                )
+            elif trade_live:
+                slots = max_positions_for_balance(bal, trade_cfg)
+                print(
+                    f"[slot] max_positions={trade_cfg.get('max_positions')} · "
+                    f"bakiye-slot≈{slots} · turda max_buy={trade_cfg.get('max_buy_per_cycle')}",
+                    flush=True,
                 )
         except Exception as exc:  # noqa: BLE001
             print(f"[account HATA] bakiye okunamadı: {exc}", file=sys.stderr)
