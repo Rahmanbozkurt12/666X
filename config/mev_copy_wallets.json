@@ -1,0 +1,94 @@
+{
+  "settings": {
+    "poll_seconds": 15,
+    "copy_delay_seconds": 60,
+    "hold_confirm_seconds": 60,
+    "atomic_window_seconds": 12,
+    "min_usd_notional": 80,
+    "max_copy_usd": 50,
+    "copy_pct_of_signal": 0.05,
+    "dry_run": true,
+    "trade_enabled": false,
+    "prefer_binance_if_listed": true,
+    "stable_symbols": ["USDT", "USDC", "USD1", "DAI", "FDUSD", "BUSD", "TUSD", "USDe", "USDE"],
+    "quote_symbols": ["WETH", "ETH", "WBTC", "BTC", "WAVAX", "AVAX"],
+    "skip_spam_decimals_zero": true,
+    "chains": {
+      "ethereum": {
+        "explorer_api": "https://eth.blockscout.com/api",
+        "explorer_tx": "https://etherscan.io/tx/",
+        "native": "ETH",
+        "enabled": true
+      },
+      "avalanche": {
+        "explorer_api": "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api",
+        "explorer_tx": "https://snowtrace.io/tx/",
+        "native": "AVAX",
+        "enabled": true
+      }
+    }
+  },
+  "wallets": [
+    {
+      "address": "0x1f2F10D1C40777AE1Da742455c65828FF36Df387",
+      "label": "jaredfromsubway 2.0",
+      "kind": "mev_sandwich",
+      "chain": "ethereum",
+      "enabled": true,
+      "note": "Aynı blok al-sat → çoğu sinyal hold filtresinde düşer (bilinçli)"
+    },
+    {
+      "address": "0xae2Fc483527b8ef99eb5d9b44875f005ba1FaE13",
+      "label": "jared EOA",
+      "kind": "mev_caller",
+      "chain": "ethereum",
+      "enabled": true
+    },
+    {
+      "address": "0x278d858f05b94576C1E6f73285886876ff6eF8D2",
+      "label": "UniV4 MEV executor",
+      "kind": "mev_arb",
+      "chain": "ethereum",
+      "enabled": true
+    },
+    {
+      "address": "0xEff6cb8b614999d130E537751Ee99724D01aA167",
+      "label": "MEV Bot Eff6",
+      "kind": "mev_arb",
+      "chain": "ethereum",
+      "enabled": true
+    },
+    {
+      "address": "0x7976Da39D375dCaE90b9dE1B88C13a38F40E47Be",
+      "label": "Avalanche Blackhole HF",
+      "kind": "hf_mm",
+      "chain": "avalanche",
+      "enabled": true,
+      "note": "USDC/WAVAX MM — yönsel tutma nadir"
+    },
+    {
+      "address": "0x3328F7f4A1D1C57c35df56bBf0c9dCAFCA309C49",
+      "label": "Banana Gun related (ETH)",
+      "kind": "sniper",
+      "chain": "ethereum",
+      "enabled": true,
+      "note": "Entity banana-gun — Arkham'dan ek adres ekle"
+    },
+    {
+      "address": "",
+      "label": "MaestroBots (adres ekle)",
+      "kind": "sniper",
+      "chain": "ethereum",
+      "enabled": false,
+      "note": "https://intel.arkm.com/explorer/entity/maestrobots — login ile adres yapıştır"
+    },
+    {
+      "address": "",
+      "label": "rsync-builder",
+      "kind": "builder",
+      "chain": "ethereum",
+      "enabled": false,
+      "note": "Block builder — token al-sat stratejisi değil, kopyalama anlamsız"
+    }
+  ]
+}
