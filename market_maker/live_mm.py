@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Binance Spot — USDT TOP20 · multi-method AL · hızlı SAT · CANLI
+Binance Spot — BNB TOP20 · multi-method AL · hızlı SAT · CANLI
 
-1) API KEY / SECRET yaz
-2) Binance: Pay fees with BNB AÇIK (komisyon indirimi) — işlem çifti USDT
-3) pip install ccxt && python live_mm.py
+1) API KEY / SECRET yaz (+ BNB bakiye)
+2) Pay fees with BNB AÇIK
+3) python live_mm.py
 
-Neden USDT? BNB pair’ler ince (log: aday=6) → az AL. USDT’de gerçek TOP20 likit.
-Komisyon yine BNB ile ödenir (hesap ayarı).
+SCAN/FAST saniyeleri sabit; AL daha agresif (min 7, gevşek filtre, market fill).
 """
 
 from __future__ import annotations
@@ -34,40 +33,39 @@ BINANCE_API_KEY = "BURAYA_API_KEY"
 BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
-QUOTE = "USDT"
+QUOTE = "BNB"
 TOP_N = 20
-MIN_OPEN_COINS = 5
-SCAN_SEC = 55.0                 # daha hızlı AL turu (eski 100)
-FAST_SEC = 3.0                  # SAT / fill takibi hızlı
-BUY_COOLDOWN_SEC = 480.0        # 8 dk (biraz daha çevik)
+MIN_OPEN_COINS = 7
+SCAN_SEC = 65.0                 # kullanıcı: saniye aynı kalsın
+FAST_SEC = 3.0
+BUY_COOLDOWN_SEC = 480.0
 SELL_COOLDOWN_SEC = 25.0
 
-# Komisyon koruması (BNB fee ≈ %0.075)
 MAKER_FEE = 0.00075
 TAKER_FEE = 0.00075
 FEE_SAFETY = 1.25
-MIN_EDGE_BPS = 8.0              # fee üstü kâr — biraz daha çabuk SAT
-# SAT eşiği dinamik ≈ fee*safety*2 + edge
+MIN_EDGE_BPS = 8.0
 
-DIP_BPS = 22.0
-MIN_QUOTE_VOL = 2_000_000.0     # USDT 24h hacim
-CANDIDATE_POOL = 80
-MIN_QUOTE_FREE = 6.0
-MAX_DRAWDOWN_QUOTE = 25.0
-MAX_SPREAD_FORCE_BPS = 90.0
-MAX_SPREAD_BPS = 40.0
-ALLOW_TAKER_TO_FILL = True      # min 5 için dolduramayan maker → market AL
-PENDING_MAX_SEC = 15.0
+DIP_BPS = 18.0
+MIN_QUOTE_VOL = 1.0             # BNB pair ince → düşük eşik, TOP20 dolsun
+CANDIDATE_POOL = 120
+MIN_QUOTE_FREE = 0.004          # daha küçük slot = daha çok AL
+MAX_DRAWDOWN_QUOTE = 0.35
+MAX_SPREAD_BPS = 80.0           # AL artsın diye gevşek
+MAX_SPREAD_FORCE_BPS = 180.0
+ALLOW_TAKER_TO_FILL = True
+PENDING_MAX_SEC = 12.0          # hızlı market'e düş
+FORCE_MARKET_UNDER_MIN = True   # min 7 altındayken direkt MARKET AL
 
-# Multi-method — kazanç oranı için sıkı AL
 RSI_PERIOD = 14
-RSI_OVERSOLD = 42.0
-RSI_MAX_BUY = 55.0
-RSI_EXIT = 58.0                 # daha erken kâr al
+RSI_OVERSOLD = 48.0             # daha çok AL adayı
+RSI_MAX_BUY = 58.0              # 52→58 (pump 78+ hâlâ yok)
+RSI_EXIT = 58.0
 EMA_FAST = 7
 EMA_SLOW = 21
-MIN_METHODS_PASS = 3
-MIN_METHODS_FORCE = 2
+MIN_METHODS_PASS = 2            # AL yükselsin
+MIN_METHODS_FORCE = 1           # min 7 doldururken tek yöntem yeter
+EXTRA_BUYS_WHEN_FULL = 2        # 7 dolduktan sonra ek kaliteli AL
 KLINE_TF = "1m"
 KLINE_LIMIT = 60
 
@@ -77,7 +75,6 @@ POST_ONLY = True
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
     "EUR", "TRY", "BRL", "AEUR",
-    # BTC/ETH serbest bırakıldı — hacim listesine girebilir; skor mid-cap'i öne alır
 }
 
 # =============================================================================
@@ -865,7 +862,7 @@ async def analyze_symbol(
         reasons.append("RSI_invalid")
 
     # HARD VETO: güçlü yeşil pump kovalama
-    if pct > 5.0:
+    if pct > 8.0:
         return SignalReport(
             symbol, 0, 0, total,
             [f"VETO_pump%={pct:+.2f}"] + reasons,
@@ -1080,10 +1077,11 @@ async def buy_one(
         log.info("skip %s — methods %d < %d", sig.symbol, sig.passed, need)
         return False
 
-    # force + geniş spread veya min doldurma → market
-    use_market = force_fill and ALLOW_TAKER_TO_FILL and (
-        len(state.positions) + len(state.pending) < MIN_OPEN_COINS
-        or spread_bps > MAX_SPREAD_BPS
+    # min altında veya force → MARKET (AL yükselsin, fill kesin)
+    use_market = ALLOW_TAKER_TO_FILL and (
+        (force_fill and FORCE_MARKET_UNDER_MIN)
+        or (force_fill and spread_bps > MAX_SPREAD_BPS)
+        or (len(state.positions) + len(state.pending) < MIN_OPEN_COINS and FORCE_MARKET_UNDER_MIN)
     )
 
     methods = ",".join(sig.reasons[:5])
@@ -1301,16 +1299,18 @@ async def scan_once(ex: Exchange, state: State) -> None:
     signals = [s for s in signals if s.passed >= need_pass]
     signals.sort(key=lambda s: -s.score)
 
-    # Sermaye yetmiyorsa az slotta kalın (min notional için)
     slots_left = 0
     if free_bnb >= MIN_QUOTE_FREE:
-        want = (MIN_OPEN_COINS - open_n - pending_n) if force else min(3, TOP_N - open_n - pending_n)
-        max_by_cash = int(free_bnb // MIN_QUOTE_FREE)
-        slots_left = max(0, min(want, max_by_cash))
+        if force:
+            want = MIN_OPEN_COINS - open_n - pending_n
+        else:
+            want = EXTRA_BUYS_WHEN_FULL
+        max_by_cash = max(1, int(free_bnb // max(MIN_QUOTE_FREE, 1e-9)))
+        slots_left = max(0, min(want, max_by_cash, 6))
         if force and slots_left < want:
             log.warning(
-                "nakit yetmiyor: hedef +%d coin ama $%.2f ile en fazla %d slot",
-                want, free_bnb, slots_left,
+                "nakit düşük: +%d hedef, free=%.4f %s → bu tur %d AL",
+                want, free_bnb, QUOTE, slots_left,
             )
 
     bought = 0
@@ -1322,15 +1322,17 @@ async def scan_once(ex: Exchange, state: State) -> None:
             break
         free_bnb = ex.free(bal, QUOTE)
         remain = max(1, slots_left - bought)
-        # her seferinde kalan serbest / kalan slot — min notional altına düşmesin
         budget = free_bnb / remain
         if budget < MIN_QUOTE_FREE:
-            log.info("bütçe bitti ($%.2f)", free_bnb)
+            # tek büyük AL dene (min 7'ye yaklaş)
+            budget = free_bnb * 0.95
+        if budget < MIN_QUOTE_FREE:
+            log.info("bütçe bitti (%.5f %s)", free_bnb, QUOTE)
             break
-        ok = await buy_one(ex, state, sig, budget, force_fill=force)
+        ok = await buy_one(ex, state, sig, budget, force_fill=force or True)
         if ok:
             bought += 1
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.2)
 
     log.info(
         "SCAN bitti | emir/AL=%d | açık=%d pending=%d",
@@ -1344,10 +1346,10 @@ async def scan_once(ex: Exchange, state: State) -> None:
 
 async def main_async() -> None:
     print("=" * 64)
-    print("USDT TOP20 · hacim+hareket · multi-method · fee-safe (Pay fees with BNB)")
-    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | min_rise={min_rise_bps():.1f}bps | RSI_max_buy={RSI_MAX_BUY}")
+    print("BNB TOP20 · agresif AL · SCAN/FAST saniye sabit")
+    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | min_open={MIN_OPEN_COINS} | RSI_max={RSI_MAX_BUY}")
     print(f"CCXT {ccxt.__version__}")
-    print("Binance: Pay fees with BNB AÇIK olsun | işlem çifti = USDT")
+    print("Binance: Pay fees with BNB AÇIK olsun")
     print("=" * 64)
 
     key, secret = resolve_keys()
@@ -1360,9 +1362,9 @@ async def main_async() -> None:
     if not bal:
         raise SystemExit("Bakiye yok / ban")
     free = ex.free(bal, QUOTE)
-    print(f"{QUOTE} free≈${free:.2f} | min {MIN_OPEN_COINS} coin hedef")
+    print(f"{QUOTE} free≈{free:.4f} | min {MIN_OPEN_COINS} coin")
     if free < MIN_QUOTE_FREE * MIN_OPEN_COINS:
-        print(f"UYARI: düşük {QUOTE} (${free:.2f}) — en az ~${MIN_QUOTE_FREE * MIN_OPEN_COINS:.0f} önerilir")
+        print(f"UYARI: düşük {QUOTE} ({free:.4f}) — 7 coin için daha fazla BNB lazım")
 
     state = State(stats=DayStats.load())
     await sync_positions(ex, state, bal)
