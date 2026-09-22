@@ -1295,7 +1295,7 @@ class Engine:
         budget = self.ex.slot_budget(bal)
         current, target = set(self.slots), set(picked)
 
-        for sym in list(current - target) | force_out:
+        for sym in (current - target) | force_out:
             if sym in keep and sym not in force_out:
                 continue
             sl = self.slots.get(sym)
