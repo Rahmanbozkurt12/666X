@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — SADECE USDT · 5m YEŞİL
+Binance Spot Market Maker — SADECE USDT · BAN-SAFE
 
-Sadece */USDT. 189sn tarama. ≥15 coin kesin.
-Giriş: -20 dip+yeşil+hacim↑ | yüksek hacim+yükselen | hacim dibinden yükselen.
-Aynı coine 1dk AL yok. Geniş fee+edge (komisyon tamponu).
+Sadece */USDT. Az paralel slot + yavaş REST (IP ban önlemi).
+Giriş: -20 dip+yeşil+hacim↑ | yüksek hacim+yükselen | recover.
+Aynı coine 1dk AL yok. Geniş fee+edge.
 
-1) API KEY yaz  (USDT bakiye + Pay fees with BNB isteğe bağlı)
+1) API KEY yaz
 2) pip install "ccxt[pro]"
 3) python live_mm.py
+   Ban yediysen 3 saat bekle; stats silip yavaş profille aç.
 """
 
 from __future__ import annotations
@@ -44,26 +45,29 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 
 QUOTE = "USDT"                  # SADECE USDT
 SCAN_ALL = True
-FORCE_MIN_OPEN = True           # her taramada ≥15 kesin
-MAX_OPEN = 15                   # 20→15: pool dolmasın + min notional
-MIN_OPEN = 15
-CANDIDATE_POOL = 200
-SCAN_SEC = 189.0                # 189 sn'de bir tarama
-REPLACE_SEC = 90.0
-BALANCE_CACHE_SEC = 8.0
-FILL_POLL_SEC = 25.0
-BOOK_REST_SEC = 15.0
-WORKER_STAGGER_SEC = 1.2        # API pool dolmasın
-HOLD_QUOTE_MULT = 8.0           # emir book'ta daha uzun kalsın
-LOOP_SLEEP_SEC = 2.0
+FORCE_MIN_OPEN = True
+MAX_OPEN = 8                    # BAN koruması: 15–20 paralel REST = IP ban
+MIN_OPEN = 8
+CANDIDATE_POOL = 80
+SCAN_SEC = 240.0                # 4 dk tarama (daha seyrek)
+REPLACE_SEC = 120.0             # emirleri sık bozma
+BALANCE_CACHE_SEC = 20.0
+FILL_POLL_SEC = 45.0
+BOOK_REST_SEC = 40.0            # book poll seyrek
+WORKER_STAGGER_SEC = 4.0        # slotlar peş peşe açılmasın
+HOLD_QUOTE_MULT = 12.0          # emir book'ta uzun kalsın
+LOOP_SLEEP_SEC = 3.0
 USE_WS = False
-API_RATE_MS = 450
-ROTATE_COOLDOWN_SEC = 5 * 60
-KEEP_GRACE_SEC = 45.0
-SAME_COIN_BUY_SEC = 60.0        # aynı coine 1 dk ara
+API_RATE_MS = 900               # ccxt rateLimit
+API_MIN_GAP_SEC = 0.35          # her REST arası min boşluk
+API_MAX_INFLIGHT = 2            # aynı anda max 2 istek
+ROTATE_COOLDOWN_SEC = 8 * 60
+KEEP_GRACE_SEC = 60.0
+SAME_COIN_BUY_SEC = 60.0
 KLINE_TF = "5m"
-KLINE_LIMIT = 12
-KLINE_TOP_N = 80
+KLINE_LIMIT = 8
+KLINE_TOP_N = 12                # 80→12: tarama banı önle
+KLINE_SLEEP_SEC = 0.40
 
 MIN_USDT_VOL = 400.0
 SOFT_USDT_VOL = 1_000.0
@@ -71,7 +75,7 @@ FLOOR_USDT_VOL = 400.0
 HIGH_USDT_VOL = 100_000.0
 MAX_BOOK_SPREAD_BPS = 140.0
 MIN_BOOK_SPREAD_BPS = 6.0
-QUOTE_MOVE_BPS = 55.0           # daha az iptal → emir görünür kalsın
+QUOTE_MOVE_BPS = 70.0           # gereksiz iptal ↓
 JOIN_TOUCH = False
 MIN_VOL_RISE_PCT = 0.02
 MIN_VOL_RISE_USDT = 800.0
@@ -89,13 +93,13 @@ BEHIND_TICKS = 2.0
 MAX_HALF_SPREAD_BPS = 150.0
 MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
-MIN_QUOTE_FREE = 5.0
+MIN_QUOTE_FREE = 8.0
 RESERVE_USDT = 2.0
 USE_QUOTE_FRAC = 0.999
-MIN_USDT_PER_SLOT = 5.0
+MIN_USDT_PER_SLOT = 8.0
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
-MAX_PAIR_HOLD_SEC = 15 * 60
+MAX_PAIR_HOLD_SEC = 20 * 60
 MAX_BUY_LEAD = 8
 MIN_WR_TO_BUY = 0.25
 MIN_TRADES_FOR_WR = 20
@@ -105,7 +109,7 @@ MOMENTUM_BUY_BPS = -25.0
 POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC
 VOL_WIDEN_MULT = 2.4
 SKEW_STRENGTH = 0.85
-BUY_GATES_OFF = True            # AL kilidi KAPALI — emirler Binance'te görünsün
+BUY_GATES_OFF = True
 
 # Tüm giriş metodları (skor ağırlıkları)
 W_VOL_RISE = 5.0                # hacim yükseliyor
@@ -154,6 +158,41 @@ _DIM = "\033[2m"
 _ban_until_ms_shared = 0
 _ban_log_ts = 0.0
 _ban_lock: Optional[asyncio.Lock] = None
+_api_sem: Optional[asyncio.Semaphore] = None
+_api_lock: Optional[asyncio.Lock] = None
+_api_last_ts = 0.0
+
+
+def _get_ban_lock() -> asyncio.Lock:
+    global _ban_lock
+    if _ban_lock is None:
+        _ban_lock = asyncio.Lock()
+    return _ban_lock
+
+
+def _get_api_sem() -> asyncio.Semaphore:
+    global _api_sem
+    if _api_sem is None:
+        _api_sem = asyncio.Semaphore(max(1, API_MAX_INFLIGHT))
+    return _api_sem
+
+
+def _get_api_lock() -> asyncio.Lock:
+    global _api_lock
+    if _api_lock is None:
+        _api_lock = asyncio.Lock()
+    return _api_lock
+
+
+async def api_pace() -> None:
+    """Global REST temposu — paralel worker'lar ban yedirmesin."""
+    global _api_last_ts
+    async with _get_api_lock():
+        now = time.time()
+        wait = API_MIN_GAP_SEC - (now - _api_last_ts)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _api_last_ts = time.time()
 
 
 def _c(color: str, text: str) -> str:
@@ -208,13 +247,6 @@ def skip_base(base: str) -> bool:
     if any(x in b for x in SKIP_CONTAINS):
         return True
     return False
-
-
-def _get_ban_lock() -> asyncio.Lock:
-    global _ban_lock
-    if _ban_lock is None:
-        _ban_lock = asyncio.Lock()
-    return _ban_lock
 
 
 def ban_until_ms(err: Exception | str) -> Optional[int]:
@@ -476,20 +508,22 @@ class Exchange:
 
     async def run(self, fn, *a, **kw):
         await wait_if_banned()
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: fn(*a, **kw))
+        async with _get_api_sem():
+            await api_pace()
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, lambda: fn(*a, **kw))
 
     async def init(self) -> None:
         while True:
             try:
                 await self.run(self.rest.load_markets)
                 log.info(
-                    "CANLI MM | markets=%d WS=%s min_spread≈%.1fbps open=%d force=%s KÂR-KİLİT",
+                    "CANLI MM | BAN-SAFE markets=%d open=%d gap=%.2fs inflight≤%d book=%ds",
                     len(self.rest.markets),
-                    bool(self.ws),
-                    min_spread_bps(),
                     MAX_OPEN,
-                    FORCE_MIN_OPEN,
+                    API_MIN_GAP_SEC,
+                    API_MAX_INFLIGHT,
+                    int(BOOK_REST_SEC),
                 )
                 return
             except Exception as e:
@@ -976,7 +1010,7 @@ async def enrich_ranked_5m(
     if not ranked:
         return ranked
     enriched: List[Tuple[float, str, str, float]] = []
-    n_check = min(len(ranked), max(KLINE_TOP_N, 80))
+    n_check = min(len(ranked), max(KLINE_TOP_N, 12))
     top = ranked[:n_check]
     rest = ranked[n_check:]
     green_n = dip_green_n = 0
@@ -985,9 +1019,8 @@ async def enrich_ranked_5m(
         if trade_sym:
             ohlcv = await ex.ohlcv(trade_sym, KLINE_TF, KLINE_LIMIT)
             g5, v5 = analyze_5m_ohlcv(ohlcv)
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(KLINE_SLEEP_SEC)
         bonus = g5 * W_GREEN_5M * 10.0 + v5 * 120.0 * W_VOL_5M
-        # -20 dip + yeşile dönüş + hacim↑ → kesin öncelik
         if g5 >= 0.7 and v5 > 0:
             bonus += 80.0 * W_DIP_REBOUND
             green_n += 1
@@ -1068,8 +1101,7 @@ async def pick_open_pairs(
         loose, sc2, _ = scan_all_binance(
             ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.6, require_rise=False
         )
-        if len(loose) > KLINE_TOP_N:
-            loose = await enrich_ranked_5m(ex, loose[: max(KLINE_TOP_N, 60)])
+        # 2. kez 5m OHLCV yağmuru YOK — ban riski
         scanned = max(scanned, sc2)
         for _sc, _b, trade_sym, _v in loose:
             if trade_sym:
