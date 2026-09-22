@@ -42,16 +42,16 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 QUOTE = "BNB"
 # TÜM Binance BNB spot tarama — keşif üst sınırı yok
 SCAN_ALL = True
-MAX_OPEN = 20                   # aynı anda açık MM (bakiyeye göre düşer)
-MIN_OPEN = 8                    # hedef minimum açık
-SCAN_SEC = 90.0                 # tüm CEX yeniden tara + rotasyon
-MIN_QUOTE_VOL = 0.3             # BNB 24h hacim eşiği (düşük = daha çok pair)
+MAX_OPEN = 12                   # aynı anda açık MM (küçük BNB'de anlamlı slot)
+MIN_OPEN = 4
+SCAN_SEC = 90.0
+MIN_QUOTE_VOL = 0.3
 REPLACE_SEC = 14.0
 BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 12.0
 BOOK_REST_SEC = 8.0
 WORKER_STAGGER_SEC = 0.8
-MAX_BOOK_SPREAD_BPS = 80.0      # tarama — ince kitapları da aday yap
+MAX_BOOK_SPREAD_BPS = 80.0
 QUOTE_MOVE_BPS = 15.0
 JOIN_BID = True
 
@@ -62,11 +62,12 @@ MIN_EDGE_BPS = 12.0
 BASE_SPREAD_TICKS = 3.0
 MAX_INVENTORY_RATIO = 0.99
 TARGET_INVENTORY_RATIO = 0.50
-MIN_QUOTE_FREE = 0.0025
+MIN_QUOTE_FREE = 0.008          # slot başına min BNB — toz slotlara izin yok
 RESERVE_BNB = 0.0003
 USE_QUOTE_FRAC = 0.998
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.18
+MIN_SELL_EDGE_BPS = 20.0        # avg maliyet + fee üstü sat (zararlı fill engel)
 
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
@@ -539,14 +540,11 @@ def pick_open_pairs(
 
 
 def max_open_for_balance(spend: float) -> int:
-    """Bakiyeye göre kaç slot açılabilir (min notional koru)."""
+    """Bakiyeye göre kaç slot — her biri en az MIN_QUOTE_FREE BNB."""
     if spend < MIN_QUOTE_FREE * 2:
         return 0
     n = int(spend / MIN_QUOTE_FREE)
     n = max(2, min(MAX_OPEN, n))
-    # MIN_OPEN hedefi — bakiye yetiyorsa
-    if spend >= MIN_QUOTE_FREE * MIN_OPEN:
-        n = max(n, min(MAX_OPEN, MIN_OPEN))
     return n
 
 
@@ -678,7 +676,16 @@ class Slot:
             side = t.get("side")
             amt = float(t.get("amount") or 0)
             px = float(t.get("price") or 0)
-            fee = float((t.get("fee") or {}).get("cost") or 0)
+            fee_raw = t.get("fee") or {}
+            fee_cost = float(fee_raw.get("cost") or 0)
+            fee_ccy = str(fee_raw.get("currency") or QUOTE).upper()
+            # fee'yi BNB'ye çevir (baz asset fee'si abartılı net yazmasın)
+            if fee_cost and fee_ccy == QUOTE:
+                fee = fee_cost
+            elif fee_cost and fee_ccy == self.base:
+                fee = fee_cost * px
+            else:
+                fee = fee_cost * px if fee_ccy != QUOTE else fee_cost
             if amt <= 0 or px <= 0:
                 continue
             st = self.ex.stats
@@ -778,65 +785,94 @@ class Slot:
             else:
                 ask = self.ex.px(self.symbol, self.book.ask + tick)
 
-        if ask <= bid or ask - bid < self.min_full_spread() * 0.85:
-            return None
-
         min_qty, min_cost = self.ex.limits(self.symbol)
-        # Adil pay: tüm serbest BNB / pair (fee tozu hariç) — idle bırakma
+        sell_base_early = max(self.base_free, 0.0)
+        # Spread daraldıysa: envanter yoksa çık; envanter varsa satım için devam
+        if ask <= bid or ask - bid < self.min_full_spread() * 0.85:
+            if sell_base_early * mid < min_cost * 0.95:
+                return None
+            # sadece sat — bid'i aşağı it
+            ask = self.ex.px(
+                self.symbol,
+                max(ask, (self.book.ask + tick) if self.book.ask > 0 else mid * 1.001),
+            )
+            bid = self.ex.px(self.symbol, ask - self.min_full_spread())
+
+        # Adil pay: tüm serbest BNB / pair (fee tozu hariç)
         fair = max(self.slot_bnb, self.ex.slot_budget())
-        self.slot_bnb = fair
+        self.slot_bnb = max(fair, MIN_QUOTE_FREE)
         n = max(1, self.ex.n_pairs)
-        # Bu pair en fazla serbest/n alır; hepsi birlikte ≈ %100 deploy
-        share = max(fair, max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC / n)
+        share = max(self.slot_bnb, max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC / n)
 
         inv_bnb = self.base_total * mid
         room = max(0.0, share * MAX_INVENTORY_RATIO - inv_bnb)
         q_avail = max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC
-        buy_budget = min(q_avail, share, room if room >= min_cost else share)
+        buy_budget = min(q_avail, share, room if room >= min_cost else 0.0)
         if buy_budget < min_cost or inv_bnb >= share * MAX_INVENTORY_RATIO:
             buy_budget = 0.0
-        sell_base = max(self.base_free, 0.0)
+        sell_base = sell_base_early
 
-        # Emir boyutu ≈ slot/pay'ın tamamı
-        target = max(min_cost * 1.05, buy_budget if buy_budget > 0 else share)
-        sz = target / mid
-        bid_sz = sz * max(0.9, 1.0 - ip * 0.2)
-        ask_sz = sz * max(0.9, 1.0 + ip * 0.2)
+        # Ortalama maliyet tabanı — zararlı maker satışı engelle
+        avg_cost = (self.inv_cost / self.inv_qty) if self.inv_qty > 1e-12 else 0.0
+        bid_sz_force_zero = False
+        if avg_cost > 0:
+            floor = avg_cost * (1.0 + MAKER_FEE * FEE_SAFETY * 2.0 + MIN_SELL_EDGE_BPS / 10000.0)
+            if ask < floor:
+                ask = self.ex.px(self.symbol, floor)
+            # post-only: ask kitap ask'ının altında kalmasın
+            if self.book.ask > 0 and ask < self.book.ask:
+                ask = self.ex.px(self.symbol, max(floor, self.book.ask))
+            if self.book.ask > 0 and ask <= self.book.ask:
+                ask = self.ex.px(self.symbol, max(floor, self.book.ask + tick))
+            if ask <= bid:
+                bid_sz_force_zero = True
+                buy_budget = 0.0
+                bid = self.ex.px(self.symbol, max(tick, ask - self.min_full_spread()))
 
-        if buy_budget >= min_cost:
-            bid_sz = min(bid_sz, buy_budget / mid)
+        if ask <= bid:
+            if sell_base * mid >= min_cost * 0.95:
+                ask = self.ex.px(
+                    self.symbol,
+                    max(
+                        avg_cost * (1.0 + MIN_SELL_EDGE_BPS / 10000.0) if avg_cost > 0 else mid * 1.001,
+                        (self.book.ask + tick) if self.book.ask > 0 else mid * 1.001,
+                    ),
+                )
+                bid = self.ex.px(self.symbol, ask - self.min_full_spread())
+                buy_budget = 0.0
+                bid_sz_force_zero = True
+            else:
+                return None
+
+        # Alım boyutu
+        if buy_budget >= min_cost and not bid_sz_force_zero:
+            bid_sz = self.ex.amt(self.symbol, buy_budget / mid)
+            if bid_sz * bid < min_cost:
+                need = min_cost / bid * 1.02
+                bid_sz = self.ex.amt(self.symbol, need) if need * bid <= buy_budget else 0.0
+            if bid_sz * bid < min_cost:
+                bid_sz = 0.0
         else:
             bid_sz = 0.0
 
+        # SATIM: envanteri share ile KISITLAMA — stuck HBAR BUY×0 SELL×0 buna bağlıydı
         if sell_base * mid >= min_cost * 0.95:
-            ask_sz = min(ask_sz, sell_base * USE_QUOTE_FRAC, share / mid * 1.2)
+            if inv_bnb >= share * TARGET_INVENTORY_RATIO or buy_budget <= 0 or bid_sz_force_zero:
+                ask_sz = sell_base * USE_QUOTE_FRAC
+            else:
+                ask_sz = min(sell_base * USE_QUOTE_FRAC, max(share / mid, min_cost / mid * 1.05))
+            ask_sz = self.ex.amt(self.symbol, ask_sz)
+            if ask_sz * ask < min_cost:
+                need = min_cost / ask * 1.02
+                ask_sz = self.ex.amt(self.symbol, need) if sell_base >= need else 0.0
+            if ask_sz * ask < min_cost:
+                ask_sz = 0.0
         else:
             ask_sz = 0.0
 
         if inv_bnb >= share * MAX_INVENTORY_RATIO:
             bid_sz = 0.0
 
-        # hard cap: notional asla payı aşmasın
-        if bid_sz > 0 and mid > 0:
-            bid_sz = min(bid_sz, buy_budget / mid)
-
-        bid_sz = self.ex.amt(self.symbol, bid_sz)
-        ask_sz = self.ex.amt(self.symbol, ask_sz)
-        if bid_sz > 0 and bid > 0 and bid_sz * bid > buy_budget * 1.001:
-            bid_sz = self.ex.amt(self.symbol, buy_budget / bid)
-        if bid_sz > 0 and bid_sz * bid < min_cost:
-            # min notional'a büyüt (bütçe yetiyorsa)
-            need = min_cost / bid * 1.02
-            if need * bid <= buy_budget + 1e-12:
-                bid_sz = self.ex.amt(self.symbol, need)
-            if bid_sz * bid < min_cost:
-                bid_sz = 0.0
-        if ask_sz > 0 and ask_sz * ask < min_cost:
-            need = min_cost / ask
-            if sell_base >= need:
-                ask_sz = self.ex.amt(self.symbol, need * 1.02)
-            if ask_sz * ask < min_cost:
-                ask_sz = 0.0
         return bid, ask, bid_sz, ask_sz
 
     async def replace(self) -> None:
@@ -860,15 +896,25 @@ class Slot:
 
         # Yeni fiyat/adet neredeyse aynıysa iptal-spam yok
         same_bid = (
-            self.last_bid > 0
+            bid_sz > 0
+            and self.last_bid > 0
             and abs(bid - self.last_bid) / self.last_bid * 10000.0 < 3.0
             and abs(bid_sz - self.last_bid_sz) <= max(1e-8, self.last_bid_sz * 0.08)
         )
         same_ask = (
-            self.last_ask > 0
+            ask_sz > 0
+            and self.last_ask > 0
             and abs(ask - self.last_ask) / self.last_ask * 10000.0 < 3.0
             and abs(ask_sz - self.last_ask_sz) <= max(1e-8, self.last_ask_sz * 0.08)
         )
+        # iki yön de 0 ise eski emri temizle (stuck BUY×0 SELL×0)
+        if bid_sz <= 0 and ask_sz <= 0:
+            if self.last_bid > 0 or self.last_ask > 0:
+                await self.ex.cancel_all(self.symbol)
+                self.last_bid = self.last_ask = 0.0
+                self.last_bid_sz = self.last_ask_sz = 0.0
+            self.last_quote = time.time()
+            return
         if (bid_sz <= 0 or same_bid) and (ask_sz <= 0 or same_ask) and (self.last_bid > 0 or self.last_ask > 0):
             self.last_quote = time.time()
             return
