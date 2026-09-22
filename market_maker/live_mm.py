@@ -43,26 +43,28 @@ SELL_COOLDOWN_SEC = 25.0
 
 MAKER_FEE = 0.00075
 TAKER_FEE = 0.00075
-FEE_SAFETY = 1.25
-MIN_EDGE_BPS = 8.0
+FEE_SAFETY = 1.6                # komisyonu geçsin diye sıkı
+MIN_EDGE_BPS = 40.0             # fee üstü net kâr hedefi (önce 8 — yetmiyordu)
+# min SAT ≈ roundtrip_fee*safety + 40bps → fee'ye ezilmesin
 
 DIP_BPS = 18.0
 MIN_QUOTE_VOL = 1.0
 CANDIDATE_POOL = 120
-MIN_QUOTE_FREE = 0.003          # küçük slot OK — bakiyeyi yay
-RESERVE_BNB = 0.002             # fee için kenarda bırak
+MIN_QUOTE_FREE = 0.003
+RESERVE_BNB = 0.002
 MAX_DRAWDOWN_QUOTE = 0.35
-MAX_SPREAD_BPS = 80.0
-MAX_SPREAD_FORCE_BPS = 180.0
+MAX_SPREAD_BPS = 35.0           # geniş spread = gizli komisyon
+MAX_SPREAD_FORCE_BPS = 55.0     # 180/429 gibi çiftlere girme
 ALLOW_TAKER_TO_FILL = True
 PENDING_MAX_SEC = 12.0
 FORCE_MARKET_UNDER_MIN = True
-DEPLOY_ALL_BNB = True           # serbest BNB'nin tamamını coine çevir
+DEPLOY_ALL_BNB = True
+SELL_USE_MARKET = False         # SAT'ta maker tercih (fee düşük)
 
 RSI_PERIOD = 14
 RSI_OVERSOLD = 48.0
 RSI_MAX_BUY = 58.0
-RSI_EXIT = 58.0
+RSI_EXIT = 62.0                 # daha geç / daha yüksekte sat
 EMA_FAST = 7
 EMA_SLOW = 21
 MIN_METHODS_PASS = 2
@@ -164,10 +166,10 @@ class DayStats:
             f"  Satış                : {_c(_RED, str(self.sells))}",
             f"  Kazanan işlem        : {_c(_GREEN, str(self.win_trades))}",
             f"  Kaybeden işlem       : {_c(_RED, str(self.loss_trades))}",
-            f"  Kazanç (brüt)        : {_c(_GREEN, f'+{self.won_bnb:.6f} USDT')}",
-            f"  Kayıp (brüt)         : {_c(_RED, f'-{self.lost_bnb:.6f} USDT')}",
-            f"  Komisyon (tahmini)   : {_c(_ORANGE, f'{self.fees_bnb:.6f} USDT')}  (maker≈{MAKER_FEE*100:.3f}%)",
-            f"  Net (kazanç-kayıp-fee): {_c(net_c, f'{net:+.6f} USDT')}",
+            f"  Kazanç (brüt)        : {_c(_GREEN, f'+{self.won_bnb:.6f} {QUOTE}')}",
+            f"  Kayıp (brüt)         : {_c(_RED, f'-{self.lost_bnb:.6f} {QUOTE}')}",
+            f"  Komisyon (tahmini)   : {_c(_ORANGE, f'{self.fees_bnb:.6f} {QUOTE}')}  (maker≈{MAKER_FEE*100:.3f}%)",
+            f"  Net (kazanç-kayıp-fee): {_c(net_c, f'{net:+.6f} {QUOTE}')}",
             f"  Süre                 : {mins:.1f} dk",
             "=" * 64,
         ]
@@ -191,7 +193,7 @@ class DayStats:
             + " "
             + _c(_ORANGE, f"fee={self.fees_bnb:.5f}")
             + " "
-            + _c(net_c, f"net={net:+.5f} USDT")
+            + _c(net_c, f"net={net:+.5f} {QUOTE}")
             + f" | AL={self.buys} SAT={self.sells} emir={self.orders}",
             flush=True,
         )
@@ -968,17 +970,21 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
         return False
 
     rise = (bid - entry) / entry * 10000.0
-    need = min_rise_bps()
+    need = min_rise_bps()  # fee*safety + MIN_EDGE — erken/ucuz SAT yok
 
-    # RSI güçlendirici: overbought ise eşiği biraz indir
     ohlcv = await ex.klines(symbol)
     closes = [float(r[4]) for r in ohlcv] if ohlcv else []
     rsi_v = rsi_wilder(closes) if closes else None
+    # RSI yüksekse eşiği İNDİRME — komisyona ezilmeyelim; biraz yükselt
     if rsi_v is not None and rsi_v >= RSI_EXIT:
-        need = max(roundtrip_fee_bps() + 4.0, need * 0.85)
+        need = max(need, min_rise_bps())
 
     if rise < need:
         return False
+
+    # net kâr kontrolü (brüt - 2 taraf fee)
+    est_round_fee = entry * qty * MAKER_FEE * 2 * FEE_SAFETY if False else 0.0
+    # qty henüz yok — aşağıda tekrar
 
     tick = ex.tick(symbol)
     price = ex.px(symbol, max(ask, bid + tick))
@@ -995,26 +1001,40 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
     if qty < min_qty or qty * price < min_cost:
         return False
 
-    # iptal + emir peş peşe (hız) — kârda market SAT (hız + fill)
-    await ex.cancel_all(symbol)
-    try:
-        say_order(f"MARKET SELL {symbol} qty≈{qty:.6f}")
-        o = await ex.run(
-            ex.rest.create_order,
-            symbol,
-            "market",
-            "sell",
-            qty,
-            None,
-            {"newClientOrderId": coid()},
+    gross = (price - entry) * qty
+    fee_est = (entry * qty + price * qty) * MAKER_FEE * FEE_SAFETY
+    if SELL_USE_MARKET:
+        fee_est = (entry * qty + price * qty) * TAKER_FEE * FEE_SAFETY
+    if gross <= fee_est:
+        log.info(
+            "skip SAT %s — brüt %.6f ≤ fee≈%.6f (rise %.1f need %.1f)",
+            symbol, gross, fee_est, rise, need,
         )
-        if state.stats is not None:
-            state.stats.ensure_today()
-            state.stats.orders += 1
-            state.stats.fees_bnb += est_fee(qty * bid) * (TAKER_FEE / MAKER_FEE)
-        log.info("MARKET SELL %s qty=%.6f id=%s", symbol, qty, o.get("id"))
-    except Exception as e:
-        log.warning("market sell fail → limit: %s", e)
+        return False
+
+    await ex.cancel_all(symbol)
+    if SELL_USE_MARKET:
+        try:
+            say_order(f"MARKET SELL {symbol} qty≈{qty:.6f}")
+            o = await ex.run(
+                ex.rest.create_order,
+                symbol,
+                "market",
+                "sell",
+                qty,
+                None,
+                {"newClientOrderId": coid()},
+            )
+            if state.stats is not None:
+                state.stats.ensure_today()
+                state.stats.orders += 1
+                state.stats.fees_bnb += est_fee(qty * bid) * (TAKER_FEE / max(MAKER_FEE, 1e-12))
+            log.info("MARKET SELL %s qty=%.6f id=%s", symbol, qty, o.get("id"))
+        except Exception as e:
+            log.warning("market sell fail → limit: %s", e)
+            o = await ex.place_fast(symbol, "sell", qty, price, state.stats)
+    else:
+        # maker SAT — fee düşük, kazanç oranı toparlanır
         o = await ex.place_fast(symbol, "sell", qty, price, state.stats)
     if not o:
         return False
@@ -1037,12 +1057,13 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
         st.lost_bnb += abs(pnl)
 
     rsi_s = f"{rsi_v:.1f}" if rsi_v is not None else "?"
+    net_trade = pnl - fee_est
     say_sell(
         f"{symbol} +{rise:.1f}bps need≥{need:.1f} RSI={rsi_s} "
-        f"pnl={pnl:+.6f}{QUOTE} | bugün satış={st.sells} net≈{st.net():+.5f}{QUOTE}"
+        f"pnl={pnl:+.6f} fee≈{fee_est:.6f} net≈{net_trade:+.6f} {QUOTE} | bugün SAT={st.sells}"
     )
     st.save()
-    log.info("%s SAT +%.1fbps pnl≈%.5f%s fee-safe", symbol, rise, pnl, QUOTE)
+    log.info("%s SAT +%.1fbps pnl≈%.5f fee≈%.5f %s", symbol, rise, pnl, fee_est, QUOTE)
     return True
 
 
@@ -1319,13 +1340,10 @@ async def scan_once(ex: Exchange, state: State) -> None:
     slots_left = 0
     if DEPLOY_ALL_BNB and spendable >= MIN_QUOTE_FREE and empty > 0:
         max_by_cash = max(1, int(spendable // max(MIN_QUOTE_FREE, 1e-12)))
-        slots_left = min(empty, max_by_cash, len(signals) if signals else empty)
-        # sinyal yoksa bile watchlist'ten market dene
-        if slots_left == 0 and signals:
-            slots_left = min(empty, max_by_cash)
+        slots_left = min(empty, max_by_cash)  # sinyal sayısına kilitleme — watchlist doldurur
         log.info(
-            "DAĞITIM | free=%.4f reserve=%.4f spend=%.4f → %d slota (açık=%d hedef=%d)",
-            free_bnb, RESERVE_BNB, spendable, slots_left, open_n, MIN_OPEN_COINS,
+            "DAĞITIM | free=%.4f reserve=%.4f spend=%.4f → %d slota (açık=%d / %d)",
+            free_bnb, RESERVE_BNB, spendable, slots_left, open_n, TOP_N,
         )
 
     bought = 0
@@ -1376,8 +1394,8 @@ async def scan_once(ex: Exchange, state: State) -> None:
 
 async def main_async() -> None:
     print("=" * 64)
-    print("BNB TOP20 · agresif AL · SCAN/FAST saniye sabit")
-    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | min_open={MIN_OPEN_COINS} | RSI_max={RSI_MAX_BUY}")
+    print("BNB · bakiyeyi TOP20'ye dağıt · 3-5'e takılma")
+    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | hedef={TOP_N} coin | reserve={RESERVE_BNB}")
     print(f"CCXT {ccxt.__version__}")
     print("Binance: Pay fees with BNB AÇIK olsun")
     print("=" * 64)
@@ -1392,9 +1410,9 @@ async def main_async() -> None:
     if not bal:
         raise SystemExit("Bakiye yok / ban")
     free = ex.free(bal, QUOTE)
-    print(f"{QUOTE} free≈{free:.4f} | min {MIN_OPEN_COINS} coin")
-    if free < MIN_QUOTE_FREE * MIN_OPEN_COINS:
-        print(f"UYARI: düşük {QUOTE} ({free:.4f}) — 7 coin için daha fazla BNB lazım")
+    print(f"{QUOTE} free≈{free:.4f} | hepsi ~{TOP_N} coine bölünecek (kenarda {RESERVE_BNB})")
+    if free < MIN_QUOTE_FREE * 5:
+        print(f"UYARI: düşük {QUOTE} ({free:.4f})")
 
     state = State(stats=DayStats.load())
     await sync_positions(ex, state, bal)
