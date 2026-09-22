@@ -87,9 +87,9 @@ MAX_DRAWDOWN_RATIO = 0.12
 MAX_ABS_24H_PCT = 18.0
 MIN_24H_PCT = 1.2
 MAX_PAIR_HOLD_SEC = 22 * 60
-MAX_BUY_LEAD = 1
-MIN_WR_TO_BUY = 0.52
-MIN_TRADES_FOR_WR = 6
+MAX_BUY_LEAD = 4
+MIN_WR_TO_BUY = 0.35
+MIN_TRADES_FOR_WR = 16
 
 # Skor: yükselen hacim birincil — mutlak hacim cezalı/ikincil
 W_VOL_RISE = 4.5
@@ -733,6 +733,9 @@ def scan_all_binance(
 
     ranked: List[Tuple[float, str, str, float]] = []
     for base, row in per_base.items():
+        bnb_sym = row.get("bnb_sym") or ""
+        if not bnb_sym:
+            continue  # */BNB yoksa MM açamayız — USDT-only yükselenleri atla
         usdt_vol = float(row["usdt_vol"])
         now_vols[base] = usdt_vol
         if usdt_vol < min_usdt_vol:
@@ -753,13 +756,14 @@ def scan_all_binance(
         score, npass, _ = method_scores(row["t"], row["spr"], usdt_vol, rise_pct, rise_abs)
         if npass < min_pass:
             continue
-        ranked.append((score, base, row.get("bnb_sym") or "", usdt_vol))
+        ranked.append((score, base, bnb_sym, usdt_vol))
     ranked.sort(key=lambda x: -x[0])
     save_vol_snap(now_vols)
     return ranked, scanned, spot_n
 
 
 def all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, str]]:
+    """Tüm aktif */BNB marketleri — last yoksa bile pad için dahil."""
     out: List[Tuple[float, str]] = []
     fx = usdt_fx(tickers)
     bnb_usd = fx.get("BNB") or 0.0
@@ -767,13 +771,15 @@ def all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, s
         if quote != QUOTE or skip_base(base):
             continue
         t = _ticker(tickers, sym)
-        last = float(t.get("last") or t.get("close") or 0)
-        if last <= 0:
-            continue
+        last = float(
+            t.get("last") or t.get("close") or t.get("bid") or t.get("ask") or 0
+        )
         qv = float(t.get("quoteVolume") or 0)
         usdt_vol = qv * bnb_usd if bnb_usd > 0 else qv
         pct = abs(float(t.get("percentage") or 0))
-        out.append((usdt_vol * (1.0 + min(pct, 15.0) / 30.0), sym))
+        # last yoksa skor 0 ama yine listeye gir (zorunlu 15 pad)
+        score = (usdt_vol * (1.0 + min(pct, 15.0) / 30.0)) if last > 0 else 0.0
+        out.append((score, sym))
     out.sort(key=lambda x: -x[0])
     return out
 
@@ -786,8 +792,9 @@ def pick_open_pairs(
     cooldown: Optional[Dict[str, float]] = None,
 ) -> Tuple[List[str], int, int]:
     """
-    Tüm Binance spot tarama → skor havuzu (CANDIDATE_POOL) → n pair.
-    keep: envanterli. cooldown: yeni çıkmış coinleri geçici ele.
+    1) Hacmi yükselen */BNB
+    2) Gevşek tarama
+    3) KESİN: tüm */BNB marketlerinden ≥n (MIN_OPEN) doldur
     """
     n = max(n, MIN_OPEN if FORCE_MIN_OPEN else n)
     keep = keep or set()
@@ -800,17 +807,19 @@ def pick_open_pairs(
     )
     pool: List[str] = []
 
-    def push(sym: str) -> None:
+    def push(sym: str, ignore_cold: bool = False) -> None:
         if not sym or sym in pool:
             return
-        if sym in cold and sym not in keep:
+        if (not ignore_cold) and sym in cold and sym not in keep:
             return
         pool.append(sym)
 
     for s in keep:
         push(s)
+    # önce yükselen hacimli (bnb marketi olanlar)
     for _sc, _b, bnb_sym, _v in ranked:
-        push(bnb_sym)
+        if bnb_sym:
+            push(bnb_sym)
         if len(pool) >= CANDIDATE_POOL:
             break
     if len(pool) < CANDIDATE_POOL:
@@ -819,36 +828,54 @@ def pick_open_pairs(
         )
         scanned = max(scanned, sc2)
         for _sc, _b, bnb_sym, _v in loose:
-            push(bnb_sym)
+            if bnb_sym:
+                push(bnb_sym)
             if len(pool) >= CANDIDATE_POOL:
                 break
-    if len(pool) < n and FORCE_MIN_OPEN:
-        for _qv, sym in all_bnb_pairs(ex, tickers):
-            push(sym)
-            if len(pool) >= max(n, CANDIDATE_POOL):
+
+    bnb_all = all_bnb_pairs(ex, tickers)
+    # her zaman BNB marketleriyle doldur (yükselen filtre 6 bırakmasın)
+    for _qv, sym in bnb_all:
+        push(sym)
+        if len(pool) >= max(n, CANDIDATE_POOL):
+            break
+    # hâlâ <n ise cooldown'u yok say — MIN_OPEN kesin
+    if FORCE_MIN_OPEN and len(pool) < n:
+        for _qv, sym in bnb_all:
+            push(sym, ignore_cold=True)
+            if len(pool) >= n:
                 break
 
-    # keep önce, kalanı havuzdan karışık seç (hep aynı top-20 olmasın)
-    out: List[str] = [s for s in keep if s in pool or True]
-    out = []
+    out: List[str] = []
     for s in keep:
         if s not in out:
             out.append(s)
     rest = [s for s in pool if s not in out]
-    # skor sırası korunarak üst dilimden örnekle
-    top = rest[: max(n * 2, 30)]
-    mid = rest[len(top):]
+    # yükselenler önde (ranked sırası pool başında), sonra hacimli BNB pad
+    top = rest[: max(n * 2, 40)]
+    mid = rest[len(top) :]
     random.shuffle(top)
     for s in top + mid:
         if len(out) >= n:
             break
         out.append(s)
 
+    # son çare: out < MIN_OPEN ise listedeki her BNB pair
+    if FORCE_MIN_OPEN and len(out) < n:
+        for _qv, sym in bnb_all:
+            if sym not in out and sym not in cold:
+                out.append(sym)
+            elif sym not in out:
+                out.append(sym)
+            if len(out) >= n:
+                break
+
     names = ", ".join(x.replace(f"/{QUOTE}", "") for x in out)
     log.info(
-        "TARAMA | spot=%d taranan_coin=%d aday_havuz=%d odak=%d (zorunlu≥%d) → %s",
+        "TARAMA | spot=%d taranan_coin=%d bnb_market=%d aday_havuz=%d odak=%d (zorunlu≥%d) → %s",
         spot_n,
         scanned,
+        len(bnb_all),
         len(pool),
         len(out),
         MIN_OPEN,
@@ -1097,8 +1124,9 @@ class Slot:
         buy_budget = max(0.0, share - inv_bnb)
         if buy_budget < min_cost or inv_bnb >= share * MAX_INVENTORY_RATIO:
             buy_budget = 0.0
-        # KÂR KİLİDİ: AL/SAT + WR
-        if not self.ex.stats.allow_buys():
+        # KÂR KİLİDİ: düşük WR → SADECE-SAT; AMA boş/az dolu slotlara yine AL (sermaye dağılsın)
+        underfilled = inv_bnb < share * 0.30
+        if not self.ex.stats.allow_buys() and not underfilled:
             buy_budget = 0.0
 
         avg_cost = (self.inv_cost / self.inv_qty) if self.inv_qty > 1e-12 else 0.0
@@ -1279,7 +1307,7 @@ class Engine:
         )
         # force_out olanları yeni listeden düş (yeniden aynı turda alma)
         picked = [s for s in picked if s not in force_out or s in keep]
-        # hâlâ MIN_OPEN değilse havuzdan doldur
+        # hâlâ MIN_OPEN değilse doğrudan tüm */BNB ile doldur
         if len(picked) < want_n:
             more, _, _ = pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
             for s in more:
@@ -1287,9 +1315,16 @@ class Engine:
                     picked.append(s)
                 if len(picked) >= want_n:
                     break
+        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
+            for _qv, sym in all_bnb_pairs(self.ex, tickers):
+                if sym in picked or sym in self.banned or (sym in force_out and sym not in keep):
+                    continue
+                picked.append(sym)
+                if len(picked) >= MIN_OPEN:
+                    break
         picked = [s for s in picked if s not in self.banned][:MAX_OPEN]
         if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
-            log.warning("odak %d < MIN_OPEN=%d — yine de açıklarla devam", len(picked), MIN_OPEN)
+            log.warning("odak %d < MIN_OPEN=%d — BNB market yetersiz", len(picked), MIN_OPEN)
         # n_pairs = gerçek açık slot → tüm BNB bu slotlara gider (hayali 15'e bölme yok)
         self.ex.n_pairs = max(1, len(picked))
         budget = self.ex.slot_budget(bal)
