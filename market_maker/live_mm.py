@@ -44,17 +44,20 @@ QUOTE = "BNB"
 SCAN_ALL = True
 MAX_OPEN = 20
 MIN_OPEN = 20                   # zorunlu minimum açık coin
-SCAN_SEC = 120.0                # daha seyrek rotasyon = daha az emir spam
-MIN_QUOTE_VOL = 0.05            # hacim eşiği düşük — oynaklığı kaçırma
-REPLACE_SEC = 45.0              # emir dinlensin — cancel spam = fee/fırsat kaybı
-BALANCE_CACHE_SEC = 12.0
-FILL_POLL_SEC = 15.0
-BOOK_REST_SEC = 10.0
-WORKER_STAGGER_SEC = 0.5
-MAX_BOOK_SPREAD_BPS = 200.0     # oynak pair kitap geniş olabilir — edge'i biz koyarız
-QUOTE_MOVE_BPS = 35.0           # mid bu kadar oynamadan yenileme YOK
+SCAN_SEC = 300.0                # seyrek rescan — ban riski ↓
+MIN_QUOTE_VOL = 0.05
+REPLACE_SEC = 60.0              # emir uzun dinlensin
+BALANCE_CACHE_SEC = 25.0
+FILL_POLL_SEC = 40.0
+BOOK_REST_SEC = 15.0
+WORKER_STAGGER_SEC = 1.5
+LOOP_SLEEP_SEC = 2.5            # 20 pair × 0.2s döngü = ban
+MAX_BOOK_SPREAD_BPS = 200.0
+QUOTE_MOVE_BPS = 40.0
 JOIN_BID = True
-HOLD_QUOTE_MULT = 4.0           # REPLACE_SEC * bu = max dinlenme
+HOLD_QUOTE_MULT = 3.0
+USE_WS = False                  # 20 WS kitap = IP ban; REST yeter
+API_RATE_MS = 500               # ccxt rateLimit
 
 # KÂR > KOMİSYON: round-trip fee üstüne net edge
 MAKER_FEE = 0.00075
@@ -145,6 +148,18 @@ def coid() -> str:
     return ("x-MMBNB" + uuid.uuid4().hex)[:32]
 
 
+_ban_until_ms_shared = 0
+_ban_log_ts = 0.0
+_ban_lock: Optional[asyncio.Lock] = None
+
+
+def _get_ban_lock() -> asyncio.Lock:
+    global _ban_lock
+    if _ban_lock is None:
+        _ban_lock = asyncio.Lock()
+    return _ban_lock
+
+
 def ban_until_ms(err: Exception | str) -> Optional[int]:
     msg = str(err)
     m = re.search(r"banned until (\d+)", msg, re.I)
@@ -156,17 +171,31 @@ def ban_until_ms(err: Exception | str) -> Optional[int]:
 
 
 async def sleep_ban(err: Exception | str) -> None:
-    until = ban_until_ms(err)
-    if not until:
-        await asyncio.sleep(20)
-        return
-    wait = max(5.0, (until - int(time.time() * 1000)) / 1000.0 + 5.0)
-    human = datetime.fromtimestamp(until / 1000, tz=timezone.utc).strftime("%H:%M:%S UTC")
-    log.error("IP BAN — %s kadar bekleniyor (≈%.0fs)", human, wait)
+    """Tek paylaşımlı ban beklemesi — 20 worker aynı anda spam log basmasın."""
+    global _ban_until_ms_shared, _ban_log_ts
+    until = ban_until_ms(err) or (int(time.time() * 1000) + 60_000)
+    async with _get_ban_lock():
+        _ban_until_ms_shared = max(_ban_until_ms_shared, until)
+        target = _ban_until_ms_shared
+    wait = max(5.0, (target - int(time.time() * 1000)) / 1000.0 + 3.0)
+    human = datetime.fromtimestamp(target / 1000, tz=timezone.utc).strftime("%H:%M:%S UTC")
+    now = time.time()
+    if now - _ban_log_ts > 25.0:
+        log.error("IP BAN — %s kadar tek sırada bekleniyor (≈%.0fs)", human, wait)
+        _ban_log_ts = now
     end = time.time() + wait
     while time.time() < end:
-        log.info("ban… %.0fs", end - time.time())
-        await asyncio.sleep(min(30.0, end - time.time()))
+        left = end - time.time()
+        if time.time() - _ban_log_ts > 60.0:
+            log.info("ban… %.0fs", left)
+            _ban_log_ts = time.time()
+        await asyncio.sleep(min(60.0, max(1.0, left)))
+
+
+async def wait_if_banned() -> None:
+    now_ms = int(time.time() * 1000)
+    if _ban_until_ms_shared > now_ms:
+        await sleep_ban(f"banned until {_ban_until_ms_shared}")
 
 
 def roundtrip_fee_bps() -> float:
@@ -254,24 +283,27 @@ class Exchange:
             "apiKey": key,
             "secret": secret,
             "enableRateLimit": True,
-            "rateLimit": 250,
+            "rateLimit": API_RATE_MS,
             "options": {"defaultType": "spot", "adjustForTimeDifference": True},
         }
         self.rest = ccxt.binance(opts)
         self.rest.set_sandbox_mode(False)
         self.ws = None
-        if ccxtpro is not None:
+        if USE_WS and ccxtpro is not None:
             try:
                 self.ws = ccxtpro.binance(opts)
                 self.ws.set_sandbox_mode(False)
             except Exception as e:
                 log.warning("WS yok: %s", e)
+        elif not USE_WS:
+            log.info("WS kapalı (USE_WS=False) — REST kitap, ban riski düşük")
         self._bal: Optional[dict] = None
         self._bal_ts = 0.0
         self._bal_lock = asyncio.Lock()
         self._order_lock = asyncio.Lock()
         self._fee: Dict[str, float] = {}
         self.n_pairs = 1
+        self._last_stats_print = 0.0
         self.stats = DayStats.load()
 
     def deployable_bnb(self, bal: Optional[dict] = None) -> float:
@@ -286,6 +318,7 @@ class Exchange:
         return self.deployable_bnb(bal) / n
 
     async def run(self, fn, *a, **kw):
+        await wait_if_banned()
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: fn(*a, **kw))
 
@@ -812,7 +845,7 @@ class Slot:
             st.fees += abs(fee)
             st.save()
             self.peak_equity = max(self.peak_equity, self.equity())
-            await self.ex.balance(force=True)
+            await self.ex.balance(force=False)
             await self.bal()
 
     def risk_ok(self) -> bool:
@@ -1004,10 +1037,10 @@ class Slot:
             self.last_quote = time.time()
             return
 
-        # Önce iptal → bakiye serbest kalsın → sonra iki yön emir
+        # Önce iptal → bakiye (cache) → iki yön emir
         await self.ex.cancel_all(self.symbol)
-        await asyncio.sleep(0.25)
-        await self.ex.balance(force=True)
+        await asyncio.sleep(0.35)
+        await self.ex.balance(force=False)
         await self.bal()
 
         q = self.quotes()
@@ -1045,9 +1078,10 @@ class Slot:
         if tr:
             self.last_tid = str(tr[-1]["id"])
 
-        use_ws = self.ex.ws is not None
+        use_ws = USE_WS and self.ex.ws is not None
         last_rest = 0.0
         last_print = 0.0
+        last_bal = 0.0
         if use_ws:
             ob = await self.ex.watch_book(self.symbol)
         else:
@@ -1059,6 +1093,7 @@ class Slot:
 
         while self.running:
             try:
+                await wait_if_banned()
                 if self.kill:
                     await self.ex.cancel_all(self.symbol)
                     break
@@ -1071,13 +1106,15 @@ class Slot:
                     if ob:
                         self.on_book(ob)
                     last_rest = time.time()
-                await self.bal()
+                if time.time() - last_bal >= BALANCE_CACHE_SEC:
+                    await self.bal()
+                    last_bal = time.time()
                 if not self.seeded_inv:
                     self.seed_inventory()
                 await self.fills()
                 self.risk_ok()
                 await self.replace()
-                if time.time() - last_print > 90:
+                if time.time() - last_print > 120:
                     print(
                         f"{self.symbol:12} mid={self.book.mid:.6g} "
                         f"base={self.base_total:.6g} rpnl={self.realized:.5f} "
@@ -1085,9 +1122,12 @@ class Slot:
                         f"{'KILL' if self.kill else 'OK'}",
                         flush=True,
                     )
-                    self.ex.stats.print_live()
+                    # bilanço spam yok — en fazla 2 dk'da bir global
+                    if time.time() - self.ex._last_stats_print > 120:
+                        self.ex.stats.print_live()
+                        self.ex._last_stats_print = time.time()
                     last_print = time.time()
-                await asyncio.sleep(0.2 if use_ws else 1.2)
+                await asyncio.sleep(LOOP_SLEEP_SEC)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -1095,7 +1135,7 @@ class Slot:
                 if ban_until_ms(e):
                     await sleep_ban(e)
                 else:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(5)
         await self.ex.cancel_all(self.symbol)
         self.running = False
 
