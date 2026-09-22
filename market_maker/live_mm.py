@@ -2,8 +2,9 @@
 """
 Binance Spot Market Maker — SADECE USDT · 5m YEŞİL
 
-Sadece */USDT market. Hacim yükselen / dip rebound / 5m yeşil.
-≥15 odak, aynı coine 1dk AL yok. Maker fee+edge+toxic kilit.
+Sadece */USDT. 189sn tarama. ≥15 coin kesin.
+Giriş: -20 dip+yeşil+hacim↑ | yüksek hacim+yükselen | hacim dibinden yükselen.
+Aynı coine 1dk AL yok. Geniş fee+edge (komisyon tamponu).
 
 1) API KEY yaz  (USDT bakiye + Pay fees with BNB isteğe bağlı)
 2) pip install "ccxt[pro]"
@@ -43,11 +44,11 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 
 QUOTE = "USDT"                  # SADECE USDT
 SCAN_ALL = True
-FORCE_MIN_OPEN = True
+FORCE_MIN_OPEN = True           # her taramada ≥15 kesin
 MAX_OPEN = 20
 MIN_OPEN = 15
-CANDIDATE_POOL = 120
-SCAN_SEC = 90.0
+CANDIDATE_POOL = 200
+SCAN_SEC = 189.0                # 189 sn'de bir tarama
 REPLACE_SEC = 75.0
 BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 20.0
@@ -59,39 +60,39 @@ USE_WS = False
 API_RATE_MS = 400
 ROTATE_COOLDOWN_SEC = 5 * 60
 KEEP_GRACE_SEC = 45.0
-SAME_COIN_BUY_SEC = 60.0
+SAME_COIN_BUY_SEC = 60.0        # aynı coine 1 dk ara
 KLINE_TF = "5m"
 KLINE_LIMIT = 12
-KLINE_TOP_N = 50
+KLINE_TOP_N = 80                # daha çok coine 5m yeşil bak
 
-MIN_USDT_VOL = 500.0
-SOFT_USDT_VOL = 2_000.0
-FLOOR_USDT_VOL = 500.0
-HIGH_USDT_VOL = 150_000.0
-MAX_BOOK_SPREAD_BPS = 120.0
+MIN_USDT_VOL = 400.0
+SOFT_USDT_VOL = 1_000.0
+FLOOR_USDT_VOL = 400.0
+HIGH_USDT_VOL = 100_000.0       # yüksek hacim eşiği
+MAX_BOOK_SPREAD_BPS = 140.0
 MIN_BOOK_SPREAD_BPS = 6.0
 QUOTE_MOVE_BPS = 40.0
 JOIN_TOUCH = False
-MIN_VOL_RISE_PCT = 0.03
-MIN_VOL_RISE_USDT = 1_500.0
-DIP_PCT_LO = -25.0
-DIP_PCT_HI = -5.0
-MAX_ABS_24H_PCT = 28.0
-MIN_24H_PCT = 0.2
+MIN_VOL_RISE_PCT = 0.02         # hacim yükselmeye başladı
+MIN_VOL_RISE_USDT = 800.0
+DIP_PCT_LO = -28.0              # ~-20 dip bandı
+DIP_PCT_HI = -8.0
+MAX_ABS_24H_PCT = 35.0
+MIN_24H_PCT = 0.0
 
 MAKER_FEE = 0.00075
-FEE_SAFETY = 2.0
-MIN_EDGE_BPS = 65.0
-MIN_SELL_EDGE_BPS = 55.0
-BASE_SPREAD_TICKS = 4.0
+FEE_SAFETY = 2.8                # komisyon tamponu ↑ — paramız eksilmesin
+MIN_EDGE_BPS = 90.0             # net edge yüksek
+MIN_SELL_EDGE_BPS = 80.0
+BASE_SPREAD_TICKS = 5.0
 BEHIND_TICKS = 2.0
-MAX_HALF_SPREAD_BPS = 120.0
+MAX_HALF_SPREAD_BPS = 150.0
 MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
-MIN_QUOTE_FREE = 6.0            # USDT slot min
+MIN_QUOTE_FREE = 5.0            # USDT slot min (≥15 için)
 RESERVE_USDT = 2.0
 USE_QUOTE_FRAC = 0.999
-MIN_USDT_PER_SLOT = 6.0
+MIN_USDT_PER_SLOT = 5.0
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
 MAX_PAIR_HOLD_SEC = 15 * 60
@@ -102,21 +103,23 @@ TOXIC_LOSS_STREAK = 2
 TOXIC_PAUSE_SEC = 10 * 60
 MOMENTUM_BUY_BPS = -12.0
 POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC
-VOL_WIDEN_MULT = 2.2
+VOL_WIDEN_MULT = 2.4
 SKEW_STRENGTH = 0.85
 
-W_VOL_RISE = 4.5
-W_VOL_RISE_PCT = 3.0
-W_VOLUME = 0.55
-W_HIGH_VOL_RISE = 2.2
-W_DIP_REBOUND = 3.5
-W_GREEN_5M = 3.2
-W_VOL_5M = 2.4
+# Tüm giriş metodları (skor ağırlıkları)
+W_VOL_RISE = 5.0                # hacim yükseliyor
+W_VOL_RISE_PCT = 3.5
+W_VOLUME = 0.60
+W_HIGH_VOL_RISE = 3.0           # yüksek hacim + yükselmeye devam
+W_DIP_REBOUND = 4.5             # -20 dip rebound
+W_GREEN_5M = 4.0                # 5m yeşile dönüş
+W_VOL_5M = 3.0
+W_VOL_RECOVER = 3.2             # hacim -lerde ama yükselmeye başlamış
 W_VOLATILITY = 0.9
 W_RANGE = 0.60
 W_SPREAD_FIT = 1.20
 W_MOMENTUM = 0.35
-MIN_METHODS_PASS = 0
+MIN_METHODS_PASS = 0            # metodlar skorlar; elemez — pad ≥15
 FALLBACK_METHODS_PASS = 0
 
 SKIP_BASES = {
@@ -632,7 +635,14 @@ def method_scores(
     green_5m: float = 0.0,
     vol_5m_rise: float = 0.0,
 ) -> Tuple[float, int, Dict[str, float]]:
-    """Hafif filtre: skor sıralar, sert eleme yapmaz (MIN_METHODS_PASS=0 ile uyumlu)."""
+    """
+    Tüm giriş metodları (skor; elemez):
+    1) Hacim yükseliyor
+    2) Yüksek hacim + yükselmeye devam
+    3) ~-20 dip + rebound
+    4) 5m yeşile dönüş + 5m hacim↑
+    5) Hacim -lerde ama yükselmeye başlamış (recover)
+    """
     pct_signed = float(t.get("percentage") or 0)
     pct = abs(pct_signed)
     last = float(t.get("last") or t.get("close") or 0)
@@ -640,6 +650,7 @@ def method_scores(
     low = float(t.get("low") or 0)
     vol_abs = pct
 
+    # 1) Hacim yükseliyor
     s_rise = 0.0
     if vol_rise_abs > 0:
         s_rise += math.log1p(vol_rise_abs) * W_VOL_RISE
@@ -647,21 +658,41 @@ def method_scores(
         s_rise += min(vol_rise_pct, 3.0) * 100.0 * W_VOL_RISE_PCT
     pass_rise = vol_rise_pct > 0 or vol_rise_abs > 0 or vol_rise_pct >= MIN_VOL_RISE_PCT
 
+    # 2) Yüksek hacim + yükselmeye devam
     s_high = 0.0
     if usdt_vol >= HIGH_USDT_VOL and vol_rise_pct > 0:
-        s_high = math.log1p(usdt_vol / HIGH_USDT_VOL) * 40.0 * W_HIGH_VOL_RISE + min(vol_rise_pct, 1.0) * 50.0
+        s_high = (
+            math.log1p(usdt_vol / HIGH_USDT_VOL) * 40.0 * W_HIGH_VOL_RISE
+            + min(vol_rise_pct, 1.0) * 55.0
+        )
         pass_rise = True
 
+    # 3) ~-20 dip rebound
     s_dip = 0.0
     if DIP_PCT_LO <= pct_signed <= DIP_PCT_HI:
         depth = min(abs(pct_signed), 25.0) / 25.0
         rise_boost = 1.0 + min(max(vol_rise_pct, 0.0), 1.5)
-        s_dip = (35.0 + depth * 70.0) * W_DIP_REBOUND * rise_boost
+        s_dip = (40.0 + depth * 80.0) * W_DIP_REBOUND * rise_boost
         pass_rise = True
 
+    # 4) 5m yeşil + 5m hacim
     s_green = max(0.0, green_5m) * W_GREEN_5M
     s_v5 = max(0.0, vol_5m_rise) * W_VOL_5M
     pass_5m = green_5m > 0.2 or vol_5m_rise > 0.05
+    # dip + yeşil mum → ekstra boost (kullanıcı kuralı)
+    if DIP_PCT_LO <= pct_signed <= DIP_PCT_HI and green_5m >= 0.6 and vol_rise_pct > 0:
+        s_dip += 60.0 * W_DIP_REBOUND
+        s_green += 25.0 * W_GREEN_5M
+
+    # 5) Hacim -lerde / düşük ama yükselmeye başlamış
+    s_recover = 0.0
+    soft_vol = usdt_vol < HIGH_USDT_VOL
+    if soft_vol and vol_rise_pct >= MIN_VOL_RISE_PCT:
+        s_recover = (
+            min(vol_rise_pct, 2.0) * 70.0 * W_VOL_RECOVER
+            + math.log1p(max(0.0, vol_rise_abs)) * 0.8 * W_VOL_RECOVER
+        )
+        pass_rise = True
 
     s_vol = min(vol_abs, 18.0) * W_VOLATILITY
     pass_vol = vol_abs <= MAX_ABS_24H_PCT or (DIP_PCT_LO <= pct_signed <= DIP_PCT_HI)
@@ -670,18 +701,18 @@ def method_scores(
     else:
         rng = max(vol_abs * 0.8, 0.5)
     s_range = min(rng, 25.0) * W_RANGE
-    pass_range = rng <= 45.0  # gevşek
+    pass_range = rng <= 50.0
     s_vol_amt = math.log1p(max(0.0, usdt_vol)) * W_VOLUME
     pass_qv = usdt_vol >= FLOOR_USDT_VOL
     need = min_spread_bps()
     if spr_bps <= 0:
-        s_spread, pass_spr = 0.0, True  # spr yoksa eleme
+        s_spread, pass_spr = 0.0, True
     elif spr_bps <= MAX_BOOK_SPREAD_BPS * 1.25:
         s_spread = max(0.0, (MAX_BOOK_SPREAD_BPS * 1.25 - abs(spr_bps - need))) * W_SPREAD_FIT * 0.08
         pass_spr = True
     else:
         s_spread = 0.0
-        pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS * 1.5
+        pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS * 1.6
     s_mom = max(0.0, pct_signed) * W_MOMENTUM
     pass_mom = pct_signed <= MAX_ABS_24H_PCT and pct_signed >= -abs(MAX_ABS_24H_PCT)
     parts = {
@@ -690,6 +721,7 @@ def method_scores(
         "dip": s_dip,
         "g5": s_green,
         "v5": s_v5,
+        "recover": s_recover,
         "vol": s_vol,
         "range": s_range,
         "qv": s_vol_amt,
@@ -877,12 +909,20 @@ def scan_all_binance(
             rise_pct = 0.0
         is_dip = DIP_PCT_LO <= pct_signed <= DIP_PCT_HI
         is_high_rising = usdt_vol >= HIGH_USDT_VOL and rise_pct > 0
-        rising_ok = rise_pct >= MIN_VOL_RISE_PCT or rise_abs >= MIN_VOL_RISE_USDT or rise_pct > 0
+        is_vol_recover = rise_pct >= MIN_VOL_RISE_PCT or rise_abs >= MIN_VOL_RISE_USDT
+        rising_ok = is_vol_recover or rise_pct > 0
         if require_rise and prev and not (rising_ok or is_dip or is_high_rising):
             continue
         score, npass, _ = method_scores(row["t"], eff_spr, usdt_vol, rise_pct, rise_abs)
         if min_pass > 0 and npass < min_pass and not (is_dip or is_high_rising or rising_ok):
             continue
+        # Öncelik boost: dip / yüksek-hacim-yükselen / recover
+        if is_dip and rising_ok:
+            score *= 1.25
+        if is_high_rising:
+            score *= 1.20
+        if is_vol_recover and usdt_vol < HIGH_USDT_VOL:
+            score *= 1.12
         ranked.append((score, base, trade_sym, usdt_vol))
     ranked.sort(key=lambda x: -x[0])
     save_vol_snap(now_vols)
@@ -893,27 +933,34 @@ async def enrich_ranked_5m(
     ex: Exchange,
     ranked: List[Tuple[float, str, str, float]],
 ) -> List[Tuple[float, str, str, float]]:
-    """Üst adaylara 5m yeşil mum + 5m hacim artışı skoru ekle (elemez, sadece sıralar)."""
+    """5m yeşil + hacim↑ skoru; dip+yeşil coinleri öne alır."""
     if not ranked:
         return ranked
     enriched: List[Tuple[float, str, str, float]] = []
-    n_check = min(len(ranked), max(KLINE_TOP_N, 50))
+    n_check = min(len(ranked), max(KLINE_TOP_N, 80))
     top = ranked[:n_check]
     rest = ranked[n_check:]
-    green_n = 0
+    green_n = dip_green_n = 0
     for sc, base, trade_sym, usdt_vol in top:
         g5 = v5 = 0.0
         if trade_sym:
             ohlcv = await ex.ohlcv(trade_sym, KLINE_TF, KLINE_LIMIT)
             g5, v5 = analyze_5m_ohlcv(ohlcv)
-            await asyncio.sleep(0.06)
-        bonus = g5 * W_GREEN_5M * 8.0 + v5 * 100.0 * W_VOL_5M
-        if g5 >= 0.8:
+            await asyncio.sleep(0.05)
+        bonus = g5 * W_GREEN_5M * 10.0 + v5 * 120.0 * W_VOL_5M
+        # -20 dip + yeşile dönüş + hacim↑ → kesin öncelik
+        if g5 >= 0.7 and v5 > 0:
+            bonus += 80.0 * W_DIP_REBOUND
             green_n += 1
+        if g5 >= 0.8:
+            dip_green_n += 1
         enriched.append((sc + bonus, base, trade_sym, usdt_vol))
     enriched.extend(rest)
     enriched.sort(key=lambda x: -x[0])
-    log.info("5m kontrol | aday=%d yeşil=%d tf=%s (sıralama, eleme yok)", len(top), green_n, KLINE_TF)
+    log.info(
+        "5m kontrol | aday=%d yeşil=%d güçlü=%d tf=%s",
+        len(top), green_n, dip_green_n, KLINE_TF,
+    )
     return enriched
 
 
@@ -945,10 +992,10 @@ async def pick_open_pairs(
     cooldown: Optional[Dict[str, float]] = None,
 ) -> Tuple[List[str], int, int]:
     """
-    1) Hacmi yükselen / yüksek+yükselen / -20 dip rebound
+    1) Hacim yükselen / yüksek+yükselen / -20 dip+yeşil / hacim recover
     2) 5m yeşil mum + 5m hacim artışı
     3) Rotasyon: soğuk coinleri ele
-    4) Pad: likit */USDT ≥n
+    4) Pad: likit */USDT — ≥15 kesin
     """
     n = max(n, MIN_OPEN if FORCE_MIN_OPEN else n)
     keep = keep or set()
@@ -1506,14 +1553,16 @@ class Engine:
                 force_out.add(sym)
 
         fundable = max(0, int(spend_usdt / MIN_USDT_PER_SLOT))
-        want_n = max(MIN_OPEN, MAX_OPEN if FORCE_MIN_OPEN else min(MAX_OPEN, fundable))
-        want_n = min(want_n, max(fundable, MIN_OPEN if FORCE_MIN_OPEN else fundable), MAX_OPEN)
+        # FORCE_MIN_OPEN: her taramada ≥15 kesin (bakiye yetmese bile ince slot)
+        if FORCE_MIN_OPEN:
+            want_n = max(MIN_OPEN, min(MAX_OPEN, max(fundable, MIN_OPEN)))
+        else:
+            want_n = min(MAX_OPEN, max(1, fundable))
         if fundable < MIN_OPEN:
             log.warning(
-                "fonlanabilir≈%d <15 (USDT slot≤%d) — mümkün olan kadar açılacak",
-                fundable, fundable,
+                "fonlanabilir≈%d <15 — yine de ≥%d açılacak (ince USDT slot)",
+                fundable, MIN_OPEN,
             )
-            want_n = max(fundable, len(keep), 1)
 
         picked, scanned, pool_n = await pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
@@ -1521,7 +1570,7 @@ class Engine:
         picked = [s for s in picked if s.endswith("/USDT")]
         picked = [s for s in picked if s not in force_out or s in keep]
         if len(picked) < want_n:
-            more, _, _ = await pick_open_pairs(self.ex, tickers, want_n + 20, keep=keep, cooldown=self.cooldown)
+            more, _, _ = await pick_open_pairs(self.ex, tickers, want_n + 30, keep=keep, cooldown=self.cooldown)
             for s in more:
                 if not s.endswith("/USDT"):
                     continue
@@ -1529,21 +1578,23 @@ class Engine:
                     picked.append(s)
                 if len(picked) >= want_n:
                     break
-        if FORCE_MIN_OPEN and len(picked) < want_n:
+        # Pad: tüm likit */USDT — ≥15 kesin
+        if len(picked) < MIN_OPEN:
             for _qv, sym in all_trade_pairs(self.ex, tickers):
                 if sym in picked or sym in self.banned or (sym in force_out and sym not in keep):
                     continue
                 picked.append(sym)
-                if len(picked) >= want_n:
+                if len(picked) >= MIN_OPEN:
                     break
 
         picked = [s for s in picked if s not in self.banned and s.endswith("/USDT")][:MAX_OPEN]
-        if fundable > 0 and len(picked) > fundable:
+        # Bakiye az olsa bile MIN_OPEN'ı koru (slot_budget otomatik incelir)
+        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
+            log.error("odak %d < MIN_OPEN=%d — USDT market/pad yetersiz", len(picked), MIN_OPEN)
+        elif not FORCE_MIN_OPEN and fundable > 0 and len(picked) > fundable:
             keep_syms = [s for s in picked if s in keep]
             extra = [s for s in picked if s not in keep]
             picked = (keep_syms + extra)[: max(fundable, len(keep_syms))]
-        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
-            log.warning("odak %d < MIN_OPEN=%d — market/bakiye sınırı", len(picked), MIN_OPEN)
 
         self.ex.n_pairs = max(1, len(picked))
         self.ex._buy_reserved = {s: v for s, v in self.ex._buy_reserved.items() if s in picked}
