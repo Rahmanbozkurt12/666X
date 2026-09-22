@@ -43,24 +43,26 @@ QUOTE = "BNB"
 # Az pair = her slota daha çok BNB + gerçek AL/SAT (0.06 BNB için 3 ideal)
 NUM_PAIRS = 3
 MIN_QUOTE_VOL = 5.0
-REPLACE_SEC = 6.0               # gereksiz iptal-spam azalt
+REPLACE_SEC = 14.0              # emir dinlensin — sık iptal = alım yok
 BALANCE_CACHE_SEC = 8.0         # iptal sonrası taze bakiye
-FILL_POLL_SEC = 20.0
+FILL_POLL_SEC = 12.0
 BOOK_REST_SEC = 8.0
 WORKER_STAGGER_SEC = 2.0
 MAX_BOOK_SPREAD_BPS = 55.0      # OPEN gibi 80bps pair'leri alma
-QUOTE_MOVE_BPS = 8.0            # mid bu kadar oynamazsa emir yenileme
+QUOTE_MOVE_BPS = 15.0           # mid bu kadar oynamazsa emir yenileme
+JOIN_BID = True                 # best bid'e yapış — 1 tick geride kalma
 
 # Spread: komisyonu geçsin
 MAKER_FEE = 0.00075
 FEE_SAFETY = 1.5
 MIN_EDGE_BPS = 12.0             # fee üstü
 BASE_SPREAD_TICKS = 3.0
-MAX_INVENTORY_RATIO = 0.92
+MAX_INVENTORY_RATIO = 0.95
+TARGET_INVENTORY_RATIO = 0.45   # iki yön MM hedefi
 MIN_QUOTE_FREE = 0.004
 RESERVE_BNB = 0.002
 POST_ONLY = True
-MAX_DRAWDOWN_RATIO = 0.12
+MAX_DRAWDOWN_RATIO = 0.18       # mark-to-market (nakit alış ≠ zarar)
 
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
@@ -405,7 +407,7 @@ class Exchange:
                 )
                 self.stats.ensure_today()
                 self.stats.orders += 1
-                self.stats.fees += amount * price * self.maker(symbol)
+                # fee sadece gerçek fill'de (iptal edilen emir komisyon yemez)
                 self.stats.save()
                 return o
             except Exception as e:
@@ -426,7 +428,6 @@ class Exchange:
                         )
                         self.stats.ensure_today()
                         self.stats.orders += 1
-                        self.stats.fees += amount * price * self.maker(symbol)
                         return o
                     except Exception as e2:
                         log.warning("post-only fail %s %s: %s", side, symbol, e2)
@@ -489,9 +490,17 @@ class Slot:
     base_free: float = 0.0
     quote_free: float = 0.0
     base_total: float = 0.0
-    realized: float = 0.0
+    realized: float = 0.0          # kapanmış round-trip PnL (BNB)
+    inv_qty: float = 0.0           # maliyet takibi (adet)
+    inv_cost: float = 0.0          # bu envanterin BNB maliyeti
+    peak_equity: float = 0.0
+    seeded_inv: bool = False
     last_quote: float = 0.0
     last_mid_quoted: float = 0.0
+    last_bid: float = 0.0
+    last_ask: float = 0.0
+    last_bid_sz: float = 0.0
+    last_ask_sz: float = 0.0
     last_fill_poll: float = 0.0
     seen: Set[str] = field(default_factory=set)
     last_tid: Optional[str] = None
@@ -525,17 +534,43 @@ class Slot:
         return math.sqrt(sum(r * r for r in rets) / len(rets)) * math.sqrt(400)
 
     def inv_pos(self) -> float:
+        """+1 = fazla base (sat), -1 = az base (al). Hedef ~TARGET_INVENTORY_RATIO."""
         mid = self.book.mid
         if mid <= 0 or self.slot_bnb <= 0:
             return 0.0
-        max_b = (self.slot_bnb * MAX_INVENTORY_RATIO) / mid
-        return max(-1.0, min(1.0, self.base_total / max_b)) if max_b else 0.0
+        target = (self.slot_bnb * TARGET_INVENTORY_RATIO) / mid
+        if target <= 0:
+            return 0.0
+        return max(-1.0, min(1.0, (self.base_total - target) / target))
 
     def min_full_spread(self) -> float:
         mid = self.book.mid
         tick = self.ex.tick(self.symbol)
         fee = max(self.ex.maker(self.symbol), MAKER_FEE) * FEE_SAFETY * 2.0
         return max(mid * fee + mid * (MIN_EDGE_BPS / 10000.0), tick * max(2.0, BASE_SPREAD_TICKS))
+
+    def equity(self) -> float:
+        mid = self.book.mid
+        open_mtm = 0.0
+        if self.inv_qty > 0 and mid > 0:
+            open_mtm = self.inv_qty * mid - self.inv_cost
+        elif self.base_total > 0 and mid > 0 and self.inv_qty <= 0:
+            # seed öncesi kaba MTM
+            open_mtm = 0.0
+        return self.realized + open_mtm
+
+    def seed_inventory(self) -> None:
+        """Başlangıç bakiyesini maliyet olarak mid'den işaretle — alış ≠ DD."""
+        if self.seeded_inv:
+            return
+        mid = self.book.mid
+        if mid <= 0:
+            return
+        qty = max(0.0, self.base_total)
+        self.inv_qty = qty
+        self.inv_cost = qty * mid
+        self.seeded_inv = True
+        self.peak_equity = max(self.peak_equity, self.equity())
 
     async def bal(self) -> None:
         b = await self.ex.balance()
@@ -562,26 +597,55 @@ class Slot:
             amt = float(t.get("amount") or 0)
             px = float(t.get("price") or 0)
             fee = float((t.get("fee") or {}).get("cost") or 0)
+            if amt <= 0 or px <= 0:
+                continue
             st = self.ex.stats
             st.ensure_today()
             if side == "buy":
-                self.realized -= amt * px + fee
+                # alış: envanter maliyeti — realized düşmez (nakit çıkışı ≠ zarar)
+                self.inv_cost += amt * px + fee
+                self.inv_qty += amt
                 st.buys += 1
                 say_buy(f"{self.symbol} FILL {amt:.6g} @ {px:.8g}")
             else:
-                self.realized += amt * px - fee
+                # satış: maliyet düş, fark = realized PnL
+                if self.inv_qty > 1e-12:
+                    avg = self.inv_cost / self.inv_qty
+                    used = min(amt, self.inv_qty)
+                    cost = avg * used
+                    self.inv_cost = max(0.0, self.inv_cost - cost)
+                    self.inv_qty = max(0.0, self.inv_qty - used)
+                    # fazla satım (seed dışı) — kalanı mid maliyet say
+                    extra = amt - used
+                    if extra > 1e-12:
+                        mid = self.book.mid or px
+                        cost += extra * mid
+                else:
+                    mid = self.book.mid or px
+                    cost = amt * mid
+                pnl = amt * px - fee - cost
+                self.realized += pnl
+                if pnl >= 0:
+                    st.won += pnl
+                    st.win_trades += 1
+                else:
+                    st.lost += -pnl
+                    st.loss_trades += 1
                 st.sells += 1
-                say_sell(f"{self.symbol} FILL {amt:.6g} @ {px:.8g}")
-            if self.realized >= 0:
-                st.won = max(st.won, 0)  # keep; realized slot-level
+                say_sell(f"{self.symbol} FILL {amt:.6g} @ {px:.8g} pnl={pnl:+.6f}")
             st.fees += abs(fee)
             st.save()
+            self.peak_equity = max(self.peak_equity, self.equity())
             await self.ex.balance(force=True)
+            await self.bal()
 
     def risk_ok(self) -> bool:
-        dd = -min(0.0, self.realized)
+        # Mark-to-market: alış maliyeti DD sayılmaz; açık pozisyon + kapalı PnL
+        eq = self.equity()
+        self.peak_equity = max(self.peak_equity, eq, 0.0)
+        dd = self.peak_equity - eq
         if self.slot_bnb > 0 and dd > self.slot_bnb * MAX_DRAWDOWN_RATIO:
-            log.error("%s KILL DD %.5f", self.symbol, dd)
+            log.error("%s KILL DD %.5f (mtm eq=%.5f)", self.symbol, dd, eq)
             self.kill = True
             return False
         return True
@@ -602,52 +666,78 @@ class Slot:
             mid * 0.00025,
             min(3.0 * max(self.vol(), 0.0004) * mid * 0.04, mid * 0.006),
         )
-        skew = max(-half * 0.3, min(half * 0.3, -self.inv_pos() * 2 * tick))
+        ip = self.inv_pos()
+        # fazla base → bid düşür / ask yaklaştır; az base → bid yükselt
+        skew = max(-half * 0.45, min(half * 0.45, -ip * half * 0.55))
         bid = mid - half + skew
         ask = mid + half + skew
         if ask - bid < self.min_full_spread():
             half = self.min_full_spread() / 2.0
-            bid, ask = mid - half, mid + half
+            bid, ask = mid - half + skew * 0.5, mid + half + skew * 0.5
 
         bid = self.ex.px(self.symbol, bid)
         ask = self.ex.px(self.symbol, ask)
-        if self.book.bid > 0 and bid >= self.book.bid:
+
+        # Best bid'e yapış (LIMIT_MAKER) — 1 tick geride kalınca alım neredeyse yok
+        if JOIN_BID and self.book.bid > 0:
+            join = self.book.bid
+            if ask - join >= self.min_full_spread() * 0.85 and join < ask:
+                bid = self.ex.px(self.symbol, join)
+            elif bid >= self.book.bid:
+                bid = self.ex.px(self.symbol, self.book.bid - tick)
+        elif self.book.bid > 0 and bid >= self.book.bid:
             bid = self.ex.px(self.symbol, self.book.bid - tick)
+
         if self.book.ask > 0 and ask <= self.book.ask:
-            ask = self.ex.px(self.symbol, self.book.ask + tick)
-        if ask <= bid or ask - bid < self.min_full_spread() * 0.9:
+            # ask tarafında da best ask'a join (post-only çaprazlama)
+            join_ask = self.book.ask
+            if join_ask - bid >= self.min_full_spread() * 0.85 and join_ask > bid:
+                ask = self.ex.px(self.symbol, join_ask)
+            else:
+                ask = self.ex.px(self.symbol, self.book.ask + tick)
+
+        if ask <= bid or ask - bid < self.min_full_spread() * 0.85:
             return None
 
         min_qty, min_cost = self.ex.limits(self.symbol)
-        # Slot'a özel bütçe — global BNB'yi tek pair yemesin
-        buy_budget = min(self.slot_bnb * 0.95, max(0.0, self.quote_free) * 0.98)
+        # Slot bütçesi — envanter hedefine göre alım boyutu
+        inv_bnb = self.base_total * mid
+        room = max(0.0, self.slot_bnb * MAX_INVENTORY_RATIO - inv_bnb)
+        buy_budget = min(self.slot_bnb * 0.95, max(0.0, self.quote_free) * 0.92, max(room, 0.0))
+        # hedefe ulaşmamışsa en az min_cost kadar yer aç
+        if room < min_cost and inv_bnb < self.slot_bnb * TARGET_INVENTORY_RATIO:
+            buy_budget = min(self.slot_bnb * 0.5, max(0.0, self.quote_free) * 0.92)
         sell_base = max(self.base_free, 0.0)
 
-        target = max(min_cost * 1.05, self.slot_bnb * 0.90)
+        target = max(min_cost * 1.05, self.slot_bnb * 0.55)
         sz = target / mid
-        ip = self.inv_pos()
-        bid_sz = sz * max(0.5, 1 + ip * 0.15)
-        ask_sz = sz * max(0.5, 1 - ip * 0.15)
+        # az envanter → daha büyük bid; fazla → daha büyük ask
+        bid_sz = sz * max(0.55, 1.0 - ip * 0.35)
+        ask_sz = sz * max(0.55, 1.0 + ip * 0.35)
 
-        if buy_budget >= min_cost and buy_budget >= MIN_QUOTE_FREE:
+        if buy_budget >= min_cost and buy_budget >= MIN_QUOTE_FREE * 0.5:
             bid_sz = min(bid_sz, buy_budget / mid)
         else:
             bid_sz = 0.0
 
         if sell_base * mid >= min_cost * 0.95:
-            ask_sz = min(ask_sz, sell_base * 0.98, self.slot_bnb / mid * 1.2)
+            ask_sz = min(ask_sz, sell_base * 0.98, self.slot_bnb / mid * 1.25)
         else:
             ask_sz = 0.0
 
-        if self.base_total * mid >= self.slot_bnb * MAX_INVENTORY_RATIO:
+        if inv_bnb >= self.slot_bnb * MAX_INVENTORY_RATIO:
             bid_sz = 0.0
 
         bid_sz = self.ex.amt(self.symbol, bid_sz)
         ask_sz = self.ex.amt(self.symbol, ask_sz)
         if bid_sz > 0 and bid_sz * bid < min_cost:
-            bid_sz = 0.0
+            # min notional'a büyüt (bütçe yetiyorsa)
+            need = min_cost / bid * 1.02
+            if need * bid <= buy_budget + 1e-12:
+                bid_sz = self.ex.amt(self.symbol, need)
+            if bid_sz * bid < min_cost:
+                bid_sz = 0.0
         if ask_sz > 0 and ask_sz * ask < min_cost:
-            # min notional için büyütmeyi dene
             need = min_cost / ask
             if sell_base >= need:
                 ask_sz = self.ex.amt(self.symbol, need * 1.02)
@@ -661,11 +751,33 @@ class Slot:
         if self.kill:
             await self.ex.cancel_all(self.symbol)
             return
-        # mid az oynadıysa ve iki yön de boş değilse skip (spam/fee)
+        # mid az oynadıysa dinlenen emri bozma (alım şansı kaçmasın)
         if self.last_mid_quoted > 0 and self.book.mid > 0:
             moved = abs(self.book.mid - self.last_mid_quoted) / self.last_mid_quoted * 10000.0
-            if moved < QUOTE_MOVE_BPS and time.time() - self.last_quote < REPLACE_SEC * 2:
+            hold = REPLACE_SEC * 3.0
+            if moved < QUOTE_MOVE_BPS and time.time() - self.last_quote < hold:
                 return
+
+        q = self.quotes()
+        if not q:
+            self.last_quote = time.time()
+            return
+        bid, ask, bid_sz, ask_sz = q
+
+        # Yeni fiyat/adet neredeyse aynıysa iptal-spam yok
+        same_bid = (
+            self.last_bid > 0
+            and abs(bid - self.last_bid) / self.last_bid * 10000.0 < 3.0
+            and abs(bid_sz - self.last_bid_sz) <= max(1e-8, self.last_bid_sz * 0.08)
+        )
+        same_ask = (
+            self.last_ask > 0
+            and abs(ask - self.last_ask) / self.last_ask * 10000.0 < 3.0
+            and abs(ask_sz - self.last_ask_sz) <= max(1e-8, self.last_ask_sz * 0.08)
+        )
+        if (bid_sz <= 0 or same_bid) and (ask_sz <= 0 or same_ask) and (self.last_bid > 0 or self.last_ask > 0):
+            self.last_quote = time.time()
+            return
 
         # Önce iptal → bakiye serbest kalsın → sonra iki yön emir
         await self.ex.cancel_all(self.symbol)
@@ -676,6 +788,8 @@ class Slot:
         q = self.quotes()
         if not q:
             self.last_quote = time.time()
+            self.last_bid = self.last_ask = 0.0
+            self.last_bid_sz = self.last_ask_sz = 0.0
             return
         bid, ask, bid_sz, ask_sz = q
 
@@ -687,6 +801,8 @@ class Slot:
 
         self.last_quote = time.time()
         self.last_mid_quoted = self.book.mid
+        self.last_bid, self.last_ask = bid, ask
+        self.last_bid_sz, self.last_ask_sz = bid_sz, ask_sz
         spr = (ask - bid) / mid * 10000 if (mid := self.book.mid) else 0
         log.info(
             "%s quote BUY %.8g×%.6g | SELL %.8g×%.6g | spr=%.1fbps | qFree=%.4f baseFree=%.6g",
@@ -713,6 +829,7 @@ class Slot:
             ob = await self.ex.book_rest(self.symbol)
         if ob:
             self.on_book(ob)
+            self.seed_inventory()
             await self.replace()
 
         while self.running:
@@ -730,6 +847,8 @@ class Slot:
                         self.on_book(ob)
                     last_rest = time.time()
                 await self.bal()
+                if not self.seeded_inv:
+                    self.seed_inventory()
                 await self.fills()
                 self.risk_ok()
                 await self.replace()
@@ -737,6 +856,7 @@ class Slot:
                     print(
                         f"{self.symbol:12} mid={self.book.mid:.6g} "
                         f"base={self.base_total:.6g} rpnl={self.realized:.5f} "
+                        f"eq={self.equity():+.5f} "
                         f"{'KILL' if self.kill else 'OK'}",
                         flush=True,
                     )
