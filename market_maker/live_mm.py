@@ -49,7 +49,7 @@ MIN_OPEN = 15                   # KESİN en az 15 coin
 CANDIDATE_POOL = 80             # yükselen hacim havuzu
 SCAN_SEC = 90.0                 # sık tarama = hacim artışını yakala
 REPLACE_SEC = 90.0
-BALANCE_CACHE_SEC = 20.0
+BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 20.0
 BOOK_REST_SEC = 12.0
 WORKER_STAGGER_SEC = 0.8
@@ -82,14 +82,15 @@ TARGET_INVENTORY_RATIO = 0.35
 MIN_QUOTE_FREE = 0.0020
 RESERVE_BNB = 0.0002            # sadece fee tozu
 USE_QUOTE_FRAC = 0.999          # KESİN: serbest BNB'nin tamamı
+MIN_BNB_PER_SLOT = 0.008        # */BNB min notional ≈ bu; altı AL basamaz
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.12
 MAX_ABS_24H_PCT = 18.0
 MIN_24H_PCT = 1.2
 MAX_PAIR_HOLD_SEC = 22 * 60
-MAX_BUY_LEAD = 4
-MIN_WR_TO_BUY = 0.35
-MIN_TRADES_FOR_WR = 16
+MAX_BUY_LEAD = 8
+MIN_WR_TO_BUY = 0.25
+MIN_TRADES_FOR_WR = 30          # eski fill'ler WR'yi hemen kilitlemesin
 
 # Skor: yükselen hacim birincil — mutlak hacim cezalı/ikincil
 W_VOL_RISE = 4.5
@@ -362,6 +363,7 @@ class Exchange:
         self._bal_lock = asyncio.Lock()
         self._order_lock = asyncio.Lock()
         self._fee: Dict[str, float] = {}
+        self._buy_reserved: Dict[str, float] = {}  # symbol -> resting AL BNB
         self.n_pairs = 1
         self.stats = DayStats.load()
         self.stopped = False
@@ -373,8 +375,24 @@ class Exchange:
         return max(0.0, self.free(b, QUOTE) - RESERVE_BNB) * USE_QUOTE_FRAC
 
     def slot_budget(self, bal: Optional[dict] = None) -> float:
-        # n_pairs slotuna eşit böl — toplam = tüm deployable BNB
         return self.deployable_bnb(bal) / max(1, self.n_pairs)
+
+    def reserved_bnb(self, exclude: str = "") -> float:
+        return sum(v for s, v in self._buy_reserved.items() if s != exclude)
+
+    def set_buy_reserve(self, symbol: str, bnb: float) -> None:
+        if bnb <= 0:
+            self._buy_reserved.pop(symbol, None)
+        else:
+            self._buy_reserved[symbol] = bnb
+
+    def free_quote_for(self, symbol: str, bal: Optional[dict] = None) -> float:
+        """Bu slotun kullanabileceği serbest BNB (diğer slot rezervleri düşülmüş)."""
+        b = bal if bal is not None else self._bal
+        if not b:
+            return 0.0
+        raw = max(0.0, self.free(b, QUOTE) - RESERVE_BNB) * USE_QUOTE_FRAC
+        return max(0.0, raw - self.reserved_bnb(exclude=symbol))
 
     async def run(self, fn, *a, **kw):
         await wait_if_banned()
@@ -527,6 +545,7 @@ class Exchange:
                 self.stats.ensure_today()
                 self.stats.orders += 1
                 self.stats.save()
+                self._bal_ts = 0.0  # bakiye stale olmasın — sonraki slot doğru free görsün
                 return o
             except Exception as e:
                 msg = str(e)
@@ -537,6 +556,7 @@ class Exchange:
                     return None
                 if any(x in msg for x in ("insufficient", "-2010", "MIN_NOTIONAL", "-1013")):
                     log.warning("order skip %s %s: %s", side, symbol, e)
+                    self._bal_ts = 0.0
                     return None
                 log.error("order %s %s: %s", side, symbol, e)
                 return None
@@ -549,6 +569,8 @@ class Exchange:
                     self.stats.ensure_today()
                     self.stats.cancels += 1
                     self.stats.save()
+                    self.set_buy_reserve(symbol, 0.0)
+                    self._bal_ts = 0.0
             except Exception as e:
                 if ban_until_ms(e):
                     await sleep_ban(e)
@@ -1002,6 +1024,16 @@ class Slot:
         self.quote_free = self.ex.free(b, QUOTE)
         self.base_total = self.ex.total(b, self.base)
 
+    async def prime_fills(self) -> None:
+        """Eski trade'leri saymadan işaretle — açılışta sahte AL/SAT + WR çökmesi olmasın."""
+        for t in await self.ex.trades(self.symbol, 20):
+            tid = str(t.get("id") or "")
+            if not tid:
+                continue
+            self.seen.add(tid)
+            self.last_tid = tid
+        self.last_fill_poll = time.time()
+
     async def fills(self) -> None:
         now = time.time()
         if now - self.last_fill_poll < FILL_POLL_SEC:
@@ -1114,18 +1146,17 @@ class Slot:
             if bid >= ask:
                 return None
 
-        # TÜM serbest BNB → açık slotlara eşit pay. Pay = envanter + resting AL.
-        n = max(1, self.ex.n_pairs)
-        q_avail = max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC
-        share = q_avail / n
-        self.slot_bnb = max(share, MIN_QUOTE_FREE, self.ex.slot_budget())
+        # Her slot SADECE kendi slot_bnb bütçesini kullanır (diğerleriyle yarışmaz)
+        alloc = max(self.slot_bnb, MIN_QUOTE_FREE)
         inv_bnb = self.base_total * mid
-        # Kalan payı AL emrine bas — idle BNB bırakma
-        buy_budget = max(0.0, share - inv_bnb)
-        if buy_budget < min_cost or inv_bnb >= share * MAX_INVENTORY_RATIO:
+        buy_budget = max(0.0, alloc - inv_bnb)
+        # Gerçek serbest BNB (başka slotların rezervi düşülmüş)
+        free_left = self.ex.free_quote_for(self.symbol)
+        buy_budget = min(buy_budget, free_left)
+        if buy_budget < min_cost or inv_bnb >= alloc * MAX_INVENTORY_RATIO:
             buy_budget = 0.0
-        # KÂR KİLİDİ: düşük WR → SADECE-SAT; AMA boş/az dolu slotlara yine AL (sermaye dağılsın)
-        underfilled = inv_bnb < share * 0.30
+        # Boş/az dolu slotlara her zaman AL izni (sermaye 15'e dağılsın)
+        underfilled = inv_bnb < alloc * 0.40
         if not self.ex.stats.allow_buys() and not underfilled:
             buy_budget = 0.0
 
@@ -1161,6 +1192,8 @@ class Slot:
             bid_sz = 0.0
         if ask <= 0 or ask_sz * ask < min_cost or ask_sz < min_qty:
             ask_sz = 0.0
+        # rezerv = gerçek resting AL maliyeti
+        self.ex.set_buy_reserve(self.symbol, (bid_sz * bid) if bid_sz > 0 and bid > 0 else 0.0)
         if bid_sz <= 0 and ask_sz <= 0:
             return None
         return bid, ask, bid_sz, ask_sz
@@ -1226,6 +1259,7 @@ class Slot:
         last_print = 0.0
         try:
             await self.bal()
+            await self.prime_fills()  # eski fill'leri yok say
             while self.running and not self.kill and not self.ex.stopped:
                 await wait_if_banned()
                 ob = None
@@ -1301,13 +1335,27 @@ class Engine:
                 force_out.add(sym)  # uzun kaldı, rotasyon
 
         want_n = MAX_OPEN if FORCE_MIN_OPEN else min(MAX_OPEN, cap)
-        want_n = max(want_n, MIN_OPEN)  # KESİN ≥15
+        want_n = max(want_n, MIN_OPEN)  # hedef ≥15
+        # Bakiye yetmiyorsa: min notional altı slot AL basamaz → kaç coin fonlanabilir?
+        fundable = max(1, int(spend / max(MIN_BNB_PER_SLOT, MIN_QUOTE_FREE)))
+        if fundable < MIN_OPEN:
+            log.warning(
+                "BNB düşük ≈%.5f → en fazla %d coin AL basabilir (15 için ≥%.3f BNB lazım). Yine %d açılacak.",
+                spend,
+                fundable,
+                MIN_OPEN * MIN_BNB_PER_SLOT,
+                max(fundable, min(want_n, fundable)),
+            )
+            want_n = max(fundable, 1)
+        else:
+            want_n = min(want_n, fundable, MAX_OPEN)
+
         picked, scanned, pool_n = pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
         )
         # force_out olanları yeni listeden düş (yeniden aynı turda alma)
         picked = [s for s in picked if s not in force_out or s in keep]
-        # hâlâ MIN_OPEN değilse doğrudan tüm */BNB ile doldur
+        # hâlâ want_n değilse doğrudan tüm */BNB ile doldur
         if len(picked) < want_n:
             more, _, _ = pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
             for s in more:
@@ -1315,19 +1363,41 @@ class Engine:
                     picked.append(s)
                 if len(picked) >= want_n:
                     break
-        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
+        if FORCE_MIN_OPEN and len(picked) < want_n:
             for _qv, sym in all_bnb_pairs(self.ex, tickers):
                 if sym in picked or sym in self.banned or (sym in force_out and sym not in keep):
                     continue
                 picked.append(sym)
-                if len(picked) >= MIN_OPEN:
+                if len(picked) >= want_n:
                     break
-        picked = [s for s in picked if s not in self.banned][:MAX_OPEN]
-        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
-            log.warning("odak %d < MIN_OPEN=%d — BNB market yetersiz", len(picked), MIN_OPEN)
-        # n_pairs = gerçek açık slot → tüm BNB bu slotlara gider (hayali 15'e bölme yok)
+        # min_cost > slot bütçesi olanları ele (AL hiç basılmaz)
+        self.ex.n_pairs = max(1, len(picked) or 1)
+        budget = self.ex.slot_budget(bal)
+        funded: List[str] = []
+        deferred: List[str] = []
+        for sym in picked:
+            if sym in keep:
+                funded.append(sym)
+                continue
+            try:
+                _, mc = self.ex.limits(sym)
+            except Exception:
+                mc = MIN_BNB_PER_SLOT
+            if budget + 1e-12 >= max(mc, MIN_QUOTE_FREE * 0.5):
+                funded.append(sym)
+            else:
+                deferred.append(sym)
+        if len(funded) < want_n:
+            for sym in deferred:
+                funded.append(sym)
+                if len(funded) >= want_n:
+                    break
+        picked = [s for s in funded if s not in self.banned][:MAX_OPEN]
+        if len(picked) < MIN_OPEN and fundable >= MIN_OPEN:
+            log.warning("odak %d < MIN_OPEN=%d — BNB market/min_cost elemesi", len(picked), MIN_OPEN)
         self.ex.n_pairs = max(1, len(picked))
         budget = self.ex.slot_budget(bal)
+        self.ex._buy_reserved = {s: v for s, v in self.ex._buy_reserved.items() if s in picked}
         current, target = set(self.slots), set(picked)
 
         for sym in (current - target) | force_out:
@@ -1355,13 +1425,14 @@ class Engine:
 
         live = ", ".join(s.replace(f"/{QUOTE}", "") for s in self.slots)
         log.info(
-            "ODAK %d/%d | taranan≈%d aday_havuz=%d | slot≈%.5f %s → %s",
+            "ODAK %d/%d | taranan≈%d aday_havuz=%d | slot≈%.5f %s (fonlanabilir≤%d) → %s",
             len(self.slots),
             MAX_OPEN,
             scanned,
             pool_n,
             budget,
             QUOTE,
+            fundable,
             live,
         )
 
