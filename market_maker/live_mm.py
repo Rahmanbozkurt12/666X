@@ -290,8 +290,14 @@ class DayStats:
         n = self.win_trades + self.loss_trades
         return (self.win_trades / n) if n else 0.0
 
-    def allow_buys(self) -> bool:
+    def allow_buys(self, flat: bool = False) -> bool:
+        """
+        flat=True → envanter yok; SADECE-SAT kilidi Binance'te sıfır emir bırakır.
+        Bu durumda AL serbest (aksi halde hiç order görünmez).
+        """
         self.ensure_today()
+        if flat:
+            return True
         if self.buys > self.sells + MAX_BUY_LEAD:
             return False
         n = self.win_trades + self.loss_trades
@@ -299,11 +305,28 @@ class DayStats:
             return False
         return True
 
+    def unlock_stale_gates(self) -> None:
+        """Önceki oturum AL>>SAT / düşük WR kilidini kır — flat'te emir görünsün."""
+        self.ensure_today()
+        if self.buys > self.sells + MAX_BUY_LEAD:
+            log.warning(
+                "stats unlock: AL lead %d→%d (eski oturum kilidi kırıldı)",
+                self.buys, self.sells,
+            )
+            self.buys = self.sells
+            self.save()
+        n = self.win_trades + self.loss_trades
+        if n >= MIN_TRADES_FOR_WR and self.win_rate() < MIN_WR_TO_BUY:
+            log.warning(
+                "stats: WR=%.0f%% düşük — envanter yokken AL yine açılır (flat unlock)",
+                self.win_rate() * 100.0,
+            )
+
     def print_live(self) -> None:
         self.ensure_today()
         net = self.net()
         wr = self.win_rate()
-        mode = "AL+SAT" if self.allow_buys() else "SADECE-SAT"
+        mode = "AL+SAT" if self.allow_buys() else "SADECE-SAT (flat→AL açık)"
         print(
             _c(_DIM, "── bilanço ── ")
             + f"emir={self.orders} iptal={self.cancels} "
@@ -386,7 +409,9 @@ class Exchange:
         self.n_pairs = 1
         self._bnb_usd = 0.0  # sadece "Pay fees with BNB" → USDT çevirisi
         self.stats = DayStats.load()
+        self.stats.unlock_stale_gates()
         self.stopped = False
+        self._quote_skip_log: Dict[str, float] = {}
 
     def quote_of(self, symbol: str) -> str:
         return symbol.split("/")[1].upper() if "/" in symbol else QUOTE
@@ -1378,37 +1403,52 @@ class Slot:
         if buy_budget < min_need:
             buy_budget = 0.0
 
-        # PROF kapıları: WR / buy-lead / toxic / momentum / post-fill cooldown
+        # Envanter yok = flat → AL kilidi uygulanmaz (yoksa Binance'te emir görünmez)
+        flat = self.inv_qty <= 1e-12 and inv_usdt < min_need * 0.9
         now = time.time()
         mom = self.mid_momentum_bps()
-        if not self.ex.stats.allow_buys():
+        skip_reason = ""
+        if not self.ex.stats.allow_buys(flat=flat):
             buy_budget = 0.0
+            skip_reason = "WR/lead SADECE-SAT"
         if self.is_toxic():
             buy_budget = 0.0
+            skip_reason = skip_reason or "toxic"
         if mom < MOMENTUM_BUY_BPS:
-            buy_budget = 0.0  # düşen bıçağa AL yok (5m yeşil yakalanınca mom toparlar)
+            buy_budget = 0.0
+            skip_reason = skip_reason or "momentum"
         if self.last_buy_fill_ts > 0 and now - self.last_buy_fill_ts < SAME_COIN_BUY_SEC:
-            buy_budget = 0.0  # AYNI coine 1 dk içinde tekrar AL yok — başka coin yakala
+            buy_budget = 0.0
+            skip_reason = skip_reason or "1dk aynı coin"
         if inv_usdt >= alloc * MAX_INVENTORY_RATIO or ip > 0.35:
             buy_budget = 0.0
+            skip_reason = skip_reason or "inv full"
         if floor > 0 and ask <= bid:
             buy_budget = 0.0
             bid = self.ex.px(self.symbol, max(tick, ask - self.min_full_spread()))
 
         bid_sz = (buy_budget / bid) if (buy_budget > 0 and bid > 0) else 0.0
         ask_sz = sell_base * 0.995 if sell_base * (ask or mid) >= min_cost else 0.0
-        # Floor altında satma
         if floor > 0 and ask + 1e-15 < floor:
             ask_sz = 0.0
 
         bid_sz = self.ex.amt(self.symbol, bid_sz)
         ask_sz = self.ex.amt(self.symbol, ask_sz)
         if bid <= 0 or bid_sz * bid < min_cost or bid_sz < min_qty:
+            if buy_budget > 0 and not skip_reason:
+                skip_reason = f"min_notional(need≈{min_need:.2f} budget≈{buy_budget:.2f})"
             bid_sz = 0.0
         if ask <= 0 or ask_sz * ask < min_cost or ask_sz < min_qty:
             ask_sz = 0.0
         self.ex.set_buy_reserve(self.symbol, (bid_sz * bid) if bid_sz > 0 and bid > 0 else 0.0)
         if bid_sz <= 0 and ask_sz <= 0:
+            last = self.ex._quote_skip_log.get(self.symbol, 0.0)
+            if now - last > 90.0:
+                self.ex._quote_skip_log[self.symbol] = now
+                log.info(
+                    "%s emir yok | flat=%s alloc=%.2f free=%.2f | %s",
+                    self.symbol, flat, alloc, free_left, skip_reason or "bütçe/min yetersiz",
+                )
             return None
         return bid, ask, bid_sz, ask_sz
 
@@ -1537,7 +1577,7 @@ class Engine:
         bal = await self.ex.balance(force=True)
         spend_usdt = self.ex.deployable_usdt(bal)
         if spend_usdt < MIN_USDT_PER_SLOT:
-            log.error("bakiye yetersiz USDT≈%.2f", spend_usdt)
+            log.error("bakiye yetersiz USDT≈%.2f (min slot≈%.1f)", spend_usdt, MIN_USDT_PER_SLOT)
             return
 
         now = time.time()
@@ -1552,17 +1592,21 @@ class Engine:
             elif age >= MAX_PAIR_HOLD_SEC and not sl.has_inventory():
                 force_out.add(sym)
 
+        # Kaç slot gerçekten emir koyabilir? (Binance min notional ≈ MIN_USDT_PER_SLOT)
         fundable = max(0, int(spend_usdt / MIN_USDT_PER_SLOT))
-        # FORCE_MIN_OPEN: her taramada ≥15 kesin (bakiye yetmese bile ince slot)
         if FORCE_MIN_OPEN:
-            want_n = max(MIN_OPEN, min(MAX_OPEN, max(fundable, MIN_OPEN)))
+            if fundable < MIN_OPEN:
+                log.error(
+                    "USDT≈%.2f → fonlanabilir %d <15 — emir görünsün diye %d slot "
+                    "(≥15 için ≈%.0f USDT lazım)",
+                    spend_usdt, fundable, max(1, fundable), MIN_OPEN * MIN_USDT_PER_SLOT,
+                )
+                want_n = max(1, fundable)
+            else:
+                want_n = min(MAX_OPEN, max(MIN_OPEN, fundable))
         else:
             want_n = min(MAX_OPEN, max(1, fundable))
-        if fundable < MIN_OPEN:
-            log.warning(
-                "fonlanabilir≈%d <15 — yine de ≥%d açılacak (ince USDT slot)",
-                fundable, MIN_OPEN,
-            )
+        log.info("bakiye USDT≈%.2f | hedef_slot=%d (fundable=%d)", spend_usdt, want_n, fundable)
 
         picked, scanned, pool_n = await pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
