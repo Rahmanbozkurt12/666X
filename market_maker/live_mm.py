@@ -35,8 +35,8 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 
 QUOTE = "BNB"
 TOP_N = 20
-MIN_OPEN_COINS = 7
-SCAN_SEC = 65.0                 # kullanıcı: saniye aynı kalsın
+MIN_OPEN_COINS = 20             # tüm bakiyeyi 20 coine dağıt (3-5'e takılma)
+SCAN_SEC = 65.0                 # saniye aynı
 FAST_SEC = 3.0
 BUY_COOLDOWN_SEC = 480.0
 SELL_COOLDOWN_SEC = 25.0
@@ -47,25 +47,26 @@ FEE_SAFETY = 1.25
 MIN_EDGE_BPS = 8.0
 
 DIP_BPS = 18.0
-MIN_QUOTE_VOL = 1.0             # BNB pair ince → düşük eşik, TOP20 dolsun
+MIN_QUOTE_VOL = 1.0
 CANDIDATE_POOL = 120
-MIN_QUOTE_FREE = 0.004          # daha küçük slot = daha çok AL
+MIN_QUOTE_FREE = 0.003          # küçük slot OK — bakiyeyi yay
+RESERVE_BNB = 0.002             # fee için kenarda bırak
 MAX_DRAWDOWN_QUOTE = 0.35
-MAX_SPREAD_BPS = 80.0           # AL artsın diye gevşek
+MAX_SPREAD_BPS = 80.0
 MAX_SPREAD_FORCE_BPS = 180.0
 ALLOW_TAKER_TO_FILL = True
-PENDING_MAX_SEC = 12.0          # hızlı market'e düş
-FORCE_MARKET_UNDER_MIN = True   # min 7 altındayken direkt MARKET AL
+PENDING_MAX_SEC = 12.0
+FORCE_MARKET_UNDER_MIN = True
+DEPLOY_ALL_BNB = True           # serbest BNB'nin tamamını coine çevir
 
 RSI_PERIOD = 14
-RSI_OVERSOLD = 48.0             # daha çok AL adayı
-RSI_MAX_BUY = 58.0              # 52→58 (pump 78+ hâlâ yok)
+RSI_OVERSOLD = 48.0
+RSI_MAX_BUY = 58.0
 RSI_EXIT = 58.0
 EMA_FAST = 7
 EMA_SLOW = 21
-MIN_METHODS_PASS = 2            # AL yükselsin
-MIN_METHODS_FORCE = 1           # min 7 doldururken tek yöntem yeter
-EXTRA_BUYS_WHEN_FULL = 2        # 7 dolduktan sonra ek kaliteli AL
+MIN_METHODS_PASS = 2
+MIN_METHODS_FORCE = 1
 KLINE_TF = "1m"
 KLINE_LIMIT = 60
 
@@ -1297,41 +1298,70 @@ async def scan_once(ex: Exchange, state: State) -> None:
     force = (open_n + pending_n) < MIN_OPEN_COINS
     need_pass = MIN_METHODS_FORCE if force else MIN_METHODS_PASS
     signals = [s for s in signals if s.passed >= need_pass]
+    # sinyal azsa: veto olmayanları da force için al (bakiye dağılsın)
+    if force and len(signals) < max(3, MIN_OPEN_COINS - open_n):
+        extra = [
+            r for r in reports
+            if isinstance(r, SignalReport)
+            and r.symbol not in busy
+            and r.passed >= 0
+            and not (r.reasons and str(r.reasons[0]).startswith("VETO"))
+            and r.mid > 0
+        ]
+        for r in extra:
+            if r not in signals:
+                signals.append(r)
     signals.sort(key=lambda s: -s.score)
 
+    # Tüm serbest BNB'yi TOP_N boş slotlara böl
+    spendable = max(0.0, free_bnb - RESERVE_BNB)
+    empty = max(0, TOP_N - open_n - pending_n)
     slots_left = 0
-    if free_bnb >= MIN_QUOTE_FREE:
-        if force:
-            want = MIN_OPEN_COINS - open_n - pending_n
-        else:
-            want = EXTRA_BUYS_WHEN_FULL
-        max_by_cash = max(1, int(free_bnb // max(MIN_QUOTE_FREE, 1e-9)))
-        slots_left = max(0, min(want, max_by_cash, 6))
-        if force and slots_left < want:
-            log.warning(
-                "nakit düşük: +%d hedef, free=%.4f %s → bu tur %d AL",
-                want, free_bnb, QUOTE, slots_left,
-            )
+    if DEPLOY_ALL_BNB and spendable >= MIN_QUOTE_FREE and empty > 0:
+        max_by_cash = max(1, int(spendable // max(MIN_QUOTE_FREE, 1e-12)))
+        slots_left = min(empty, max_by_cash, len(signals) if signals else empty)
+        # sinyal yoksa bile watchlist'ten market dene
+        if slots_left == 0 and signals:
+            slots_left = min(empty, max_by_cash)
+        log.info(
+            "DAĞITIM | free=%.4f reserve=%.4f spend=%.4f → %d slota (açık=%d hedef=%d)",
+            free_bnb, RESERVE_BNB, spendable, slots_left, open_n, MIN_OPEN_COINS,
+        )
 
     bought = 0
-    for sig in signals:
+    # sinyal yetmezse watchlist'ten doldur
+    buy_queue: List[Any] = list(signals)
+    if len(buy_queue) < slots_left:
+        for sym, qv, last in movers[:TOP_N]:
+            if sym in busy or any(getattr(s, "symbol", None) == sym for s in buy_queue):
+                continue
+            # sahte SignalReport — force market
+            buy_queue.append(
+                SignalReport(sym, 0.5, 1, 1, ["deploy_all"], qv, last, last * 0.999, last * 1.001, last, None)
+            )
+            if len(buy_queue) >= slots_left:
+                break
+
+    for sig in buy_queue:
         if bought >= max(0, slots_left):
             break
         bal = await ex.balance(force=True)
         if not bal:
             break
         free_bnb = ex.free(bal, QUOTE)
+        spendable = max(0.0, free_bnb - RESERVE_BNB)
         remain = max(1, slots_left - bought)
-        budget = free_bnb / remain
+        budget = spendable / remain
         if budget < MIN_QUOTE_FREE:
-            # tek büyük AL dene (min 7'ye yaklaş)
-            budget = free_bnb * 0.95
-        if budget < MIN_QUOTE_FREE:
-            log.info("bütçe bitti (%.5f %s)", free_bnb, QUOTE)
-            break
-        ok = await buy_one(ex, state, sig, budget, force_fill=force or True)
+            if spendable >= MIN_QUOTE_FREE:
+                budget = spendable  # son kalanı tek coine bas
+            else:
+                log.info("BNB bitti (free=%.5f)", free_bnb)
+                break
+        ok = await buy_one(ex, state, sig, budget, force_fill=True)
         if ok:
             bought += 1
+            busy.add(sig.symbol)
             await asyncio.sleep(0.2)
 
     log.info(
