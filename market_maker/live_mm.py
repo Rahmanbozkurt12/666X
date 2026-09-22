@@ -59,19 +59,21 @@ HOLD_QUOTE_MULT = 3.0
 USE_WS = False                  # 20 WS kitap = IP ban; REST yeter
 API_RATE_MS = 500               # ccxt rateLimit
 
-# KÂR > KOMİSYON: round-trip fee üstüne net edge
+# KÂR > KOMİSYON / ZARAR — agresif edge
 MAKER_FEE = 0.00075
-FEE_SAFETY = 2.0                # fee'yi abartılı varsay → daha geniş spread
-MIN_EDGE_BPS = 40.0             # fee üstü net kâr hedefi
+FEE_SAFETY = 2.2
+MIN_EDGE_BPS = 55.0             # fee üstü net kâr
 BASE_SPREAD_TICKS = 4.0
-MAX_INVENTORY_RATIO = 0.95
-TARGET_INVENTORY_RATIO = 0.40
-MIN_QUOTE_FREE = 0.0020         # 20 slot × ~0.002 = 0.04 BNB ile çalışır
+MAX_INVENTORY_RATIO = 0.85      # erken sat — envanter şişmesin
+TARGET_INVENTORY_RATIO = 0.28   # düşük hedef = daha çok SAT
+MIN_QUOTE_FREE = 0.0020
 RESERVE_BNB = 0.0003
 USE_QUOTE_FRAC = 0.995
 POST_ONLY = True
-MAX_DRAWDOWN_RATIO = 0.22
-MIN_SELL_EDGE_BPS = 45.0        # avg maliyet + fee + kâr — zararlı satışı kes
+MAX_DRAWDOWN_RATIO = 0.20
+MIN_SELL_EDGE_BPS = 60.0        # avg maliyet + fee + kâr
+MAX_BUY_LEAD = 2                # AL, SAT'tan en fazla 2 önde (AL=22 SAT=8 engel)
+BUY_ONLY_BELOW_MID_BPS = 15.0   # sadece mid altı bid (dip al)
 # Skor ağırlıkları (multi-method)
 W_VOLATILITY = 3.0
 W_RANGE = 1.5
@@ -210,6 +212,7 @@ def min_spread_bps() -> float:
 class DayStats:
     day: str = field(default_factory=utc_day)
     orders: int = 0
+    cancels: int = 0
     buys: int = 0
     sells: int = 0
     win_trades: int = 0
@@ -223,7 +226,7 @@ class DayStats:
         d = utc_day()
         if d != self.day:
             self.day = d
-            self.orders = self.buys = self.sells = 0
+            self.orders = self.cancels = self.buys = self.sells = 0
             self.win_trades = self.loss_trades = 0
             self.won = self.lost = self.fees = 0.0
             self.started_at = time.time()
@@ -231,18 +234,23 @@ class DayStats:
     def net(self) -> float:
         return self.won - self.lost - self.fees
 
+    def win_rate(self) -> float:
+        n = self.win_trades + self.loss_trades
+        return (self.win_trades / n * 100.0) if n else 0.0
+
     def print_live(self) -> None:
         self.ensure_today()
         net = self.net()
+        wr = self.win_rate()
         print(
             _c(_DIM, "── bilanço ── ")
-            + f"emir={self.orders} "
+            + f"emir={self.orders} iptal={self.cancels} "
             + _c(_GREEN, f"AL={self.buys}")
             + " "
             + _c(_RED, f"SAT={self.sells}")
             + " "
             + _c(_ORANGE, f"fee={self.fees:.5f}")
-            + " "
+            + f" wr={wr:.0f}% "
             + _c(_GREEN if net >= 0 else _RED, f"net={net:+.5f} {QUOTE}"),
             flush=True,
         )
@@ -252,7 +260,11 @@ class DayStats:
         net = self.net()
         print("=" * 64, flush=True)
         print(_c(_BOLD, f"GÜNLÜK ÖZET ({self.day} UTC)"), flush=True)
-        print(f"  Emir={self.orders} AL={self.buys} SAT={self.sells}", flush=True)
+        print(
+            f"  Emir={self.orders} İptal={self.cancels} AL={self.buys} SAT={self.sells} "
+            f"WR={self.win_rate():.0f}%",
+            flush=True,
+        )
         print(f"  Kazanç=+{self.won:.6f} Kayıp=-{self.lost:.6f} Fee={self.fees:.6f} {QUOTE}", flush=True)
         print(_c(_GREEN if net >= 0 else _RED, f"  Net={net:+.6f} {QUOTE}"), flush=True)
         print("=" * 64, flush=True)
@@ -327,12 +339,12 @@ class Exchange:
             try:
                 await self.run(self.rest.load_markets)
                 log.info(
-                    "CANLI MM | markets=%d WS=%s min_spread≈%.1fbps max_open=%d SCAN_ALL=%s",
+                    "CANLI MM | markets=%d WS=%s rate=%dms loop=%.1fs max_open=%d",
                     len(self.rest.markets),
                     bool(self.ws),
-                    min_spread_bps(),
+                    API_RATE_MS,
+                    LOOP_SLEEP_SEC,
                     MAX_OPEN,
-                    SCAN_ALL,
                 )
                 return
             except Exception as e:
@@ -500,6 +512,8 @@ class Exchange:
             try:
                 if hasattr(self.rest, "cancel_all_orders"):
                     await self.run(self.rest.cancel_all_orders, symbol)
+                    self.stats.ensure_today()
+                    self.stats.cancels += 1
             except Exception as e:
                 if ban_until_ms(e):
                     await sleep_ban(e)
@@ -928,6 +942,11 @@ class Slot:
         buy_budget = min(q_avail, share, room if room >= min_cost else 0.0)
         if buy_budget < min_cost or inv_bnb >= share * MAX_INVENTORY_RATIO:
             buy_budget = 0.0
+        # Global AL/SAT dengesi — fazla alış = envanter + net risk
+        st = self.ex.stats
+        st.ensure_today()
+        if st.buys > st.sells + MAX_BUY_LEAD:
+            buy_budget = 0.0
         sell_base = sell_base_early
 
         # Ortalama maliyet tabanı — zararlı maker satışı engelle
@@ -937,7 +956,6 @@ class Slot:
             floor = avg_cost * (1.0 + MAKER_FEE * FEE_SAFETY * 2.0 + MIN_SELL_EDGE_BPS / 10000.0)
             if ask < floor:
                 ask = self.ex.px(self.symbol, floor)
-            # post-only: ask kitap ask'ının altında kalmasın
             if self.book.ask > 0 and ask < self.book.ask:
                 ask = self.ex.px(self.symbol, max(floor, self.book.ask))
             if self.book.ask > 0 and ask <= self.book.ask:
@@ -946,6 +964,18 @@ class Slot:
                 bid_sz_force_zero = True
                 buy_budget = 0.0
                 bid = self.ex.px(self.symbol, max(tick, ask - self.min_full_spread()))
+
+        # Sadece mid altı al (dip) — pahalı alım = zarar riski
+        if buy_budget > 0 and mid > 0 and bid > 0:
+            below = (mid - bid) / mid * 10000.0
+            if below < BUY_ONLY_BELOW_MID_BPS:
+                # bid'i daha aşağı çek veya alma
+                want_bid = self.ex.px(self.symbol, mid * (1.0 - BUY_ONLY_BELOW_MID_BPS / 10000.0))
+                if want_bid < bid and ask - want_bid >= self.min_full_spread():
+                    bid = want_bid
+                else:
+                    buy_budget = 0.0
+                    bid_sz_force_zero = True
 
         if ask <= bid:
             if sell_base * mid >= min_cost * 0.95:
