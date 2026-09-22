@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import signal
 import sys
@@ -43,9 +44,10 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 QUOTE = "BNB"
 SCAN_ALL = True
 FORCE_MIN_OPEN = True
-MAX_OPEN = 20
+MAX_OPEN = 20                   # aynı anda odak = 20
 MIN_OPEN = 20
-SCAN_SEC = 180.0
+CANDIDATE_POOL = 60             # skordan ilk 60 aday → 20 seç (hep aynı olmasın)
+SCAN_SEC = 120.0                # 2 dk'da bir yeniden tara + rotasyon
 REPLACE_SEC = 90.0
 BALANCE_CACHE_SEC = 20.0
 FILL_POLL_SEC = 20.0
@@ -55,19 +57,21 @@ HOLD_QUOTE_MULT = 5.0
 LOOP_SLEEP_SEC = 1.5
 USE_WS = False                  # 20 WS = ban
 API_RATE_MS = 450
+ROTATE_COOLDOWN_SEC = 20 * 60   # çıkan coin 20 dk tekrar alınmaz
+KEEP_GRACE_SEC = 60.0
 
-MIN_USDT_VOL = 120_000.0        # ölü kitap yok
+MIN_USDT_VOL = 120_000.0
 SOFT_USDT_VOL = 40_000.0
 FLOOR_USDT_VOL = 8_000.0
 MAX_BOOK_SPREAD_BPS = 100.0
 QUOTE_MOVE_BPS = 55.0
 JOIN_TOUCH = False
 
-# KÂR KİLİDİ — wr=%37 net eksi buradan geliyordu (dar edge + fazla AL)
+# KÂR KİLİDİ
 MAKER_FEE = 0.00075
 FEE_SAFETY = 1.55
-MIN_EDGE_BPS = 48.0             # round-trip fee üstü
-MIN_SELL_EDGE_BPS = 42.0        # avg maliyet altı SAT YASAK
+MIN_EDGE_BPS = 48.0
+MIN_SELL_EDGE_BPS = 42.0
 BASE_SPREAD_TICKS = 3.0
 MAX_HALF_SPREAD_BPS = 85.0
 MAX_INVENTORY_RATIO = 0.55
@@ -79,9 +83,9 @@ POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.12
 MAX_ABS_24H_PCT = 18.0
 MIN_24H_PCT = 1.5
-MAX_PAIR_HOLD_SEC = 40 * 60
-MAX_BUY_LEAD = 1                # AL ≤ SAT+1
-MIN_WR_TO_BUY = 0.52            # wr düşükse sadece sat
+MAX_PAIR_HOLD_SEC = 22 * 60     # envantersiz max kalış → zorunlu rotasyon
+MAX_BUY_LEAD = 1
+MIN_WR_TO_BUY = 0.52
 MIN_TRADES_FOR_WR = 6
 
 W_VOLUME = 3.4
@@ -712,48 +716,78 @@ def pick_open_pairs(
     tickers: Dict[str, dict],
     n: int,
     keep: Optional[Set[str]] = None,
+    cooldown: Optional[Dict[str, float]] = None,
 ) -> Tuple[List[str], int, int]:
+    """
+    Tüm Binance spot tarama → skor havuzu (CANDIDATE_POOL) → n pair.
+    keep: envanterli. cooldown: yeni çıkmış coinleri geçici ele.
+    """
     n = max(n, MIN_OPEN if FORCE_MIN_OPEN else n)
     keep = keep or set()
-    out: List[str] = []
+    cooldown = cooldown or {}
+    now = time.time()
+    cold = {s for s, ts in cooldown.items() if now - ts < ROTATE_COOLDOWN_SEC}
+
     ranked, scanned, spot_n = scan_all_binance(
         ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS
     )
+    pool: List[str] = []
 
-    def add(sym: str) -> None:
-        if sym and sym not in out and len(out) < n:
-            out.append(sym)
+    def push(sym: str) -> None:
+        if not sym or sym in pool:
+            return
+        if sym in cold and sym not in keep:
+            return
+        pool.append(sym)
 
     for s in keep:
-        add(s)
+        push(s)
     for _sc, _b, bnb_sym, _v in ranked:
-        add(bnb_sym)
-    qualified = len(out)
-    if len(out) < n:
+        push(bnb_sym)
+        if len(pool) >= CANDIDATE_POOL:
+            break
+    if len(pool) < CANDIDATE_POOL:
         loose, sc2, _ = scan_all_binance(
             ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.4
         )
         scanned = max(scanned, sc2)
         for _sc, _b, bnb_sym, _v in loose:
-            add(bnb_sym)
-    if len(out) < n:
-        floor, sc3, _ = scan_all_binance(
-            ex, tickers, FLOOR_USDT_VOL, 0, MAX_BOOK_SPREAD_BPS * 1.8
-        )
-        scanned = max(scanned, sc3)
-        for _sc, _b, bnb_sym, _v in floor:
-            add(bnb_sym)
-    if len(out) < n and FORCE_MIN_OPEN:
-        for _qv, sym in all_bnb_pairs(ex, tickers):
-            add(sym)
-            if len(out) >= n:
+            push(bnb_sym)
+            if len(pool) >= CANDIDATE_POOL:
                 break
+    if len(pool) < n and FORCE_MIN_OPEN:
+        for _qv, sym in all_bnb_pairs(ex, tickers):
+            push(sym)
+            if len(pool) >= max(n, CANDIDATE_POOL):
+                break
+
+    # keep önce, kalanı havuzdan karışık seç (hep aynı top-20 olmasın)
+    out: List[str] = [s for s in keep if s in pool or True]
+    out = []
+    for s in keep:
+        if s not in out:
+            out.append(s)
+    rest = [s for s in pool if s not in out]
+    # skor sırası korunarak üst dilimden örnekle
+    top = rest[: max(n * 2, 30)]
+    mid = rest[len(top):]
+    random.shuffle(top)
+    for s in top + mid:
+        if len(out) >= n:
+            break
+        out.append(s)
+
     names = ", ".join(x.replace(f"/{QUOTE}", "") for x in out)
     log.info(
-        "BINANCE TAM TARAMA | spot=%d coin=%d aday=%d açık=%d (≥%d) → %s",
-        spot_n, scanned, qualified, len(out), MIN_OPEN, names or "-",
+        "TARAMA | spot=%d taranan_coin=%d aday_havuz=%d odak=%d (zorunlu≥%d) → %s",
+        spot_n,
+        scanned,
+        len(pool),
+        len(out),
+        MIN_OPEN,
+        names or "-",
     )
-    return out, scanned, qualified
+    return out, scanned, len(pool)
 
 
 def max_open_for_balance(spend: float) -> int:
@@ -1145,6 +1179,7 @@ class Engine:
         self.slots: Dict[str, Slot] = {}
         self.tasks: Dict[str, asyncio.Task] = {}
         self.banned: Set[str] = set()
+        self.cooldown: Dict[str, float] = {}  # sym -> exit time
 
     async def refresh_universe(self) -> None:
         tickers = await self.ex.tickers()
@@ -1157,29 +1192,53 @@ class Engine:
         if cap <= 0:
             log.error("BNB yetersiz (≈%.5f)", spend)
             return
+
+        now = time.time()
         keep: Set[str] = set()
+        force_out: Set[str] = set()
         for sym, sl in list(self.slots.items()):
+            age = now - sl.opened_at
             if sl.has_inventory() and not sl.kill:
+                keep.add(sym)  # envanter bitmeden çıkma
+            elif age < KEEP_GRACE_SEC:
                 keep.add(sym)
-            elif (time.time() - sl.opened_at) < 90:
-                keep.add(sym)
+            elif age >= MAX_PAIR_HOLD_SEC and not sl.has_inventory():
+                force_out.add(sym)  # uzun kaldı, rotasyon
+
         want_n = MAX_OPEN if FORCE_MIN_OPEN else min(MAX_OPEN, cap)
-        picked, _, _ = pick_open_pairs(self.ex, tickers, want_n, keep=keep)
+        picked, scanned, pool_n = pick_open_pairs(
+            self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
+        )
+        # force_out olanları yeni listeden düş (yeniden aynı turda alma)
+        picked = [s for s in picked if s not in force_out or s in keep]
+        # hâlâ 20 değilse havuzdan doldur
+        if len(picked) < want_n:
+            more, _, _ = pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
+            for s in more:
+                if s not in picked and s not in force_out and s not in self.banned:
+                    picked.append(s)
+                if len(picked) >= want_n:
+                    break
         picked = [s for s in picked if s not in self.banned][:MAX_OPEN]
         self.ex.n_pairs = max(1, len(picked))
         budget = self.ex.slot_budget(bal)
         current, target = set(self.slots), set(picked)
-        for sym in list(current - target):
-            sl = self.slots.get(sym)
-            if sl and sl.has_inventory():
+
+        for sym in list(current - target) | force_out:
+            if sym in keep and sym not in force_out:
                 continue
-            log.info("rotasyon çıkış %s", sym)
+            sl = self.slots.get(sym)
+            if sl and sl.has_inventory() and sym not in force_out:
+                continue
+            log.info("rotasyon çıkış %s (hold/skor)", sym)
+            self.cooldown[sym] = now
             if sl:
                 sl.running = False
             t = self.tasks.pop(sym, None)
             if t:
                 t.cancel()
             self.slots.pop(sym, None)
+
         for i, sym in enumerate(picked):
             if sym in self.slots:
                 self.slots[sym].slot_bnb = budget
@@ -1187,8 +1246,18 @@ class Engine:
             sl = Slot(ex=self.ex, symbol=sym, slot_bnb=budget)
             self.slots[sym] = sl
             self.tasks[sym] = asyncio.create_task(self._boot(sl, i * WORKER_STAGGER_SEC))
+
         live = ", ".join(s.replace(f"/{QUOTE}", "") for s in self.slots)
-        log.info("AÇIK %d/%d slot≈%.5f %s → %s", len(self.slots), MAX_OPEN, budget, QUOTE, live)
+        log.info(
+            "ODAK %d/%d | taranan≈%d aday_havuz=%d | slot≈%.5f %s → %s",
+            len(self.slots),
+            MAX_OPEN,
+            scanned,
+            pool_n,
+            budget,
+            QUOTE,
+            live,
+        )
 
     async def _boot(self, sl: Slot, delay: float) -> None:
         try:
