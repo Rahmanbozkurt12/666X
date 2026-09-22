@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — BNB · PROF MM · KÂR ÖNCELİKLİ
+Binance Spot Market Maker — BNB · PROF MM · 5m YEŞİL + HACİM
 
-Tüm Binance spot tarar → hacmi yükselen */BNB.
-Prof kurallar: fee+edge spread, inventory skew, adverse-selection pause,
-momentum gate, maliyet floor. Maker only (LIMIT_MAKER).
+Seçim: hacmi yükselen · yüksek hacim yükselmeye devam · ~-20 dip rebound.
+5m mum yeşil + 5m hacim artışı. Aynı coine 1 dk tekrar AL yok.
+Maker only — fee+edge+inventory+toxic pause.
 
 1) API KEY yaz  (BNB + Pay fees with BNB AÇIK)
 2) pip install "ccxt[pro]"
@@ -45,51 +45,51 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 QUOTE = "BNB"
 SCAN_ALL = True
 FORCE_MIN_OPEN = True
-MAX_OPEN = 18                   # üst sınır
+MAX_OPEN = 20                   # daha fazla odak
 MIN_OPEN = 15                   # KESİN en az 15 coin
-CANDIDATE_POOL = 80             # yükselen hacim havuzu
-SCAN_SEC = 60.0                 # 5m sinyali kaçırma
+CANDIDATE_POOL = 120            # geniş havuz → daha çok coin
+SCAN_SEC = 90.0                 # sık tarama (çok coin yakala)
 REPLACE_SEC = 75.0
 BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 20.0
 BOOK_REST_SEC = 12.0
-WORKER_STAGGER_SEC = 0.8
+WORKER_STAGGER_SEC = 0.6
 HOLD_QUOTE_MULT = 5.0
 LOOP_SLEEP_SEC = 1.5
 USE_WS = False
-API_RATE_MS = 450
-ROTATE_COOLDOWN_SEC = 8 * 60    # çıkan coin biraz beklesin, yenilere yer aç
-KEEP_GRACE_SEC = 60.0
+API_RATE_MS = 400
+ROTATE_COOLDOWN_SEC = 5 * 60    # kısa cooldown → yeni coinlere yer
+KEEP_GRACE_SEC = 45.0
 SAME_COIN_BUY_SEC = 60.0        # AYNI coine 1 dk içinde tekrar AL YOK
-KLINE_TF = "5m"                 # en kısa anlamlı TF
-KLINE_LIMIT = 12                # son ~1 saat 5m
-KLINE_TOP_N = 36                # 5m kontrol edilecek aday
+KLINE_TF = "5m"
+KLINE_LIMIT = 12
+KLINE_TOP_N = 50                # daha fazla 5m kontrol
 
-# Tabana — likit + yükselen; dar/toksik book'a girme
-MIN_USDT_VOL = 20_000.0
-SOFT_USDT_VOL = 6_000.0
-FLOOR_USDT_VOL = 2_000.0
-HIGH_USDT_VOL = 500_000.0       # yüksek hacim + hâlâ yükseliyor → kaçırma
-MAX_BOOK_SPREAD_BPS = 80.0
-MIN_BOOK_SPREAD_BPS = 12.0
-QUOTE_MOVE_BPS = 35.0
+# Tabana HAFİF — çok coin tarasın
+MIN_USDT_VOL = 500.0            # düşük eşik (500 USDT+)
+SOFT_USDT_VOL = 2_000.0
+FLOOR_USDT_VOL = 500.0
+HIGH_USDT_VOL = 150_000.0       # yüksek hacim + yükseliyor
+MAX_BOOK_SPREAD_BPS = 120.0     # daha geniş book kabul
+MIN_BOOK_SPREAD_BPS = 6.0       # dar book'a da izin
+QUOTE_MOVE_BPS = 40.0
 JOIN_TOUCH = False
-MIN_VOL_RISE_PCT = 0.05         # +%5 hacim artışı yeter
-MIN_VOL_RISE_USDT = 3_000.0
-DIP_PCT_LO = -22.0              # ~-20 bandı dip rebound
-DIP_PCT_HI = -8.0
-MAX_ABS_24H_PCT = 22.0          # -20'lik dip coinleri kaçırma
-MIN_24H_PCT = 0.5
+MIN_VOL_RISE_PCT = 0.03         # +%3 hacim artışı yeter
+MIN_VOL_RISE_USDT = 1_500.0
+DIP_PCT_LO = -25.0              # dip bandı geniş
+DIP_PCT_HI = -5.0
+MAX_ABS_24H_PCT = 28.0          # daha fazla coin
+MIN_24H_PCT = 0.2
 
-# PROF MM — fee + edge + inventory + adverse selection
+# PROF MM — fee + edge (koru) ama tarama gevşek
 MAKER_FEE = 0.00075
 FEE_SAFETY = 2.0
-MIN_EDGE_BPS = 65.0             # round-trip fee üstü net edge
-MIN_SELL_EDGE_BPS = 55.0        # maliyet+fee+edge altında SAT yok
+MIN_EDGE_BPS = 65.0
+MIN_SELL_EDGE_BPS = 55.0
 BASE_SPREAD_TICKS = 4.0
-BEHIND_TICKS = 2.0              # best'ten 2 tick geride (daha az toksik fill)
+BEHIND_TICKS = 2.0
 MAX_HALF_SPREAD_BPS = 120.0
-MAX_INVENTORY_RATIO = 0.45      # pro: envanter riski sınırlı
+MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
 MIN_QUOTE_FREE = 0.0020
 RESERVE_BNB = 0.0002
@@ -97,30 +97,30 @@ USE_QUOTE_FRAC = 0.999
 MIN_BNB_PER_SLOT = 0.008
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
-MAX_PAIR_HOLD_SEC = 18 * 60     # envantersiz daha çabuk rotasyon → yeni coin
+MAX_PAIR_HOLD_SEC = 15 * 60     # daha hızlı rotasyon
 MAX_BUY_LEAD = 2
-MIN_WR_TO_BUY = 0.45
+MIN_WR_TO_BUY = 0.42
 MIN_TRADES_FOR_WR = 8
 TOXIC_LOSS_STREAK = 2
-TOXIC_PAUSE_SEC = 12 * 60
-MOMENTUM_BUY_BPS = -8.0
-POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC  # 1 dk aynı coine tekrar AL yok
+TOXIC_PAUSE_SEC = 10 * 60
+MOMENTUM_BUY_BPS = -12.0        # biraz daha toleranslı
+POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC
 VOL_WIDEN_MULT = 2.2
 SKEW_STRENGTH = 0.85
 
-# Skor: yükselen hacim + yüksek-hacim-hâlâ-yükseliyor + dip rebound + 5m yeşil
+# Skor — yükselen / yüksek+yükselen / dip / 5m yeşil
 W_VOL_RISE = 4.5
 W_VOL_RISE_PCT = 3.0
-W_VOLUME = 0.55                 # yüksek mutlak hacim (yükseliyorsa) bonus
-W_HIGH_VOL_RISE = 2.2           # zaten yüksek hacim + artış
-W_DIP_REBOUND = 3.5             # -20 bandı + hacim artışı
-W_GREEN_5M = 3.2                # 5m yeşil mum / kısa TF
-W_VOL_5M = 2.4                  # 5m hacim artışı
+W_VOLUME = 0.55
+W_HIGH_VOL_RISE = 2.2
+W_DIP_REBOUND = 3.5
+W_GREEN_5M = 3.2
+W_VOL_5M = 2.4
 W_VOLATILITY = 0.9
 W_RANGE = 0.60
-W_SPREAD_FIT = 1.40
-W_MOMENTUM = 0.35               # 24h pozitif hafif bonus (yeşil trend)
-MIN_METHODS_PASS = 1
+W_SPREAD_FIT = 1.20
+W_MOMENTUM = 0.35
+MIN_METHODS_PASS = 0            # filtre gevşek → çok coin
 FALLBACK_METHODS_PASS = 0
 
 SKIP_BASES = {
@@ -1330,9 +1330,9 @@ class Slot:
         if self.is_toxic():
             buy_budget = 0.0
         if mom < MOMENTUM_BUY_BPS:
-            buy_budget = 0.0  # düşen bıçağa AL yok
-        if self.last_buy_fill_ts > 0 and now - self.last_buy_fill_ts < POST_FILL_COOLDOWN_SEC:
-            buy_budget = 0.0  # fill sonrası fiyat aleyhe döner — bekle
+            buy_budget = 0.0  # düşen bıçağa AL yok (5m yeşil yakalanınca mom toparlar)
+        if self.last_buy_fill_ts > 0 and now - self.last_buy_fill_ts < SAME_COIN_BUY_SEC:
+            buy_budget = 0.0  # AYNI coine 1 dk içinde tekrar AL yok — başka coin yakala
         if inv_bnb >= alloc * MAX_INVENTORY_RATIO or ip > 0.35:
             buy_budget = 0.0
         if floor > 0 and ask <= bid:
