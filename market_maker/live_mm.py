@@ -84,6 +84,91 @@ logging.basicConfig(
 )
 log = logging.getLogger("live_mm")
 
+# ANSI renkler (Windows VT destekli terminallerde de çalışır)
+_RESET = "\033[0m"
+_GREEN = "\033[92m"
+_RED = "\033[91m"
+_ORANGE = "\033[38;5;208m"
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+
+
+def _c(color: str, text: str) -> str:
+    return f"{color}{text}{_RESET}"
+
+
+def say_buy(msg: str) -> None:
+    print(_c(_GREEN, f"🟢 AL  | {msg}"), flush=True)
+
+
+def say_sell(msg: str) -> None:
+    print(_c(_RED, f"🔴 SAT | {msg}"), flush=True)
+
+
+def say_order(msg: str) -> None:
+    print(_c(_ORANGE, f"🟠 EMİR | {msg}"), flush=True)
+
+
+def utc_day() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def est_fee(notional: float) -> float:
+    """BNB cinsinden tahmini maker komisyon."""
+    return abs(notional) * MAKER_FEE
+
+
+@dataclass
+class DayStats:
+    day: str = field(default_factory=utc_day)
+    orders: int = 0
+    buys: int = 0
+    sells: int = 0
+    win_trades: int = 0
+    loss_trades: int = 0
+    won_bnb: float = 0.0
+    lost_bnb: float = 0.0
+    fees_bnb: float = 0.0
+    started_at: float = field(default_factory=time.time)
+
+    def ensure_today(self) -> None:
+        d = utc_day()
+        if d != self.day:
+            self.day = d
+            self.orders = self.buys = self.sells = 0
+            self.win_trades = self.loss_trades = 0
+            self.won_bnb = self.lost_bnb = self.fees_bnb = 0.0
+            self.started_at = time.time()
+
+    def net(self) -> float:
+        return self.won_bnb - self.lost_bnb - self.fees_bnb
+
+    def summary_lines(self) -> List[str]:
+        self.ensure_today()
+        mins = max(0.1, (time.time() - self.started_at) / 60.0)
+        net = self.net()
+        net_c = _GREEN if net >= 0 else _RED
+        lines = [
+            "=" * 64,
+            _c(_BOLD, f"GÜNLÜK ÖZET  ({self.day} UTC)"),
+            "-" * 64,
+            f"  Emir sayısı      : {_c(_ORANGE, str(self.orders))}",
+            f"  Alış (fill/ack)  : {_c(_GREEN, str(self.buys))}",
+            f"  Satış            : {_c(_RED, str(self.sells))}",
+            f"  İşlem (roundtrip): {self.sells}  | kazanılan {self.win_trades} / kaybedilen {self.loss_trades}",
+            f"  Kazanç (brüt)    : {_c(_GREEN, f'+{self.won_bnb:.6f} BNB')}",
+            f"  Kayıp (brüt)     : {_c(_RED, f'-{self.lost_bnb:.6f} BNB')}",
+            f"  Komisyon (tahmini): {_c(_ORANGE, f'{self.fees_bnb:.6f} BNB')}  (maker≈{MAKER_FEE*100:.3f}%)",
+            f"  Net              : {_c(net_c, f'{net:+.6f} BNB')}",
+            f"  Süre             : {mins:.1f} dk",
+            "=" * 64,
+        ]
+        return lines
+
+    def print_summary(self) -> None:
+        for line in self.summary_lines():
+            print(line, flush=True)
+
 
 def clean(s: str) -> str:
     s = (s or "").strip()
@@ -211,6 +296,7 @@ class State:
     realized_bnb: float = 0.0
     kill: bool = False
     watchlist: List[str] = field(default_factory=list)  # son top-20
+    stats: DayStats = field(default_factory=DayStats)
 
 
 class Exchange:
@@ -366,7 +452,14 @@ class Exchange:
             return float(p)
         return 1e-6
 
-    async def place_fast(self, symbol: str, side: str, amount: float, price: float) -> Optional[dict]:
+    async def place_fast(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        price: float,
+        stats: Optional[DayStats] = None,
+    ) -> Optional[dict]:
         """Emir hızı için kısa yol — gereksiz bekleme yok."""
         amount = self.amt(symbol, amount)
         price = self.px(symbol, price)
@@ -380,9 +473,14 @@ class Exchange:
             try:
                 otype = "LIMIT_MAKER" if POST_ONLY else "limit"
                 params: Dict[str, Any] = {"newClientOrderId": coid()}
+                say_order(f"{side.upper()} {symbol} qty={amount:.8f} @ {price:.8f}")
                 o = await self.run(
                     self.rest.create_order, symbol, otype, side, amount, price, params
                 )
+                if stats is not None:
+                    stats.ensure_today()
+                    stats.orders += 1
+                    stats.fees_bnb += est_fee(amount * price)
                 log.info("EMİR %s %s qty=%.8f @ %.8f id=%s", side.upper(), symbol, amount, price, o.get("id"))
                 return o
             except Exception as e:
@@ -391,8 +489,8 @@ class Exchange:
                     await sleep_ban(e)
                     return None
                 if any(x in msg for x in ("Post Only", "-5022", "would immediately", "Order would")):
-                    # bir kez postOnly=limit dene — hâlâ hızlı
                     try:
+                        say_order(f"RETRY {side.upper()} {symbol} @ {price:.8f}")
                         o = await self.run(
                             self.rest.create_order,
                             symbol,
@@ -402,6 +500,10 @@ class Exchange:
                             price,
                             {"newClientOrderId": coid(), "postOnly": True},
                         )
+                        if stats is not None:
+                            stats.ensure_today()
+                            stats.orders += 1
+                            stats.fees_bnb += est_fee(amount * price)
                         log.info("EMİR(retry) %s %s @ %.8f id=%s", side.upper(), symbol, price, o.get("id"))
                         return o
                     except Exception as e2:
@@ -705,7 +807,7 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
 
     # iptal + emir peş peşe (hız)
     await ex.cancel_all(symbol)
-    o = await ex.place_fast(symbol, "sell", qty, price)
+    o = await ex.place_fast(symbol, "sell", qty, price, state.stats)
     if not o:
         return False
 
@@ -714,15 +816,23 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
     state.positions.pop(symbol, None)
     state.sell_block_until[symbol] = now + SELL_COOLDOWN_SEC
     state.buy_block_until[symbol] = now + BUY_COOLDOWN_SEC
-    log.info(
-        "%s SAT +%.1fbps (need≥%.1f) RSI=%s pnl≈%.5fBNB | %s",
-        symbol,
-        rise,
-        need,
-        f"{rsi_v:.1f}" if rsi_v is not None else "?",
-        pnl,
-        "fee-safe",
+
+    st = state.stats
+    st.ensure_today()
+    st.sells += 1
+    if pnl >= 0:
+        st.win_trades += 1
+        st.won_bnb += pnl
+    else:
+        st.loss_trades += 1
+        st.lost_bnb += abs(pnl)
+
+    rsi_s = f"{rsi_v:.1f}" if rsi_v is not None else "?"
+    say_sell(
+        f"{symbol} +{rise:.1f}bps need≥{need:.1f} RSI={rsi_s} "
+        f"pnl={pnl:+.6f}BNB | bugün satış={st.sells} net≈{st.net():+.5f}BNB"
     )
+    log.info("%s SAT +%.1fbps pnl≈%.5fBNB fee-safe", symbol, rise, pnl)
     return True
 
 
@@ -756,7 +866,7 @@ async def buy_one(
         return False
 
     await ex.cancel_all(sig.symbol)
-    o = await ex.place_fast(sig.symbol, "buy", qty, price)
+    o = await ex.place_fast(sig.symbol, "buy", qty, price, state.stats)
     if not o:
         return False
 
@@ -768,16 +878,14 @@ async def buy_one(
         methods=",".join(sig.reasons[:5]),
     )
     state.buy_block_until[sig.symbol] = now + BUY_COOLDOWN_SEC
-    log.info(
-        "%s AL @ %.8f qty=%.6f bud=%.4fBNB | methods=%d/%d %s | 10dk cool",
-        sig.symbol,
-        price,
-        qty,
-        budget,
-        sig.passed,
-        sig.total,
-        sig.reasons[:4],
+    st = state.stats
+    st.ensure_today()
+    st.buys += 1
+    say_buy(
+        f"{sig.symbol} @ {price:.8f} qty={qty:.6f} bud={budget:.4f}BNB | "
+        f"methods={sig.passed}/{sig.total} | bugün alış={st.buys} emir={st.orders}"
     )
+    log.info("%s AL methods=%d/%d", sig.symbol, sig.passed, sig.total)
     return True
 
 
@@ -930,7 +1038,8 @@ async def main_async() -> None:
     state = State()
     await sync_positions(ex, state, bal)
     print(f"Açık pozisyon≈{len(state.positions)}")
-    print("Ctrl+C dur")
+    print(_c(_GREEN, "AL=yeşil"), "|", _c(_RED, "SAT=kırmızı"), "|", _c(_ORANGE, "EMİR=turuncu"))
+    print("Ctrl+C dur → günlük özet")
     print("=" * 64)
 
     fast_task = asyncio.create_task(fast_loop(ex, state))
@@ -945,7 +1054,16 @@ async def main_async() -> None:
                     await sleep_ban(e)
             elapsed = time.time() - t0
             wait = max(5.0, SCAN_SEC - elapsed)
-            log.info("sonraki SCAN %.0fs (FAST sat loop arka planda)", wait)
+            st = state.stats
+            st.ensure_today()
+            log.info(
+                "sonraki SCAN %.0fs | bugün emir=%d AL=%d SAT=%d net≈%+.5fBNB",
+                wait,
+                st.orders,
+                st.buys,
+                st.sells,
+                st.net(),
+            )
             await asyncio.sleep(wait)
     except asyncio.CancelledError:
         pass
@@ -957,6 +1075,7 @@ async def main_async() -> None:
                 await ex.cancel_all(sym)
             except Exception:
                 pass
+        state.stats.print_summary()
         print("Kapandı | realize≈%.5f BNB" % state.realized_bnb)
 
 
@@ -964,6 +1083,14 @@ def main() -> None:
     if sys.platform.startswith("win"):
         try:
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
+        # Windows konsol renk
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
         except Exception:
             pass
     try:
