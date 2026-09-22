@@ -40,14 +40,16 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
 QUOTE = "BNB"
-# Hızlı MM — az pair (50 zorunlu değil)
-NUM_PAIRS = 6
-MIN_QUOTE_VOL = 5.0             # BNB 24h hacim tabanı
-REPLACE_SEC = 4.0               # emir yenileme (hızlı)
-BALANCE_CACHE_SEC = 20.0
-FILL_POLL_SEC = 25.0
-BOOK_REST_SEC = 8.0             # WS yoksa
-WORKER_STAGGER_SEC = 1.5
+# Az pair = her slota daha çok BNB + gerçek AL/SAT (0.06 BNB için 3 ideal)
+NUM_PAIRS = 3
+MIN_QUOTE_VOL = 5.0
+REPLACE_SEC = 6.0               # gereksiz iptal-spam azalt
+BALANCE_CACHE_SEC = 8.0         # iptal sonrası taze bakiye
+FILL_POLL_SEC = 20.0
+BOOK_REST_SEC = 8.0
+WORKER_STAGGER_SEC = 2.0
+MAX_BOOK_SPREAD_BPS = 55.0      # OPEN gibi 80bps pair'leri alma
+QUOTE_MOVE_BPS = 8.0            # mid bu kadar oynamazsa emir yenileme
 
 # Spread: komisyonu geçsin
 MAKER_FEE = 0.00075
@@ -461,7 +463,7 @@ def pick_liquid_pairs(ex: Exchange, tickers: Dict[str, dict], n: int = NUM_PAIRS
         ask = float(t.get("ask") or 0)
         if bid > 0 and ask > bid:
             spr = (ask - bid) / ((ask + bid) / 2) * 10000.0
-            if spr > 80:
+            if spr > MAX_BOOK_SPREAD_BPS:
                 continue
         rows.append((qv, sym))
     rows.sort(key=lambda x: -x[0])
@@ -489,6 +491,7 @@ class Slot:
     base_total: float = 0.0
     realized: float = 0.0
     last_quote: float = 0.0
+    last_mid_quoted: float = 0.0
     last_fill_poll: float = 0.0
     seen: Set[str] = field(default_factory=set)
     last_tid: Optional[str] = None
@@ -568,10 +571,10 @@ class Slot:
             else:
                 self.realized += amt * px - fee
                 st.sells += 1
-                if amt * px > 0:
-                    st.won += max(0.0, amt * px * 0.0)  # realize günlük brüt ayrı
                 say_sell(f"{self.symbol} FILL {amt:.6g} @ {px:.8g}")
-            st.fees += fee
+            if self.realized >= 0:
+                st.won = max(st.won, 0)  # keep; realized slot-level
+            st.fees += abs(fee)
             st.save()
             await self.ex.balance(force=True)
 
@@ -587,6 +590,11 @@ class Slot:
         mid = self.book.mid
         if mid <= 0:
             return None
+        # book zaten çok genişse MM etme
+        if self.book.bid > 0 and self.book.ask > self.book.bid:
+            nat = (self.book.ask - self.book.bid) / mid * 10000.0
+            if nat > MAX_BOOK_SPREAD_BPS * 1.2:
+                return None
         tick = self.ex.tick(self.symbol)
         half = max(
             self.min_full_spread() / 2.0,
@@ -603,7 +611,6 @@ class Slot:
 
         bid = self.ex.px(self.symbol, bid)
         ask = self.ex.px(self.symbol, ask)
-        # book içinde kal (LIMIT_MAKER reject olmasın)
         if self.book.bid > 0 and bid >= self.book.bid:
             bid = self.ex.px(self.symbol, self.book.bid - tick)
         if self.book.ask > 0 and ask <= self.book.ask:
@@ -612,23 +619,40 @@ class Slot:
             return None
 
         min_qty, min_cost = self.ex.limits(self.symbol)
-        target = max(min_cost * 1.1, self.slot_bnb * 0.88)
+        # Slot'a özel bütçe — global BNB'yi tek pair yemesin
+        buy_budget = min(self.slot_bnb * 0.95, max(0.0, self.quote_free) * 0.98)
+        sell_base = max(self.base_free, 0.0)
+
+        target = max(min_cost * 1.05, self.slot_bnb * 0.90)
         sz = target / mid
         ip = self.inv_pos()
-        bid_sz = sz * max(0.45, 1 + ip * 0.2)
-        ask_sz = sz * max(0.45, 1 - ip * 0.2)
-        max_buy = min(self.quote_free * 0.9, self.slot_bnb)
-        bid_sz = min(bid_sz, max_buy / mid) if max_buy >= min_cost else 0.0
-        max_sell = min(self.base_free * 0.95, self.slot_bnb / mid)
-        ask_sz = min(ask_sz, max_sell) if max_sell * mid >= min_cost else 0.0
-        if abs(self.base_total) * mid >= self.slot_bnb * MAX_INVENTORY_RATIO:
+        bid_sz = sz * max(0.5, 1 + ip * 0.15)
+        ask_sz = sz * max(0.5, 1 - ip * 0.15)
+
+        if buy_budget >= min_cost and buy_budget >= MIN_QUOTE_FREE:
+            bid_sz = min(bid_sz, buy_budget / mid)
+        else:
             bid_sz = 0.0
+
+        if sell_base * mid >= min_cost * 0.95:
+            ask_sz = min(ask_sz, sell_base * 0.98, self.slot_bnb / mid * 1.2)
+        else:
+            ask_sz = 0.0
+
+        if self.base_total * mid >= self.slot_bnb * MAX_INVENTORY_RATIO:
+            bid_sz = 0.0
+
         bid_sz = self.ex.amt(self.symbol, bid_sz)
         ask_sz = self.ex.amt(self.symbol, ask_sz)
         if bid_sz > 0 and bid_sz * bid < min_cost:
             bid_sz = 0.0
         if ask_sz > 0 and ask_sz * ask < min_cost:
-            ask_sz = 0.0
+            # min notional için büyütmeyi dene
+            need = min_cost / ask
+            if sell_base >= need:
+                ask_sz = self.ex.amt(self.symbol, need * 1.02)
+            if ask_sz * ask < min_cost:
+                ask_sz = 0.0
         return bid, ask, bid_sz, ask_sz
 
     async def replace(self) -> None:
@@ -637,25 +661,36 @@ class Slot:
         if self.kill:
             await self.ex.cancel_all(self.symbol)
             return
+        # mid az oynadıysa ve iki yön de boş değilse skip (spam/fee)
+        if self.last_mid_quoted > 0 and self.book.mid > 0:
+            moved = abs(self.book.mid - self.last_mid_quoted) / self.last_mid_quoted * 10000.0
+            if moved < QUOTE_MOVE_BPS and time.time() - self.last_quote < REPLACE_SEC * 2:
+                return
+
+        # Önce iptal → bakiye serbest kalsın → sonra iki yön emir
+        await self.ex.cancel_all(self.symbol)
+        await asyncio.sleep(0.25)
+        await self.ex.balance(force=True)
+        await self.bal()
+
         q = self.quotes()
         if not q:
+            self.last_quote = time.time()
             return
         bid, ask, bid_sz, ask_sz = q
-        await self.ex.cancel_all(self.symbol)
-        await asyncio.sleep(0.15)
-        # aynı anda iki yön — gerçek MM
-        tasks = []
-        if bid_sz > 0 and self.quote_free >= MIN_QUOTE_FREE:
-            tasks.append(self.ex.place(self.symbol, "buy", bid_sz, bid))
-        if ask_sz > 0 and self.base_free > 0:
-            tasks.append(self.ex.place(self.symbol, "sell", ask_sz, ask))
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+
+        if bid_sz > 0:
+            await self.ex.place(self.symbol, "buy", bid_sz, bid)
+            await asyncio.sleep(0.12)
+        if ask_sz > 0:
+            await self.ex.place(self.symbol, "sell", ask_sz, ask)
+
         self.last_quote = time.time()
+        self.last_mid_quoted = self.book.mid
         spr = (ask - bid) / mid * 10000 if (mid := self.book.mid) else 0
         log.info(
-            "%s quote bid=%.8g×%.6g ask=%.8g×%.6g spr=%.1fbps",
-            self.symbol, bid, bid_sz, ask, ask_sz, spr,
+            "%s quote BUY %.8g×%.6g | SELL %.8g×%.6g | spr=%.1fbps | qFree=%.4f baseFree=%.6g",
+            self.symbol, bid, bid_sz, ask, ask_sz, spr, self.quote_free, self.base_free,
         )
 
     async def run(self, delay: float = 0.0) -> None:
