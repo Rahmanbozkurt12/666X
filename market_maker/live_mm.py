@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — BNB · PROF MM · 5m YEŞİL + HACİM
+Binance Spot Market Maker — BNB · GENİŞ TARAMA · PROF EDGE
 
-Seçim: hacmi yükselen · yüksek hacim yükselmeye devam · ~-20 dip rebound.
-5m mum yeşil + 5m hacim artışı. Aynı coine 1 dk tekrar AL yok.
-Maker only — fee+edge+inventory+toxic pause.
+Hafif filtre → çok coin. Skor: yükselen hacim / yüksek+yükselen / ~-20 dip / 5m yeşil.
+≥15 odak, aynı coine 1dk AL yok. Maker fee+edge+toxic kilitleri açık.
 
 1) API KEY yaz  (BNB + Pay fees with BNB AÇIK)
 2) pip install "ccxt[pro]"
@@ -614,6 +613,7 @@ def method_scores(
     green_5m: float = 0.0,
     vol_5m_rise: float = 0.0,
 ) -> Tuple[float, int, Dict[str, float]]:
+    """Hafif filtre: skor sıralar, sert eleme yapmaz (MIN_METHODS_PASS=0 ile uyumlu)."""
     pct_signed = float(t.get("percentage") or 0)
     pct = abs(pct_signed)
     last = float(t.get("last") or t.get("close") or 0)
@@ -626,47 +626,43 @@ def method_scores(
         s_rise += math.log1p(vol_rise_abs) * W_VOL_RISE
     if vol_rise_pct > 0:
         s_rise += min(vol_rise_pct, 3.0) * 100.0 * W_VOL_RISE_PCT
-    pass_rise = (vol_rise_pct >= MIN_VOL_RISE_PCT) or (vol_rise_abs >= MIN_VOL_RISE_USDT)
+    pass_rise = vol_rise_pct > 0 or vol_rise_abs > 0 or vol_rise_pct >= MIN_VOL_RISE_PCT
 
-    # Yüksek hacim + hâlâ yükseliyor → kaçırma
     s_high = 0.0
     if usdt_vol >= HIGH_USDT_VOL and vol_rise_pct > 0:
         s_high = math.log1p(usdt_vol / HIGH_USDT_VOL) * 40.0 * W_HIGH_VOL_RISE + min(vol_rise_pct, 1.0) * 50.0
         pass_rise = True
 
-    # ~-20 bandı dip + hacim artışı = yeşil mum öncesi rebound
     s_dip = 0.0
-    if DIP_PCT_LO <= pct_signed <= DIP_PCT_HI and (vol_rise_pct > 0 or vol_rise_abs > 0):
-        depth = min(abs(pct_signed), 22.0) / 22.0
-        s_dip = (40.0 + depth * 60.0) * W_DIP_REBOUND * (1.0 + min(max(vol_rise_pct, 0.0), 1.0))
+    if DIP_PCT_LO <= pct_signed <= DIP_PCT_HI:
+        depth = min(abs(pct_signed), 25.0) / 25.0
+        rise_boost = 1.0 + min(max(vol_rise_pct, 0.0), 1.5)
+        s_dip = (35.0 + depth * 70.0) * W_DIP_REBOUND * rise_boost
         pass_rise = True
 
     s_green = max(0.0, green_5m) * W_GREEN_5M
     s_v5 = max(0.0, vol_5m_rise) * W_VOL_5M
-    pass_5m = green_5m > 0 or vol_5m_rise > 0.15
+    pass_5m = green_5m > 0.2 or vol_5m_rise > 0.05
 
-    s_vol = min(vol_abs, 12.0) * W_VOLATILITY
-    pass_vol = MIN_24H_PCT <= vol_abs <= MAX_ABS_24H_PCT or (DIP_PCT_LO <= pct_signed <= DIP_PCT_HI)
+    s_vol = min(vol_abs, 18.0) * W_VOLATILITY
+    pass_vol = vol_abs <= MAX_ABS_24H_PCT or (DIP_PCT_LO <= pct_signed <= DIP_PCT_HI)
     if last > 0 and high > low > 0:
         rng = (high - low) / last * 100.0
     else:
-        rng = vol_abs * 0.8
-    s_range = min(rng, 18.0) * W_RANGE
-    pass_range = 1.0 <= rng <= 30.0
+        rng = max(vol_abs * 0.8, 0.5)
+    s_range = min(rng, 25.0) * W_RANGE
+    pass_range = rng <= 45.0  # gevşek
     s_vol_amt = math.log1p(max(0.0, usdt_vol)) * W_VOLUME
     pass_qv = usdt_vol >= FLOOR_USDT_VOL
     need = min_spread_bps()
     if spr_bps <= 0:
-        s_spread, pass_spr = 0.0, False
-    elif spr_bps < need * 0.45:
-        s_spread, pass_spr = spr_bps * 0.02, False
-    elif spr_bps <= need * 2.2:
-        s_spread = (need * 2.2 - abs(spr_bps - need * 1.15)) * W_SPREAD_FIT * 0.12
+        s_spread, pass_spr = 0.0, True  # spr yoksa eleme
+    elif spr_bps <= MAX_BOOK_SPREAD_BPS * 1.25:
+        s_spread = max(0.0, (MAX_BOOK_SPREAD_BPS * 1.25 - abs(spr_bps - need))) * W_SPREAD_FIT * 0.08
         pass_spr = True
     else:
-        s_spread = max(0.0, (MAX_BOOK_SPREAD_BPS - spr_bps)) * 0.015
-        pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS
-    # Pozitif 24h hafif bonus; aşırı eksi dip rebound'da zaten s_dip var
+        s_spread = 0.0
+        pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS * 1.5
     s_mom = max(0.0, pct_signed) * W_MOMENTUM
     pass_mom = pct_signed <= MAX_ABS_24H_PCT and pct_signed >= -abs(MAX_ABS_24H_PCT)
     parts = {
@@ -849,13 +845,16 @@ def scan_all_binance(
         now_vols[base] = usdt_vol
         if usdt_vol < min_usdt_vol:
             continue
-        if row["spr"] > max_spread and row.get("bnb_spr", 9e9) > max_spread:
+        # BNB book spread öncelikli (asıl trade ettiğimiz market)
+        eff_spr = float(row.get("bnb_spr") or 9e9)
+        if eff_spr >= 9e9:
+            eff_spr = float(row["spr"])
+        if eff_spr > max_spread:
             continue
         pct_signed = float(row.get("pct_signed") or row["t"].get("percentage") or 0)
-        # Aşırı pump ele; -20 dip rebound'a izin ver
         if pct_signed > MAX_ABS_24H_PCT:
             continue
-        if pct_signed < -abs(MAX_ABS_24H_PCT) and not (DIP_PCT_LO <= pct_signed <= DIP_PCT_HI):
+        if pct_signed < -abs(MAX_ABS_24H_PCT):
             continue
         prev_v = float(prev.get(base) or 0.0)
         if prev_v > 1e-9:
@@ -863,14 +862,15 @@ def scan_all_binance(
             rise_pct = rise_abs / prev_v
         else:
             rise_abs = 0.0
-            rise_pct = max(0.0, abs(pct_signed) / 100.0)
+            rise_pct = 0.0
         is_dip = DIP_PCT_LO <= pct_signed <= DIP_PCT_HI
         is_high_rising = usdt_vol >= HIGH_USDT_VOL and rise_pct > 0
-        rising_ok = rise_pct >= MIN_VOL_RISE_PCT or rise_abs >= MIN_VOL_RISE_USDT
+        rising_ok = rise_pct >= MIN_VOL_RISE_PCT or rise_abs >= MIN_VOL_RISE_USDT or rise_pct > 0
+        # require_rise=True iken bile: yükselen VEYA dip VEYA yüksek+yükselen VEYA ilk snap
         if require_rise and prev and not (rising_ok or is_dip or is_high_rising):
             continue
-        score, npass, _ = method_scores(row["t"], row["spr"], usdt_vol, rise_pct, rise_abs)
-        if npass < min_pass and not (is_dip and rising_ok):
+        score, npass, _ = method_scores(row["t"], eff_spr, usdt_vol, rise_pct, rise_abs)
+        if min_pass > 0 and npass < min_pass and not (is_dip or is_high_rising or rising_ok):
             continue
         ranked.append((score, base, bnb_sym, usdt_vol))
     ranked.sort(key=lambda x: -x[0])
@@ -882,26 +882,27 @@ async def enrich_ranked_5m(
     ex: Exchange,
     ranked: List[Tuple[float, str, str, float]],
 ) -> List[Tuple[float, str, str, float]]:
-    """Üst adaylara 5m yeşil mum + 5m hacim artışı skoru ekle."""
+    """Üst adaylara 5m yeşil mum + 5m hacim artışı skoru ekle (elemez, sadece sıralar)."""
     if not ranked:
         return ranked
     enriched: List[Tuple[float, str, str, float]] = []
-    top = ranked[:KLINE_TOP_N]
-    rest = ranked[KLINE_TOP_N:]
+    n_check = min(len(ranked), max(KLINE_TOP_N, 50))
+    top = ranked[:n_check]
+    rest = ranked[n_check:]
     green_n = 0
     for sc, base, bnb_sym, usdt_vol in top:
         g5 = v5 = 0.0
         if bnb_sym:
             ohlcv = await ex.ohlcv(bnb_sym, KLINE_TF, KLINE_LIMIT)
             g5, v5 = analyze_5m_ohlcv(ohlcv)
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.06)
         bonus = g5 * W_GREEN_5M * 8.0 + v5 * 100.0 * W_VOL_5M
-        if g5 >= 1.0 and v5 > 0.1:
+        if g5 >= 0.8:
             green_n += 1
         enriched.append((sc + bonus, base, bnb_sym, usdt_vol))
     enriched.extend(rest)
     enriched.sort(key=lambda x: -x[0])
-    log.info("5m kontrol | aday=%d yeşil_güçlü=%d tf=%s", len(top), green_n, KLINE_TF)
+    log.info("5m kontrol | aday=%d yeşil=%d tf=%s (sıralama, eleme yok)", len(top), green_n, KLINE_TF)
     return enriched
 
 
@@ -947,8 +948,9 @@ async def pick_open_pairs(
     cold = {s for s, ts in cooldown.items() if now - ts < ROTATE_COOLDOWN_SEC}
 
     ranked, scanned, spot_n = scan_all_binance(
-        ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS, require_rise=True
+        ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS, require_rise=False
     )
+    # Yükselenleri öne al ama eleme — skor zaten rise/dip/high boost'luyor
     ranked = await enrich_ranked_5m(ex, ranked)
     pool: List[str] = []
 
@@ -968,9 +970,10 @@ async def pick_open_pairs(
             break
     if len(pool) < CANDIDATE_POOL:
         loose, sc2, _ = scan_all_binance(
-            ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.4, require_rise=False
+            ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.6, require_rise=False
         )
-        loose = await enrich_ranked_5m(ex, loose[:KLINE_TOP_N])
+        if len(loose) > KLINE_TOP_N:
+            loose = await enrich_ranked_5m(ex, loose[: max(KLINE_TOP_N, 60)])
         scanned = max(scanned, sc2)
         for _sc, _b, bnb_sym, _v in loose:
             if bnb_sym:
@@ -1270,11 +1273,9 @@ class Slot:
         nat_bps = 0.0
         if self.book.bid > 0 and self.book.ask > self.book.bid:
             nat_bps = (self.book.ask - self.book.bid) / mid * 10000.0
-            # Illikid veya edge yok → quote etme
-            if nat_bps > MAX_BOOK_SPREAD_BPS:
+            # Sadece aşırı geniş book'u atla — dar book'a izin (MIN_BOOK gevşek)
+            if nat_bps > MAX_BOOK_SPREAD_BPS * 1.35:
                 return None
-            if nat_bps < MIN_BOOK_SPREAD_BPS and not self.has_inventory():
-                return None  # dar book'ta fee'ye yenilirsin
 
         tick = self.ex.tick(self.symbol)
         half = self.min_full_spread() / 2.0
