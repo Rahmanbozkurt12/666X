@@ -57,10 +57,11 @@ MAKER_FEE = 0.00075
 FEE_SAFETY = 1.5
 MIN_EDGE_BPS = 12.0             # fee üstü
 BASE_SPREAD_TICKS = 3.0
-MAX_INVENTORY_RATIO = 0.95
-TARGET_INVENTORY_RATIO = 0.45   # iki yön MM hedefi
-MIN_QUOTE_FREE = 0.004
-RESERVE_BNB = 0.002
+MAX_INVENTORY_RATIO = 0.99
+TARGET_INVENTORY_RATIO = 0.50   # iki yön MM hedefi
+MIN_QUOTE_FREE = 0.003
+RESERVE_BNB = 0.0003            # sadece fee tozu — gerisini deploy
+USE_QUOTE_FRAC = 0.998          # serbest BNB'nin neredeyse tamamı
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.18       # mark-to-market (nakit alış ≠ zarar)
 
@@ -257,7 +258,19 @@ class Exchange:
         self._bal_lock = asyncio.Lock()
         self._order_lock = asyncio.Lock()
         self._fee: Dict[str, float] = {}
+        self.n_pairs = 1
         self.stats = DayStats.load()
+
+    def deployable_bnb(self, bal: Optional[dict] = None) -> float:
+        """Fee tozu hariç tüm serbest BNB."""
+        b = bal if bal is not None else self._bal
+        if not b:
+            return 0.0
+        return max(0.0, self.free(b, QUOTE) - RESERVE_BNB)
+
+    def slot_budget(self, bal: Optional[dict] = None) -> float:
+        n = max(1, self.n_pairs)
+        return self.deployable_bnb(bal) / n
 
     async def run(self, fn, *a, **kw):
         loop = asyncio.get_event_loop()
@@ -700,36 +713,48 @@ class Slot:
             return None
 
         min_qty, min_cost = self.ex.limits(self.symbol)
-        # Slot bütçesi — envanter hedefine göre alım boyutu
+        # Adil pay: tüm serbest BNB / pair (fee tozu hariç) — idle bırakma
+        fair = max(self.slot_bnb, self.ex.slot_budget())
+        self.slot_bnb = fair
+        n = max(1, self.ex.n_pairs)
+        # Bu pair en fazla serbest/n alır; hepsi birlikte ≈ %100 deploy
+        share = max(fair, max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC / n)
+
         inv_bnb = self.base_total * mid
-        room = max(0.0, self.slot_bnb * MAX_INVENTORY_RATIO - inv_bnb)
-        buy_budget = min(self.slot_bnb * 0.95, max(0.0, self.quote_free) * 0.92, max(room, 0.0))
-        # hedefe ulaşmamışsa en az min_cost kadar yer aç
-        if room < min_cost and inv_bnb < self.slot_bnb * TARGET_INVENTORY_RATIO:
-            buy_budget = min(self.slot_bnb * 0.5, max(0.0, self.quote_free) * 0.92)
+        room = max(0.0, share * MAX_INVENTORY_RATIO - inv_bnb)
+        q_avail = max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC
+        buy_budget = min(q_avail, share, room if room >= min_cost else share)
+        if buy_budget < min_cost or inv_bnb >= share * MAX_INVENTORY_RATIO:
+            buy_budget = 0.0
         sell_base = max(self.base_free, 0.0)
 
-        target = max(min_cost * 1.05, self.slot_bnb * 0.55)
+        # Emir boyutu ≈ slot/pay'ın tamamı
+        target = max(min_cost * 1.05, buy_budget if buy_budget > 0 else share)
         sz = target / mid
-        # az envanter → daha büyük bid; fazla → daha büyük ask
-        bid_sz = sz * max(0.55, 1.0 - ip * 0.35)
-        ask_sz = sz * max(0.55, 1.0 + ip * 0.35)
+        bid_sz = sz * max(0.9, 1.0 - ip * 0.2)
+        ask_sz = sz * max(0.9, 1.0 + ip * 0.2)
 
-        if buy_budget >= min_cost and buy_budget >= MIN_QUOTE_FREE * 0.5:
+        if buy_budget >= min_cost:
             bid_sz = min(bid_sz, buy_budget / mid)
         else:
             bid_sz = 0.0
 
         if sell_base * mid >= min_cost * 0.95:
-            ask_sz = min(ask_sz, sell_base * 0.98, self.slot_bnb / mid * 1.25)
+            ask_sz = min(ask_sz, sell_base * USE_QUOTE_FRAC, share / mid * 1.2)
         else:
             ask_sz = 0.0
 
-        if inv_bnb >= self.slot_bnb * MAX_INVENTORY_RATIO:
+        if inv_bnb >= share * MAX_INVENTORY_RATIO:
             bid_sz = 0.0
+
+        # hard cap: notional asla payı aşmasın
+        if bid_sz > 0 and mid > 0:
+            bid_sz = min(bid_sz, buy_budget / mid)
 
         bid_sz = self.ex.amt(self.symbol, bid_sz)
         ask_sz = self.ex.amt(self.symbol, ask_sz)
+        if bid_sz > 0 and bid > 0 and bid_sz * bid > buy_budget * 1.001:
+            bid_sz = self.ex.amt(self.symbol, buy_budget / bid)
         if bid_sz > 0 and bid_sz * bid < min_cost:
             # min notional'a büyüt (bütçe yetiyorsa)
             need = min_cost / bid * 1.02
@@ -891,8 +916,8 @@ async def main_async() -> None:
     if not bal:
         raise SystemExit("Bakiye yok / ban")
     free = ex.free(bal, QUOTE)
-    spend = max(0.0, free - RESERVE_BNB)
-    print(f"{QUOTE} free≈{free:.4f} | deploy≈{spend:.4f} (reserve {RESERVE_BNB})")
+    spend = ex.deployable_bnb(bal)
+    print(f"{QUOTE} free≈{free:.6f} | deploy≈{spend:.6f} (fee tozu {RESERVE_BNB})")
 
     tickers = await ex.tickers()
     symbols = pick_liquid_pairs(ex, tickers, NUM_PAIRS)
@@ -900,11 +925,12 @@ async def main_async() -> None:
         raise SystemExit("Yeterli likit BNB pair yok")
 
     n = len(symbols)
+    ex.n_pairs = n
     slot = spend / n if n else 0.0
     if slot < MIN_QUOTE_FREE:
         raise SystemExit(f"Slot {slot:.5f} {QUOTE} küçük — BNB ekle veya NUM_PAIRS düşür")
 
-    print(f"{n}×{slot:.4f} {QUOTE} | Ctrl+C dur")
+    print(f"{n}×{slot:.6f} {QUOTE} | TÜM serbest BNB deploy | Ctrl+C dur")
     print(_c(_GREEN, "AL=yeşil"), "|", _c(_RED, "SAT=kırmızı"), "|", _c(_ORANGE, "EMİR=turuncu"))
     print("=" * 64)
 
