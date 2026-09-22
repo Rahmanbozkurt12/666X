@@ -3,7 +3,7 @@
 Binance Spot Market Maker — BNB · KÂR KİLİTLİ · 20 COİN · CANLI
 
 Tüm Binance spot coinleri tarar (USDT hacim × oynaklık). Emir */BNB.
-FORCE_MIN_OPEN=20. Sadece maker. Zararlı satış yok; AL/SAT dengeli; düşük WR'de sadece SAT.
+FORCE_MIN_OPEN≥15. Hacim YÜKSELEN coinler. Tüm BNB bakiyesi. Maker only.
 
 1) API KEY yaz  (BNB + Pay fees with BNB AÇIK)
 2) pip install "ccxt[pro]"
@@ -44,10 +44,10 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 QUOTE = "BNB"
 SCAN_ALL = True
 FORCE_MIN_OPEN = True
-MAX_OPEN = 20                   # aynı anda odak = 20
-MIN_OPEN = 20
-CANDIDATE_POOL = 60             # skordan ilk 60 aday → 20 seç (hep aynı olmasın)
-SCAN_SEC = 120.0                # 2 dk'da bir yeniden tara + rotasyon
+MAX_OPEN = 18                   # üst sınır
+MIN_OPEN = 15                   # KESİN en az 15 coin
+CANDIDATE_POOL = 80             # yükselen hacim havuzu
+SCAN_SEC = 90.0                 # sık tarama = hacim artışını yakala
 REPLACE_SEC = 90.0
 BALANCE_CACHE_SEC = 20.0
 FILL_POLL_SEC = 20.0
@@ -55,17 +55,20 @@ BOOK_REST_SEC = 12.0
 WORKER_STAGGER_SEC = 0.8
 HOLD_QUOTE_MULT = 5.0
 LOOP_SLEEP_SEC = 1.5
-USE_WS = False                  # 20 WS = ban
+USE_WS = False
 API_RATE_MS = 450
-ROTATE_COOLDOWN_SEC = 20 * 60   # çıkan coin 20 dk tekrar alınmaz
+ROTATE_COOLDOWN_SEC = 15 * 60
 KEEP_GRACE_SEC = 60.0
 
-MIN_USDT_VOL = 120_000.0
-SOFT_USDT_VOL = 40_000.0
-FLOOR_USDT_VOL = 8_000.0
+# Tabana düşük — asıl filtre "hacim YÜKSELİYOR"
+MIN_USDT_VOL = 25_000.0
+SOFT_USDT_VOL = 8_000.0
+FLOOR_USDT_VOL = 2_000.0
 MAX_BOOK_SPREAD_BPS = 100.0
 QUOTE_MOVE_BPS = 55.0
 JOIN_TOUCH = False
+MIN_VOL_RISE_PCT = 0.08         # önceki tarama vs şimdi ≥ +%8
+MIN_VOL_RISE_USDT = 5_000.0     # veya en az +5k USDT hacim artışı
 
 # KÂR KİLİDİ
 MAKER_FEE = 0.00075
@@ -74,27 +77,30 @@ MIN_EDGE_BPS = 48.0
 MIN_SELL_EDGE_BPS = 42.0
 BASE_SPREAD_TICKS = 3.0
 MAX_HALF_SPREAD_BPS = 85.0
-MAX_INVENTORY_RATIO = 0.55
-TARGET_INVENTORY_RATIO = 0.22
-MIN_QUOTE_FREE = 0.0028
-RESERVE_BNB = 0.0005
-USE_QUOTE_FRAC = 0.90
+MAX_INVENTORY_RATIO = 0.98      # slot payının neredeyse tamamı envanter olabilir
+TARGET_INVENTORY_RATIO = 0.35
+MIN_QUOTE_FREE = 0.0020
+RESERVE_BNB = 0.0002            # sadece fee tozu
+USE_QUOTE_FRAC = 0.999          # KESİN: serbest BNB'nin tamamı
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.12
 MAX_ABS_24H_PCT = 18.0
-MIN_24H_PCT = 1.5
-MAX_PAIR_HOLD_SEC = 22 * 60     # envantersiz max kalış → zorunlu rotasyon
+MIN_24H_PCT = 1.2
+MAX_PAIR_HOLD_SEC = 22 * 60
 MAX_BUY_LEAD = 1
 MIN_WR_TO_BUY = 0.52
 MIN_TRADES_FOR_WR = 6
 
-W_VOLUME = 3.4
-W_VOLATILITY = 1.0
-W_RANGE = 0.65
-W_SPREAD_FIT = 1.50
-W_MOMENTUM = -0.65
-MIN_METHODS_PASS = 2
-FALLBACK_METHODS_PASS = 1
+# Skor: yükselen hacim birincil — mutlak hacim cezalı/ikincil
+W_VOL_RISE = 4.5
+W_VOL_RISE_PCT = 2.8
+W_VOLUME = 0.25                 # mutlak hacim neredeyse yok
+W_VOLATILITY = 1.1
+W_RANGE = 0.70
+W_SPREAD_FIT = 1.40
+W_MOMENTUM = -0.40
+MIN_METHODS_PASS = 1
+FALLBACK_METHODS_PASS = 0
 
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
@@ -106,6 +112,7 @@ SKIP_CONTAINS = ("3L", "3S", "2L", "2S", "LEVERAGED")
 _OUT = Path(__file__).resolve().parent.parent / "output"
 STATS_PATH = _OUT / "live_mm_day_stats.json"
 STATE_PATH = _OUT / "live_mm_state.json"
+VOL_SNAP_PATH = _OUT / "live_mm_vol_snap.json"
 
 # =============================================================================
 
@@ -363,9 +370,10 @@ class Exchange:
         b = bal if bal is not None else self._bal
         if not b:
             return 0.0
-        return max(0.0, self.free(b, QUOTE) - RESERVE_BNB)
+        return max(0.0, self.free(b, QUOTE) - RESERVE_BNB) * USE_QUOTE_FRAC
 
     def slot_budget(self, bal: Optional[dict] = None) -> float:
+        # n_pairs slotuna eşit böl — toplam = tüm deployable BNB
         return self.deployable_bnb(bal) / max(1, self.n_pairs)
 
     async def run(self, fn, *a, **kw):
@@ -546,12 +554,26 @@ class Exchange:
                     await sleep_ban(e)
 
 
-def method_scores(t: dict, spr_bps: float, usdt_vol: float) -> Tuple[float, int, Dict[str, float]]:
+def method_scores(
+    t: dict,
+    spr_bps: float,
+    usdt_vol: float,
+    vol_rise_pct: float = 0.0,
+    vol_rise_abs: float = 0.0,
+) -> Tuple[float, int, Dict[str, float]]:
     pct = float(t.get("percentage") or 0)
     last = float(t.get("last") or t.get("close") or 0)
     high = float(t.get("high") or 0)
     low = float(t.get("low") or 0)
     vol_abs = abs(pct)
+
+    s_rise = 0.0
+    if vol_rise_abs > 0:
+        s_rise += math.log1p(vol_rise_abs) * W_VOL_RISE
+    if vol_rise_pct > 0:
+        s_rise += min(vol_rise_pct, 3.0) * 100.0 * W_VOL_RISE_PCT
+    pass_rise = (vol_rise_pct >= MIN_VOL_RISE_PCT) or (vol_rise_abs >= MIN_VOL_RISE_USDT)
+
     s_vol = min(vol_abs, 12.0) * W_VOLATILITY
     pass_vol = MIN_24H_PCT <= vol_abs <= MAX_ABS_24H_PCT
     if last > 0 and high > low > 0:
@@ -559,7 +581,7 @@ def method_scores(t: dict, spr_bps: float, usdt_vol: float) -> Tuple[float, int,
     else:
         rng = vol_abs * 0.8
     s_range = min(rng, 18.0) * W_RANGE
-    pass_range = 1.8 <= rng <= 28.0
+    pass_range = 1.5 <= rng <= 28.0
     s_vol_amt = math.log1p(max(0.0, usdt_vol)) * W_VOLUME
     pass_qv = usdt_vol >= FLOOR_USDT_VOL
     need = min_spread_bps()
@@ -575,8 +597,37 @@ def method_scores(t: dict, spr_bps: float, usdt_vol: float) -> Tuple[float, int,
         pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS
     s_mom = abs(pct) * W_MOMENTUM
     pass_mom = vol_abs <= MAX_ABS_24H_PCT
-    parts = {"vol": s_vol, "range": s_range, "qv": s_vol_amt, "spread": s_spread, "mom": s_mom}
-    return sum(parts.values()), sum([pass_vol, pass_range, pass_qv, pass_spr, pass_mom]), parts
+    parts = {
+        "rise": s_rise,
+        "vol": s_vol,
+        "range": s_range,
+        "qv": s_vol_amt,
+        "spread": s_spread,
+        "mom": s_mom,
+    }
+    passed = sum([pass_rise, pass_vol, pass_range, pass_qv, pass_spr, pass_mom])
+    return sum(parts.values()), passed, parts
+
+
+def load_vol_snap() -> Dict[str, float]:
+    try:
+        if VOL_SNAP_PATH.exists():
+            raw = json.loads(VOL_SNAP_PATH.read_text(encoding="utf-8"))
+            return {str(k): float(v) for k, v in (raw.get("vols") or raw).items()}
+    except Exception:
+        pass
+    return {}
+
+
+def save_vol_snap(vols: Dict[str, float]) -> None:
+    try:
+        VOL_SNAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+        VOL_SNAP_PATH.write_text(
+            json.dumps({"ts": time.time(), "vols": vols}, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
 
 def _ticker(tickers: Dict[str, dict], sym: str) -> dict:
@@ -643,8 +694,12 @@ def scan_all_binance(
     min_usdt_vol: float,
     min_pass: int,
     max_spread: float,
+    require_rise: bool = True,
 ) -> Tuple[List[Tuple[float, str, str, float]], int, int]:
+    """Skor = hacim ARTISI (önceki tarama vs şimdi). En yüksek mutlak hacim öncelikli değil."""
     fx = usdt_fx(tickers)
+    prev = load_vol_snap()
+    now_vols: Dict[str, float] = {}
     per_base: Dict[str, dict] = {}
     scanned = spot_n = 0
     for sym, base, quote, _m in iter_spot(ex):
@@ -675,20 +730,32 @@ def scan_all_binance(
         if quote == QUOTE:
             row["bnb_sym"] = sym
             row["bnb_spr"] = spr
+
     ranked: List[Tuple[float, str, str, float]] = []
     for base, row in per_base.items():
-        if row["usdt_vol"] < min_usdt_vol:
+        usdt_vol = float(row["usdt_vol"])
+        now_vols[base] = usdt_vol
+        if usdt_vol < min_usdt_vol:
             continue
         if row["spr"] > max_spread and row.get("bnb_spr", 9e9) > max_spread:
             continue
         if row["pct"] > MAX_ABS_24H_PCT:
             continue
-        score, npass, _ = method_scores(row["t"], row["spr"], row["usdt_vol"])
+        prev_v = float(prev.get(base) or 0.0)
+        if prev_v > 1e-9:
+            rise_abs = usdt_vol - prev_v
+            rise_pct = rise_abs / prev_v
+        else:
+            rise_abs = 0.0
+            rise_pct = max(0.0, abs(float(row["t"].get("percentage") or 0)) / 100.0)
+        if require_rise and prev and rise_pct < MIN_VOL_RISE_PCT and rise_abs < MIN_VOL_RISE_USDT:
+            continue
+        score, npass, _ = method_scores(row["t"], row["spr"], usdt_vol, rise_pct, rise_abs)
         if npass < min_pass:
             continue
-        score *= 1.0 + math.log1p(row["usdt_vol"]) / 14.0
-        ranked.append((score, base, row.get("bnb_sym") or "", row["usdt_vol"]))
+        ranked.append((score, base, row.get("bnb_sym") or "", usdt_vol))
     ranked.sort(key=lambda x: -x[0])
+    save_vol_snap(now_vols)
     return ranked, scanned, spot_n
 
 
@@ -729,7 +796,7 @@ def pick_open_pairs(
     cold = {s for s, ts in cooldown.items() if now - ts < ROTATE_COOLDOWN_SEC}
 
     ranked, scanned, spot_n = scan_all_binance(
-        ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS
+        ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS, require_rise=True
     )
     pool: List[str] = []
 
@@ -748,7 +815,7 @@ def pick_open_pairs(
             break
     if len(pool) < CANDIDATE_POOL:
         loose, sc2, _ = scan_all_binance(
-            ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.4
+            ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.4, require_rise=False
         )
         scanned = max(scanned, sc2)
         for _sc, _b, bnb_sym, _v in loose:
@@ -1020,14 +1087,14 @@ class Slot:
             if bid >= ask:
                 return None
 
-        fair = max(self.slot_bnb, self.ex.slot_budget())
-        self.slot_bnb = max(fair, MIN_QUOTE_FREE)
+        # TÜM serbest BNB → açık slotlara eşit pay. Pay = envanter + resting AL.
         n = max(1, self.ex.n_pairs)
-        share = max(self.slot_bnb, max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC / n)
-        inv_bnb = self.base_total * mid
-        room = max(0.0, share * MAX_INVENTORY_RATIO - inv_bnb)
         q_avail = max(0.0, self.quote_free - RESERVE_BNB) * USE_QUOTE_FRAC
-        buy_budget = min(q_avail, share, room if room >= min_cost else 0.0)
+        share = q_avail / n
+        self.slot_bnb = max(share, MIN_QUOTE_FREE, self.ex.slot_budget())
+        inv_bnb = self.base_total * mid
+        # Kalan payı AL emrine bas — idle BNB bırakma
+        buy_budget = max(0.0, share - inv_bnb)
         if buy_budget < min_cost or inv_bnb >= share * MAX_INVENTORY_RATIO:
             buy_budget = 0.0
         # KÂR KİLİDİ: AL/SAT + WR
@@ -1206,12 +1273,13 @@ class Engine:
                 force_out.add(sym)  # uzun kaldı, rotasyon
 
         want_n = MAX_OPEN if FORCE_MIN_OPEN else min(MAX_OPEN, cap)
+        want_n = max(want_n, MIN_OPEN)  # KESİN ≥15
         picked, scanned, pool_n = pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
         )
         # force_out olanları yeni listeden düş (yeniden aynı turda alma)
         picked = [s for s in picked if s not in force_out or s in keep]
-        # hâlâ 20 değilse havuzdan doldur
+        # hâlâ MIN_OPEN değilse havuzdan doldur
         if len(picked) < want_n:
             more, _, _ = pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
             for s in more:
@@ -1220,6 +1288,9 @@ class Engine:
                 if len(picked) >= want_n:
                     break
         picked = [s for s in picked if s not in self.banned][:MAX_OPEN]
+        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
+            log.warning("odak %d < MIN_OPEN=%d — yine de açıklarla devam", len(picked), MIN_OPEN)
+        # n_pairs = gerçek açık slot → tüm BNB bu slotlara gider (hayali 15'e bölme yok)
         self.ex.n_pairs = max(1, len(picked))
         budget = self.ex.slot_budget(bal)
         current, target = set(self.slots), set(picked)
