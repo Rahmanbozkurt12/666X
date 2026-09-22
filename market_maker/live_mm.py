@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — BNB · TÜM CEX TARAMA · CANLI
+Binance Spot Market Maker — BNB · KÂR ÖNCELİKLİ · 20 COİN · CANLI
 
-Tüm Binance spot BNB pair'lerini tarar; en iyi skorluları LIMIT_MAKER
-bid+ask ile açar; periyodik yeniden tarayıp rotasyon yapar.
+Tüm Binance BNB spot'u tarar (oynaklık + multi-method).
+En az 20 pair açar. Spread fee+edge üstü; az cancel = az komisyon.
 
 1) API KEY yaz  (+ BNB bakiye, Pay fees with BNB AÇIK)
 2) pip install "ccxt[pro]"
@@ -40,34 +40,42 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
 QUOTE = "BNB"
-# TÜM Binance BNB spot tarama — keşif üst sınırı yok
+# TÜM Binance BNB spot — volatilite öncelikli, EN AZ 20 coin
 SCAN_ALL = True
-MAX_OPEN = 12                   # aynı anda açık MM (küçük BNB'de anlamlı slot)
-MIN_OPEN = 4
-SCAN_SEC = 90.0
-MIN_QUOTE_VOL = 0.3
-REPLACE_SEC = 14.0
-BALANCE_CACHE_SEC = 8.0
-FILL_POLL_SEC = 12.0
-BOOK_REST_SEC = 8.0
-WORKER_STAGGER_SEC = 0.8
-MAX_BOOK_SPREAD_BPS = 80.0
-QUOTE_MOVE_BPS = 15.0
+MAX_OPEN = 20
+MIN_OPEN = 20                   # zorunlu minimum açık coin
+SCAN_SEC = 120.0                # daha seyrek rotasyon = daha az emir spam
+MIN_QUOTE_VOL = 0.05            # hacim eşiği düşük — oynaklığı kaçırma
+REPLACE_SEC = 45.0              # emir dinlensin — cancel spam = fee/fırsat kaybı
+BALANCE_CACHE_SEC = 12.0
+FILL_POLL_SEC = 15.0
+BOOK_REST_SEC = 10.0
+WORKER_STAGGER_SEC = 0.5
+MAX_BOOK_SPREAD_BPS = 200.0     # oynak pair kitap geniş olabilir — edge'i biz koyarız
+QUOTE_MOVE_BPS = 35.0           # mid bu kadar oynamadan yenileme YOK
 JOIN_BID = True
+HOLD_QUOTE_MULT = 4.0           # REPLACE_SEC * bu = max dinlenme
 
-# Spread: komisyonu geçsin
+# KÂR > KOMİSYON: round-trip fee üstüne net edge
 MAKER_FEE = 0.00075
-FEE_SAFETY = 1.5
-MIN_EDGE_BPS = 12.0
-BASE_SPREAD_TICKS = 3.0
-MAX_INVENTORY_RATIO = 0.99
-TARGET_INVENTORY_RATIO = 0.50
-MIN_QUOTE_FREE = 0.008          # slot başına min BNB — toz slotlara izin yok
+FEE_SAFETY = 2.0                # fee'yi abartılı varsay → daha geniş spread
+MIN_EDGE_BPS = 40.0             # fee üstü net kâr hedefi
+BASE_SPREAD_TICKS = 4.0
+MAX_INVENTORY_RATIO = 0.95
+TARGET_INVENTORY_RATIO = 0.40
+MIN_QUOTE_FREE = 0.0020         # 20 slot × ~0.002 = 0.04 BNB ile çalışır
 RESERVE_BNB = 0.0003
-USE_QUOTE_FRAC = 0.998
+USE_QUOTE_FRAC = 0.995
 POST_ONLY = True
-MAX_DRAWDOWN_RATIO = 0.18
-MIN_SELL_EDGE_BPS = 20.0        # avg maliyet + fee üstü sat (zararlı fill engel)
+MAX_DRAWDOWN_RATIO = 0.22
+MIN_SELL_EDGE_BPS = 45.0        # avg maliyet + fee + kâr — zararlı satışı kes
+# Skor ağırlıkları (multi-method)
+W_VOLATILITY = 3.0
+W_RANGE = 1.5
+W_VOLUME = 0.35                 # hacim düşük ağırlık
+W_SPREAD_FIT = 1.2              # fee'yi geçen ama aşırı geniş olmayan spread
+W_MOMENTUM = 1.0
+MIN_METHODS_PASS = 2            # en az 2 yöntem yeşil olmadan açma
 
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
@@ -464,14 +472,70 @@ class Exchange:
                     await sleep_ban(e)
 
 
+def method_scores(t: dict, spr_bps: float) -> Tuple[float, int, Dict[str, float]]:
+    """
+    Multi-method skor: volatilite / range / hacim / spread-fit / momentum.
+    Dönüş: (toplam skor, geçen yöntem sayısı, kırılım)
+    """
+    qv = float(t.get("quoteVolume") or 0)
+    pct = float(t.get("percentage") or 0)
+    last = float(t.get("last") or t.get("close") or 0)
+    high = float(t.get("high") or 0)
+    low = float(t.get("low") or 0)
+
+    vol_abs = abs(pct)
+    s_vol = vol_abs * W_VOLATILITY
+    pass_vol = vol_abs >= 1.5
+
+    if last > 0 and high > low > 0:
+        rng = (high - low) / last * 100.0
+    else:
+        rng = vol_abs * 0.8
+    s_range = rng * W_RANGE
+    pass_range = rng >= 2.0
+
+    s_vol_amt = math.log1p(max(0.0, qv)) * W_VOLUME * 10.0
+    pass_qv = qv >= MIN_QUOTE_VOL
+
+    need = min_spread_bps()
+    if spr_bps <= 0:
+        s_spread = 0.0
+        pass_spr = False
+    elif spr_bps < need * 0.5:
+        s_spread = spr_bps * 0.05
+        pass_spr = False
+    elif spr_bps <= need * 2.5:
+        s_spread = (need * 2.5 - abs(spr_bps - need)) * W_SPREAD_FIT * 0.1
+        pass_spr = True
+    else:
+        s_spread = max(0.0, (MAX_BOOK_SPREAD_BPS - spr_bps)) * 0.02
+        pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS
+
+    if pct <= -2.0:
+        s_mom = (abs(pct) * 0.6) * W_MOMENTUM
+        pass_mom = True
+    elif pct >= 3.0:
+        s_mom = pct * 0.25 * W_MOMENTUM
+        pass_mom = True
+    else:
+        s_mom = abs(pct) * 0.1
+        pass_mom = vol_abs >= 2.0
+
+    parts = {
+        "vol": s_vol,
+        "range": s_range,
+        "qv": s_vol_amt,
+        "spread": s_spread,
+        "mom": s_mom,
+    }
+    passed = sum([pass_vol, pass_range, pass_qv, pass_spr, pass_mom])
+    return sum(parts.values()), passed, parts
+
+
 def scan_all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> Tuple[List[Tuple[float, str]], int]:
-    """
-    Binance'teki TÜM spot BNB pair'lerini tara.
-    Dönüş: (skor, symbol) sıralı liste + taranan ham adet.
-    """
+    """Tüm spot BNB pair — oynaklık + multi-method öncelikli."""
     rows: List[Tuple[float, str]] = []
     scanned = 0
-    # Önce markets üzerinden — ticker'da olmayanları da say
     markets = ex.rest.markets or {}
     for sym, m in markets.items():
         if not sym.endswith(f"/{QUOTE}") or ":" in sym:
@@ -493,16 +557,17 @@ def scan_all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> Tuple[List[Tup
             if last <= 0:
                 continue
             mid = last
-            spr = 999.0
+            spr = 40.0
         else:
             mid = (bid + ask) / 2.0
             spr = (ask - bid) / mid * 10000.0
             if spr > MAX_BOOK_SPREAD_BPS:
                 continue
-        # skor: hacim ↑, spread ↓ (dar spread = daha iyi MM)
-        score = qv / max(1.0, spr / 10.0)
-        ch = abs(float(t.get("percentage") or 0))
-        score *= 1.0 + min(ch, 25.0) / 100.0  # hareket bonus
+        score, npass, _ = method_scores(t, spr)
+        if npass < MIN_METHODS_PASS:
+            continue
+        pct = abs(float(t.get("percentage") or 0))
+        score *= 1.0 + min(pct, 40.0) / 50.0
         rows.append((score, sym))
     rows.sort(key=lambda x: -x[0])
     return rows, scanned
@@ -514,12 +579,11 @@ def pick_open_pairs(
     n: int,
     keep: Optional[Set[str]] = None,
 ) -> Tuple[List[str], int, int]:
-    """Tüm CEX tara → en iyi n pair. keep: mümkünse tut (envanterli)."""
+    """Tüm CEX tara → en oynak n pair (hedef ≥ MIN_OPEN=20)."""
     ranked, scanned = scan_all_bnb_pairs(ex, tickers)
     qualified = len(ranked)
     keep = keep or set()
     out: List[str] = []
-    # önce elde envanter/keep olanları koru (skor listesindeyse)
     ranked_syms = [s for _, s in ranked]
     ranked_set = set(ranked_syms)
     for s in keep:
@@ -528,24 +592,47 @@ def pick_open_pairs(
     for s in ranked_syms:
         if s not in out and len(out) < n:
             out.append(s)
+    if len(out) < n:
+        for _, sym in ranked:
+            if sym not in out:
+                out.append(sym)
+            if len(out) >= n:
+                break
+    if len(out) < n:
+        for sym, m in (ex.rest.markets or {}).items():
+            if not sym.endswith(f"/{QUOTE}") or ":" in sym:
+                continue
+            if m.get("active") is False or m.get("contract"):
+                continue
+            base = sym.split("/")[0].upper()
+            if base in SKIP_BASES or sym in out:
+                continue
+            t = tickers.get(sym) or {}
+            if float(t.get("quoteVolume") or 0) < MIN_QUOTE_VOL:
+                continue
+            out.append(sym)
+            if len(out) >= n:
+                break
     names = ", ".join(x.replace(f"/{QUOTE}", "") for x in out)
     log.info(
-        "CEX TARAMA | taranan=%d aday=%d açılacak=%d → %s",
+        "CEX TARAMA | taranan=%d aday=%d açılacak=%d (hedef≥%d) → %s",
         scanned,
         qualified,
         len(out),
+        MIN_OPEN,
         names or "-",
     )
     return out, scanned, qualified
 
 
 def max_open_for_balance(spend: float) -> int:
-    """Bakiyeye göre kaç slot — her biri en az MIN_QUOTE_FREE BNB."""
+    """EN AZ 20 coin — bakiye ~0.04+ BNB ise zorla MAX_OPEN."""
     if spend < MIN_QUOTE_FREE * 2:
         return 0
-    n = int(spend / MIN_QUOTE_FREE)
-    n = max(2, min(MAX_OPEN, n))
-    return n
+    if spend >= MIN_QUOTE_FREE * MIN_OPEN * 0.85:
+        return MAX_OPEN
+    n = max(2, int(spend / MIN_QUOTE_FREE))
+    return min(MAX_OPEN, n)
 
 
 def pick_liquid_pairs(ex: Exchange, tickers: Dict[str, dict], n: int = MAX_OPEN) -> List[str]:
@@ -767,10 +854,10 @@ class Slot:
         bid = self.ex.px(self.symbol, bid)
         ask = self.ex.px(self.symbol, ask)
 
-        # Best bid'e yapış (LIMIT_MAKER) — 1 tick geride kalınca alım neredeyse yok
+        # Best bid'e yapış — ama fee+edge spread'i ezme
         if JOIN_BID and self.book.bid > 0:
             join = self.book.bid
-            if ask - join >= self.min_full_spread() * 0.85 and join < ask:
+            if ask - join >= self.min_full_spread() and join < ask:
                 bid = self.ex.px(self.symbol, join)
             elif bid >= self.book.bid:
                 bid = self.ex.px(self.symbol, self.book.bid - tick)
@@ -778,20 +865,18 @@ class Slot:
             bid = self.ex.px(self.symbol, self.book.bid - tick)
 
         if self.book.ask > 0 and ask <= self.book.ask:
-            # ask tarafında da best ask'a join (post-only çaprazlama)
             join_ask = self.book.ask
-            if join_ask - bid >= self.min_full_spread() * 0.85 and join_ask > bid:
+            if join_ask - bid >= self.min_full_spread() and join_ask > bid:
                 ask = self.ex.px(self.symbol, join_ask)
             else:
                 ask = self.ex.px(self.symbol, self.book.ask + tick)
 
         min_qty, min_cost = self.ex.limits(self.symbol)
         sell_base_early = max(self.base_free, 0.0)
-        # Spread daraldıysa: envanter yoksa çık; envanter varsa satım için devam
-        if ask <= bid or ask - bid < self.min_full_spread() * 0.85:
+        # Spread fee+edge altındaysa: envanter yoksa çık; varsa sadece kârlı sat
+        if ask <= bid or ask - bid < self.min_full_spread():
             if sell_base_early * mid < min_cost * 0.95:
                 return None
-            # sadece sat — bid'i aşağı it
             ask = self.ex.px(
                 self.symbol,
                 max(ask, (self.book.ask + tick) if self.book.ask > 0 else mid * 1.001),
@@ -881,10 +966,10 @@ class Slot:
         if self.kill:
             await self.ex.cancel_all(self.symbol)
             return
-        # mid az oynadıysa dinlenen emri bozma (alım şansı kaçmasın)
+        # mid az oynadıysa dinlenen emri bozma (cancel spam = fee/fırsat kaybı)
         if self.last_mid_quoted > 0 and self.book.mid > 0:
             moved = abs(self.book.mid - self.last_mid_quoted) / self.last_mid_quoted * 10000.0
-            hold = REPLACE_SEC * 3.0
+            hold = REPLACE_SEC * HOLD_QUOTE_MULT
             if moved < QUOTE_MOVE_BPS and time.time() - self.last_quote < hold:
                 return
 
@@ -992,7 +1077,7 @@ class Slot:
                 await self.fills()
                 self.risk_ok()
                 await self.replace()
-                if time.time() - last_print > 30:
+                if time.time() - last_print > 90:
                     print(
                         f"{self.symbol:12} mid={self.book.mid:.6g} "
                         f"base={self.base_total:.6g} rpnl={self.realized:.5f} "
@@ -1017,10 +1102,11 @@ class Slot:
 
 async def main_async() -> None:
     print("=" * 64)
-    print("Binance REAL MM · BNB · TÜM CEX TARAMA · LIMIT_MAKER")
+    print("Binance REAL MM · BNB · KÂR>FEE · ≥20 COİN · OYNAK TARAMA")
     print(
-        f"SCAN_ALL | max_open={MAX_OPEN} min_open={MIN_OPEN} | "
-        f"rescan={SCAN_SEC:.0f}s | min_spread≈{min_spread_bps():.1f}bps"
+        f"SCAN_ALL | open={MIN_OPEN}..{MAX_OPEN} | rescan={SCAN_SEC:.0f}s | "
+        f"replace≥{REPLACE_SEC:.0f}s | min_spread≈{min_spread_bps():.1f}bps "
+        f"(fee≈{roundtrip_fee_bps():.1f}+edge{MIN_EDGE_BPS:.0f})"
     )
     print(f"CCXT {ccxt.__version__} | Pro={'var' if ccxtpro else 'YOK — pip install ccxt[pro]'}")
     print("Pay fees with BNB AÇIK olsun")
