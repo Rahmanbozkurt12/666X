@@ -424,10 +424,21 @@ class Exchange:
             "secret": secret,
             "enableRateLimit": True,
             "rateLimit": API_RATE_MS,
-            "options": {"defaultType": "spot", "adjustForTimeDifference": True},
+            "timeout": 30000,
+            "options": {
+                "defaultType": "spot",
+                "adjustForTimeDifference": True,
+                "fetchCurrencies": False,  # sapi capital/config → ban/network kırılmasın
+                "warnOnFetchOpenOrdersWithoutSymbol": False,
+            },
         }
         self.rest = ccxt.binance(opts)
         self.rest.set_sandbox_mode(False)
+        # public market bilgisi yeterli; signed sapi currencies lazım değil
+        try:
+            self.rest.has["fetchCurrencies"] = False
+        except Exception:
+            pass
         # 20 paralel slot → connection pool dolmasın
         try:
             from requests.adapters import HTTPAdapter
