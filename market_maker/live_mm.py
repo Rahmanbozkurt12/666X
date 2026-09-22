@@ -48,8 +48,8 @@ FORCE_MIN_OPEN = True
 MAX_OPEN = 18                   # üst sınır
 MIN_OPEN = 15                   # KESİN en az 15 coin
 CANDIDATE_POOL = 80             # yükselen hacim havuzu
-SCAN_SEC = 90.0                 # sık tarama = hacim artışını yakala
-REPLACE_SEC = 90.0
+SCAN_SEC = 60.0                 # 5m sinyali kaçırma
+REPLACE_SEC = 75.0
 BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 20.0
 BOOK_REST_SEC = 12.0
@@ -58,19 +58,28 @@ HOLD_QUOTE_MULT = 5.0
 LOOP_SLEEP_SEC = 1.5
 USE_WS = False
 API_RATE_MS = 450
-ROTATE_COOLDOWN_SEC = 15 * 60
+ROTATE_COOLDOWN_SEC = 8 * 60    # çıkan coin biraz beklesin, yenilere yer aç
 KEEP_GRACE_SEC = 60.0
+SAME_COIN_BUY_SEC = 60.0        # AYNI coine 1 dk içinde tekrar AL YOK
+KLINE_TF = "5m"                 # en kısa anlamlı TF
+KLINE_LIMIT = 12                # son ~1 saat 5m
+KLINE_TOP_N = 36                # 5m kontrol edilecek aday
 
 # Tabana — likit + yükselen; dar/toksik book'a girme
-MIN_USDT_VOL = 25_000.0
-SOFT_USDT_VOL = 8_000.0
+MIN_USDT_VOL = 20_000.0
+SOFT_USDT_VOL = 6_000.0
 FLOOR_USDT_VOL = 2_000.0
+HIGH_USDT_VOL = 500_000.0       # yüksek hacim + hâlâ yükseliyor → kaçırma
 MAX_BOOK_SPREAD_BPS = 80.0
-MIN_BOOK_SPREAD_BPS = 12.0      # çok dar book = fee yer, edge yok
+MIN_BOOK_SPREAD_BPS = 12.0
 QUOTE_MOVE_BPS = 35.0
 JOIN_TOUCH = False
-MIN_VOL_RISE_PCT = 0.08
-MIN_VOL_RISE_USDT = 5_000.0
+MIN_VOL_RISE_PCT = 0.05         # +%5 hacim artışı yeter
+MIN_VOL_RISE_USDT = 3_000.0
+DIP_PCT_LO = -22.0              # ~-20 bandı dip rebound
+DIP_PCT_HI = -8.0
+MAX_ABS_24H_PCT = 22.0          # -20'lik dip coinleri kaçırma
+MIN_24H_PCT = 0.5
 
 # PROF MM — fee + edge + inventory + adverse selection
 MAKER_FEE = 0.00075
@@ -88,27 +97,29 @@ USE_QUOTE_FRAC = 0.999
 MIN_BNB_PER_SLOT = 0.008
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
-MAX_ABS_24H_PCT = 12.0
-MIN_24H_PCT = 1.0
-MAX_PAIR_HOLD_SEC = 22 * 60
+MAX_PAIR_HOLD_SEC = 18 * 60     # envantersiz daha çabuk rotasyon → yeni coin
 MAX_BUY_LEAD = 2
 MIN_WR_TO_BUY = 0.45
 MIN_TRADES_FOR_WR = 8
-TOXIC_LOSS_STREAK = 2           # peş peşe zararlı SAT → AL durdur
+TOXIC_LOSS_STREAK = 2
 TOXIC_PAUSE_SEC = 12 * 60
-MOMENTUM_BUY_BPS = -8.0         # kısa vade mid düşüyorsa AL yok
-POST_FILL_COOLDOWN_SEC = 25.0   # AL fill sonrası yeni AL yok
+MOMENTUM_BUY_BPS = -8.0
+POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC  # 1 dk aynı coine tekrar AL yok
 VOL_WIDEN_MULT = 2.2
 SKEW_STRENGTH = 0.85
 
-# Skor: yükselen hacim birincil — mutlak hacim cezalı/ikincil
+# Skor: yükselen hacim + yüksek-hacim-hâlâ-yükseliyor + dip rebound + 5m yeşil
 W_VOL_RISE = 4.5
-W_VOL_RISE_PCT = 2.8
-W_VOLUME = 0.25                 # mutlak hacim neredeyse yok
-W_VOLATILITY = 1.1
-W_RANGE = 0.70
+W_VOL_RISE_PCT = 3.0
+W_VOLUME = 0.55                 # yüksek mutlak hacim (yükseliyorsa) bonus
+W_HIGH_VOL_RISE = 2.2           # zaten yüksek hacim + artış
+W_DIP_REBOUND = 3.5             # -20 bandı + hacim artışı
+W_GREEN_5M = 3.2                # 5m yeşil mum / kısa TF
+W_VOL_5M = 2.4                  # 5m hacim artışı
+W_VOLATILITY = 0.9
+W_RANGE = 0.60
 W_SPREAD_FIT = 1.40
-W_MOMENTUM = -0.40
+W_MOMENTUM = 0.35               # 24h pozitif hafif bonus (yeşil trend)
 MIN_METHODS_PASS = 1
 FALLBACK_METHODS_PASS = 0
 
@@ -478,6 +489,15 @@ class Exchange:
                 await sleep_ban(e)
             return None
 
+    async def ohlcv(self, symbol: str, timeframe: str = KLINE_TF, limit: int = KLINE_LIMIT) -> List[list]:
+        try:
+            data = await self.run(self.rest.fetch_ohlcv, symbol, timeframe, None, limit)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            if ban_until_ms(e):
+                await sleep_ban(e)
+            return []
+
     async def trades(self, symbol: str, limit: int = 12):
         try:
             return await self.run(self.rest.fetch_my_trades, symbol, None, limit) or []
@@ -591,12 +611,15 @@ def method_scores(
     usdt_vol: float,
     vol_rise_pct: float = 0.0,
     vol_rise_abs: float = 0.0,
+    green_5m: float = 0.0,
+    vol_5m_rise: float = 0.0,
 ) -> Tuple[float, int, Dict[str, float]]:
-    pct = float(t.get("percentage") or 0)
+    pct_signed = float(t.get("percentage") or 0)
+    pct = abs(pct_signed)
     last = float(t.get("last") or t.get("close") or 0)
     high = float(t.get("high") or 0)
     low = float(t.get("low") or 0)
-    vol_abs = abs(pct)
+    vol_abs = pct
 
     s_rise = 0.0
     if vol_rise_abs > 0:
@@ -605,14 +628,31 @@ def method_scores(
         s_rise += min(vol_rise_pct, 3.0) * 100.0 * W_VOL_RISE_PCT
     pass_rise = (vol_rise_pct >= MIN_VOL_RISE_PCT) or (vol_rise_abs >= MIN_VOL_RISE_USDT)
 
+    # Yüksek hacim + hâlâ yükseliyor → kaçırma
+    s_high = 0.0
+    if usdt_vol >= HIGH_USDT_VOL and vol_rise_pct > 0:
+        s_high = math.log1p(usdt_vol / HIGH_USDT_VOL) * 40.0 * W_HIGH_VOL_RISE + min(vol_rise_pct, 1.0) * 50.0
+        pass_rise = True
+
+    # ~-20 bandı dip + hacim artışı = yeşil mum öncesi rebound
+    s_dip = 0.0
+    if DIP_PCT_LO <= pct_signed <= DIP_PCT_HI and (vol_rise_pct > 0 or vol_rise_abs > 0):
+        depth = min(abs(pct_signed), 22.0) / 22.0
+        s_dip = (40.0 + depth * 60.0) * W_DIP_REBOUND * (1.0 + min(max(vol_rise_pct, 0.0), 1.0))
+        pass_rise = True
+
+    s_green = max(0.0, green_5m) * W_GREEN_5M
+    s_v5 = max(0.0, vol_5m_rise) * W_VOL_5M
+    pass_5m = green_5m > 0 or vol_5m_rise > 0.15
+
     s_vol = min(vol_abs, 12.0) * W_VOLATILITY
-    pass_vol = MIN_24H_PCT <= vol_abs <= MAX_ABS_24H_PCT
+    pass_vol = MIN_24H_PCT <= vol_abs <= MAX_ABS_24H_PCT or (DIP_PCT_LO <= pct_signed <= DIP_PCT_HI)
     if last > 0 and high > low > 0:
         rng = (high - low) / last * 100.0
     else:
         rng = vol_abs * 0.8
     s_range = min(rng, 18.0) * W_RANGE
-    pass_range = 1.5 <= rng <= 28.0
+    pass_range = 1.0 <= rng <= 30.0
     s_vol_amt = math.log1p(max(0.0, usdt_vol)) * W_VOLUME
     pass_qv = usdt_vol >= FLOOR_USDT_VOL
     need = min_spread_bps()
@@ -626,18 +666,50 @@ def method_scores(
     else:
         s_spread = max(0.0, (MAX_BOOK_SPREAD_BPS - spr_bps)) * 0.015
         pass_spr = spr_bps <= MAX_BOOK_SPREAD_BPS
-    s_mom = abs(pct) * W_MOMENTUM
-    pass_mom = vol_abs <= MAX_ABS_24H_PCT
+    # Pozitif 24h hafif bonus; aşırı eksi dip rebound'da zaten s_dip var
+    s_mom = max(0.0, pct_signed) * W_MOMENTUM
+    pass_mom = pct_signed <= MAX_ABS_24H_PCT and pct_signed >= -abs(MAX_ABS_24H_PCT)
     parts = {
         "rise": s_rise,
+        "high": s_high,
+        "dip": s_dip,
+        "g5": s_green,
+        "v5": s_v5,
         "vol": s_vol,
         "range": s_range,
         "qv": s_vol_amt,
         "spread": s_spread,
         "mom": s_mom,
     }
-    passed = sum([pass_rise, pass_vol, pass_range, pass_qv, pass_spr, pass_mom])
+    passed = sum([pass_rise or pass_5m, pass_vol, pass_range, pass_qv, pass_spr, pass_mom])
     return sum(parts.values()), passed, parts
+
+
+def analyze_5m_ohlcv(ohlcv: List[list]) -> Tuple[float, float]:
+    """
+    5m mum: yeşil skor (0..1+) + hacim yükseliş oranı.
+    Yeşil mumları erken yakala → başarı ↑
+    """
+    if not ohlcv or len(ohlcv) < 4:
+        return 0.0, 0.0
+    # [ts, o, h, l, c, vol]
+    greens = 0
+    body_sum = 0.0
+    for candle in ohlcv[-6:]:
+        o, h, l, c, v = float(candle[1]), float(candle[2]), float(candle[3]), float(candle[4]), float(candle[5])
+        if c > o and o > 0:
+            greens += 1
+            body_sum += (c - o) / o
+    last = ohlcv[-1]
+    o, c = float(last[1]), float(last[4])
+    last_green = 1.0 if c > o else (0.35 if c >= o * 0.999 else 0.0)
+    # son 3 vs önceki 3 hacim
+    vols = [float(x[5] or 0) for x in ohlcv]
+    prev = sum(vols[-6:-3]) / 3.0 if len(vols) >= 6 else sum(vols[:-3]) / max(1, len(vols) - 3)
+    cur = sum(vols[-3:]) / 3.0
+    vol_rise = ((cur - prev) / prev) if prev > 1e-12 else (0.5 if cur > 0 else 0.0)
+    green_score = last_green * 1.2 + greens / 6.0 + min(body_sum * 50.0, 1.5)
+    return green_score, max(0.0, vol_rise)
 
 
 def load_vol_snap() -> Dict[str, float]:
@@ -727,7 +799,12 @@ def scan_all_binance(
     max_spread: float,
     require_rise: bool = True,
 ) -> Tuple[List[Tuple[float, str, str, float]], int, int]:
-    """Skor = hacim ARTISI (önceki tarama vs şimdi). En yüksek mutlak hacim öncelikli değil."""
+    """
+    Skor önceliği:
+    1) Hacim YÜKSELİYOR
+    2) Hacim zaten yüksek + yükselmeye devam
+    3) ~-20 dip + hacim artışı (rebound / yeşil mum öncesi)
+    """
     fx = usdt_fx(tickers)
     prev = load_vol_snap()
     now_vols: Dict[str, float] = {}
@@ -745,19 +822,20 @@ def scan_all_binance(
         if spr is None:
             continue
         usdt_vol = quote_vol_usdt(t, quote, fx)
-        pct = abs(float(t.get("percentage") or 0))
+        pct_signed = float(t.get("percentage") or 0)
+        pct = abs(pct_signed)
         row = per_base.get(base)
         if row is None:
             row = {
-                "base": base, "usdt_vol": 0.0, "pct": 0.0, "t": t, "spr": spr,
-                "best_sym": sym, "bnb_sym": None, "bnb_spr": 9e9,
+                "base": base, "usdt_vol": 0.0, "pct": 0.0, "pct_signed": 0.0,
+                "t": t, "spr": spr, "best_sym": sym, "bnb_sym": None, "bnb_spr": 9e9,
             }
             per_base[base] = row
         row["usdt_vol"] = max(float(row["usdt_vol"]), usdt_vol)
         if quote in ("USDT", "USDC", "FDUSD") and usdt_vol >= float(row.get("ref_vol") or 0):
-            row.update(t=t, spr=spr, best_sym=sym, pct=pct, ref_vol=usdt_vol)
+            row.update(t=t, spr=spr, best_sym=sym, pct=pct, pct_signed=pct_signed, ref_vol=usdt_vol)
         elif not row.get("ref_vol") and usdt_vol > 0:
-            row.update(t=t, spr=spr, best_sym=sym, pct=max(row["pct"], pct))
+            row.update(t=t, spr=spr, best_sym=sym, pct=max(row["pct"], pct), pct_signed=pct_signed)
         if quote == QUOTE:
             row["bnb_sym"] = sym
             row["bnb_spr"] = spr
@@ -766,14 +844,18 @@ def scan_all_binance(
     for base, row in per_base.items():
         bnb_sym = row.get("bnb_sym") or ""
         if not bnb_sym:
-            continue  # */BNB yoksa MM açamayız — USDT-only yükselenleri atla
+            continue
         usdt_vol = float(row["usdt_vol"])
         now_vols[base] = usdt_vol
         if usdt_vol < min_usdt_vol:
             continue
         if row["spr"] > max_spread and row.get("bnb_spr", 9e9) > max_spread:
             continue
-        if row["pct"] > MAX_ABS_24H_PCT:
+        pct_signed = float(row.get("pct_signed") or row["t"].get("percentage") or 0)
+        # Aşırı pump ele; -20 dip rebound'a izin ver
+        if pct_signed > MAX_ABS_24H_PCT:
+            continue
+        if pct_signed < -abs(MAX_ABS_24H_PCT) and not (DIP_PCT_LO <= pct_signed <= DIP_PCT_HI):
             continue
         prev_v = float(prev.get(base) or 0.0)
         if prev_v > 1e-9:
@@ -781,16 +863,46 @@ def scan_all_binance(
             rise_pct = rise_abs / prev_v
         else:
             rise_abs = 0.0
-            rise_pct = max(0.0, abs(float(row["t"].get("percentage") or 0)) / 100.0)
-        if require_rise and prev and rise_pct < MIN_VOL_RISE_PCT and rise_abs < MIN_VOL_RISE_USDT:
+            rise_pct = max(0.0, abs(pct_signed) / 100.0)
+        is_dip = DIP_PCT_LO <= pct_signed <= DIP_PCT_HI
+        is_high_rising = usdt_vol >= HIGH_USDT_VOL and rise_pct > 0
+        rising_ok = rise_pct >= MIN_VOL_RISE_PCT or rise_abs >= MIN_VOL_RISE_USDT
+        if require_rise and prev and not (rising_ok or is_dip or is_high_rising):
             continue
         score, npass, _ = method_scores(row["t"], row["spr"], usdt_vol, rise_pct, rise_abs)
-        if npass < min_pass:
+        if npass < min_pass and not (is_dip and rising_ok):
             continue
         ranked.append((score, base, bnb_sym, usdt_vol))
     ranked.sort(key=lambda x: -x[0])
     save_vol_snap(now_vols)
     return ranked, scanned, spot_n
+
+
+async def enrich_ranked_5m(
+    ex: Exchange,
+    ranked: List[Tuple[float, str, str, float]],
+) -> List[Tuple[float, str, str, float]]:
+    """Üst adaylara 5m yeşil mum + 5m hacim artışı skoru ekle."""
+    if not ranked:
+        return ranked
+    enriched: List[Tuple[float, str, str, float]] = []
+    top = ranked[:KLINE_TOP_N]
+    rest = ranked[KLINE_TOP_N:]
+    green_n = 0
+    for sc, base, bnb_sym, usdt_vol in top:
+        g5 = v5 = 0.0
+        if bnb_sym:
+            ohlcv = await ex.ohlcv(bnb_sym, KLINE_TF, KLINE_LIMIT)
+            g5, v5 = analyze_5m_ohlcv(ohlcv)
+            await asyncio.sleep(0.08)
+        bonus = g5 * W_GREEN_5M * 8.0 + v5 * 100.0 * W_VOL_5M
+        if g5 >= 1.0 and v5 > 0.1:
+            green_n += 1
+        enriched.append((sc + bonus, base, bnb_sym, usdt_vol))
+    enriched.extend(rest)
+    enriched.sort(key=lambda x: -x[0])
+    log.info("5m kontrol | aday=%d yeşil_güçlü=%d tf=%s", len(top), green_n, KLINE_TF)
+    return enriched
 
 
 def all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, str]]:
@@ -815,7 +927,7 @@ def all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, s
     return out
 
 
-def pick_open_pairs(
+async def pick_open_pairs(
     ex: Exchange,
     tickers: Dict[str, dict],
     n: int,
@@ -823,9 +935,10 @@ def pick_open_pairs(
     cooldown: Optional[Dict[str, float]] = None,
 ) -> Tuple[List[str], int, int]:
     """
-    1) Hacmi yükselen */BNB
-    2) Gevşek tarama
-    3) KESİN: tüm */BNB marketlerinden ≥n (MIN_OPEN) doldur
+    1) Hacmi yükselen / yüksek+yükselen / -20 dip rebound
+    2) 5m yeşil mum + 5m hacim artışı
+    3) Rotasyon: soğuk coinleri ele, her coine fırsat
+    4) Pad: tüm */BNB ≥n
     """
     n = max(n, MIN_OPEN if FORCE_MIN_OPEN else n)
     keep = keep or set()
@@ -836,6 +949,7 @@ def pick_open_pairs(
     ranked, scanned, spot_n = scan_all_binance(
         ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS, require_rise=True
     )
+    ranked = await enrich_ranked_5m(ex, ranked)
     pool: List[str] = []
 
     def push(sym: str, ignore_cold: bool = False) -> None:
@@ -847,7 +961,6 @@ def pick_open_pairs(
 
     for s in keep:
         push(s)
-    # önce yükselen hacimli (bnb marketi olanlar)
     for _sc, _b, bnb_sym, _v in ranked:
         if bnb_sym:
             push(bnb_sym)
@@ -857,6 +970,7 @@ def pick_open_pairs(
         loose, sc2, _ = scan_all_binance(
             ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.4, require_rise=False
         )
+        loose = await enrich_ranked_5m(ex, loose[:KLINE_TOP_N])
         scanned = max(scanned, sc2)
         for _sc, _b, bnb_sym, _v in loose:
             if bnb_sym:
@@ -865,12 +979,10 @@ def pick_open_pairs(
                 break
 
     bnb_all = all_bnb_pairs(ex, tickers)
-    # her zaman BNB marketleriyle doldur (yükselen filtre 6 bırakmasın)
     for _qv, sym in bnb_all:
         push(sym)
         if len(pool) >= max(n, CANDIDATE_POOL):
             break
-    # hâlâ <n ise cooldown'u yok say — MIN_OPEN kesin
     if FORCE_MIN_OPEN and len(pool) < n:
         for _qv, sym in bnb_all:
             push(sym, ignore_cold=True)
@@ -882,28 +994,27 @@ def pick_open_pairs(
         if s not in out:
             out.append(s)
     rest = [s for s in pool if s not in out]
-    # yükselenler önde (ranked sırası pool başında), sonra hacimli BNB pad
+    # skor sırası + hafif shuffle: hep aynı 3 coine yapışmasın
     top = rest[: max(n * 2, 40)]
     mid = rest[len(top) :]
-    random.shuffle(top)
-    for s in top + mid:
+    # ilk yarısı skor koru, ikinci yarı karışık → yeni coin şansı
+    head, tail = top[: max(n, 10)], top[max(n, 10) :]
+    random.shuffle(tail)
+    for s in head + tail + mid:
         if len(out) >= n:
             break
         out.append(s)
 
-    # son çare: out < MIN_OPEN ise listedeki her BNB pair
     if FORCE_MIN_OPEN and len(out) < n:
         for _qv, sym in bnb_all:
-            if sym not in out and sym not in cold:
-                out.append(sym)
-            elif sym not in out:
+            if sym not in out:
                 out.append(sym)
             if len(out) >= n:
                 break
 
     names = ", ".join(x.replace(f"/{QUOTE}", "") for x in out)
     log.info(
-        "TARAMA | spot=%d taranan_coin=%d bnb_market=%d aday_havuz=%d odak=%d (zorunlu≥%d) → %s",
+        "TARAMA | spot=%d taranan=%d bnb=%d havuz=%d odak=%d (≥%d) 5m+hacim+dip → %s",
         spot_n,
         scanned,
         len(bnb_all),
@@ -1400,14 +1511,14 @@ class Engine:
         else:
             want_n = min(want_n, fundable, MAX_OPEN)
 
-        picked, scanned, pool_n = pick_open_pairs(
+        picked, scanned, pool_n = await pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
         )
         # force_out olanları yeni listeden düş (yeniden aynı turda alma)
         picked = [s for s in picked if s not in force_out or s in keep]
         # hâlâ want_n değilse doğrudan tüm */BNB ile doldur
         if len(picked) < want_n:
-            more, _, _ = pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
+            more, _, _ = await pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
             for s in more:
                 if s not in picked and s not in force_out and s not in self.banned:
                     picked.append(s)
