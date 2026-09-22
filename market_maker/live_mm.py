@@ -6,11 +6,12 @@ Binance Spot — BNB · TOP 20 hareketli · multi-method AL · hızlı SAT · CA
 2) pip install ccxt
 3) python live_mm.py
 
-Mimari (hız düşmesin diye ayrıldı):
-  • Her 100 sn SCAN  → en hareketli 20 coin + RSI/EMA/hacim/book/ticker analizi → AL
-  • Her ~8 sn FAST   → sadece açık pozisyonlarda SAT (emir hızı aynı kalır)
-  • LIMIT_MAKER + komisyon eşiği (fee'ye ezilmeden sat)
-  • Aldığı coini 10 dk tekrar ALMAZ | en az 5 coin | hacme göre emir
+Mimari:
+  • Her 55 sn SCAN → hacim+hareket TOP20 + tüm metodlar → AL (min 5 kesin)
+  • Her 3 sn FAST → SAT + pending fill (hızlı)
+  • RSI>52 / pump VETO (kazanç oranı)
+  • Maker; min5 için fill olmazsa MARKET
+  • Komisyon eşiği + günlük bilanço
 """
 
 from __future__ import annotations
@@ -40,41 +41,46 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 QUOTE = "BNB"
 TOP_N = 20
 MIN_OPEN_COINS = 5
-SCAN_SEC = 100.0                # ağır analiz / AL turu
-FAST_SEC = 8.0                  # SAT + emir hızı (düşmez)
-BUY_COOLDOWN_SEC = 600.0        # AL sonrası 10 dk aynı coin yok
-SELL_COOLDOWN_SEC = 45.0
+SCAN_SEC = 55.0                 # daha hızlı AL turu (eski 100)
+FAST_SEC = 3.0                  # SAT / fill takibi hızlı
+BUY_COOLDOWN_SEC = 480.0        # 8 dk (biraz daha çevik)
+SELL_COOLDOWN_SEC = 25.0
 
-# Komisyon koruması (BNB ile fee ödemede maker ≈ %0.075)
+# Komisyon koruması (BNB fee ≈ %0.075)
 MAKER_FEE = 0.00075
 TAKER_FEE = 0.00075
-FEE_SAFETY = 1.35               # güvenlik çarpanı
-MIN_EDGE_BPS = 12.0             # fee üstü ekstra kâr (bps)
-# SAT eşiği = roundtrip fee*safety + MIN_EDGE  (dinamik hesaplanır)
+FEE_SAFETY = 1.25
+MIN_EDGE_BPS = 8.0              # fee üstü kâr — biraz daha çabuk SAT
+# SAT eşiği dinamik ≈ fee*safety*2 + edge
 
-DIP_BPS = 28.0
-MIN_QUOTE_VOL_BNB = 40.0
-CANDIDATE_POOL = 60
-MIN_BNB_FREE = 0.015
-MAX_DRAWDOWN_BNB = 0.20
-MAX_SPREAD_BPS = 35.0           # spread bundan genişse ALMA (fee+slip)
+DIP_BPS = 22.0
+MIN_QUOTE_VOL_BNB = 8.0         # BNB pair'ler düşük hacimli olabilir — 20'yi doldur
+CANDIDATE_POOL = 80
+MIN_BNB_FREE = 0.008
+MAX_DRAWDOWN_BNB = 0.25
+MAX_SPREAD_BPS = 45.0
+ALLOW_TAKER_TO_FILL = True      # min 5 için dolduramayan maker → market AL
+PENDING_MAX_SEC = 18.0          # fill olmazsa iptal / taker
 
-# Multi-method eşikler
+# Multi-method — kazanç oranı için sıkı AL
 RSI_PERIOD = 14
-RSI_OVERSOLD = 38.0             # RSI altı → AL adayı
-RSI_EXIT = 62.0                 # RSI üstü → SAT güçlendirir
+RSI_OVERSOLD = 42.0
+RSI_MAX_BUY = 52.0              # üstü ALMA (HBAR 78 gibi pump yasak)
+RSI_EXIT = 58.0                 # daha erken kâr al
 EMA_FAST = 7
 EMA_SLOW = 21
-MIN_METHODS_PASS = 3            # AL için en az N yöntem yeşil
+MIN_METHODS_PASS = 4            # kaliteli AL
+MIN_METHODS_FORCE = 3           # min 5 doldururken taban (yine RSI_MAX_BUY şart)
 KLINE_TF = "1m"
 KLINE_LIMIT = 60
 
-BALANCE_CACHE_SEC = 40.0
+BALANCE_CACHE_SEC = 20.0
 POST_ONLY = True
 
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
-    "EUR", "TRY", "BRL", "AEUR", "BTC", "ETH",
+    "EUR", "TRY", "BRL", "AEUR",
+    # BTC/ETH serbest bırakıldı — hacim listesine girebilir; skor mid-cap'i öne alır
 }
 
 # =============================================================================
@@ -347,14 +353,26 @@ class SignalReport:
 
 
 @dataclass
+class PendingBuy:
+    symbol: str
+    order_id: Optional[str]
+    price: float
+    qty: float
+    budget: float
+    placed_at: float
+    methods: str = ""
+
+
+@dataclass
 class State:
     positions: Dict[str, Pos] = field(default_factory=dict)
+    pending: Dict[str, PendingBuy] = field(default_factory=dict)
     buy_block_until: Dict[str, float] = field(default_factory=dict)
     sell_block_until: Dict[str, float] = field(default_factory=dict)
     recently_scanned: List[str] = field(default_factory=list)
     realized_bnb: float = 0.0
     kill: bool = False
-    watchlist: List[str] = field(default_factory=list)  # son top-20
+    watchlist: List[str] = field(default_factory=list)
     stats: DayStats = field(default_factory=DayStats)
 
 
@@ -571,6 +589,74 @@ class Exchange:
                 log.error("order %s %s: %s", side, symbol, e)
                 return None
 
+    async def place_market_buy(
+        self,
+        symbol: str,
+        quote_bnb: float,
+        stats: Optional[DayStats] = None,
+    ) -> Optional[dict]:
+        """Hızlı doldurma — min 5 için taker AL (quoteOrderQty)."""
+        quote_bnb = float(f"{quote_bnb:.8f}")
+        min_qty, min_cost = self.limits(symbol)
+        if quote_bnb < max(min_cost, MIN_BNB_FREE * 0.5):
+            return None
+        async with self._order_lock:
+            try:
+                say_order(f"MARKET BUY {symbol} ~{quote_bnb:.4f} BNB")
+                o = await self.run(
+                    self.rest.create_order,
+                    symbol,
+                    "market",
+                    "buy",
+                    None,
+                    None,
+                    {"quoteOrderQty": quote_bnb, "newClientOrderId": coid()},
+                )
+                if stats is not None:
+                    stats.ensure_today()
+                    stats.orders += 1
+                    stats.fees_bnb += est_fee(quote_bnb) * (TAKER_FEE / MAKER_FEE)
+                log.info("MARKET BUY %s quote=%.4f id=%s", symbol, quote_bnb, o.get("id"))
+                return o
+            except Exception as e:
+                # bazı sembollerde quoteOrderQty olmayabilir → amount ile dene
+                try:
+                    bt = await self.book_ticker(symbol)
+                    if not bt:
+                        raise e
+                    ask = bt[1]
+                    qty = self.amt(symbol, (quote_bnb * 0.98) / ask)
+                    if qty < min_qty:
+                        raise e
+                    say_order(f"MARKET BUY {symbol} qty={qty}")
+                    o = await self.run(
+                        self.rest.create_order,
+                        symbol,
+                        "market",
+                        "buy",
+                        qty,
+                        None,
+                        {"newClientOrderId": coid()},
+                    )
+                    if stats is not None:
+                        stats.ensure_today()
+                        stats.orders += 1
+                        stats.fees_bnb += est_fee(qty * ask) * (TAKER_FEE / MAKER_FEE)
+                    return o
+                except Exception as e2:
+                    if ban_until_ms(e2):
+                        await sleep_ban(e2)
+                    log.error("market buy %s: %s", symbol, e2)
+                    return None
+
+    async def fetch_order(self, symbol: str, order_id: str) -> Optional[dict]:
+        try:
+            return await self.run(self.rest.fetch_order, order_id, symbol)
+        except Exception as e:
+            if ban_until_ms(e):
+                await sleep_ban(e)
+            return None
+
     async def cancel_all(self, symbol: str) -> None:
         async with self._order_lock:
             try:
@@ -592,23 +678,17 @@ def score_ticker(t: dict) -> float:
     return ch * math.log10(qv + 10.0) + (ch ** 1.2) * 0.5
 
 
-def pick_movers(
-    ex: Exchange,
-    tickers: Dict[str, dict],
-    state: State,
-    n: int = TOP_N,
-) -> List[Tuple[str, float, float]]:
-    recent = set(state.recently_scanned[-40:])
-    rows: List[Tuple[float, str, float, float]] = []
-
+def _bnb_spot_rows(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[str, dict, float, float, float]]:
+    """(sym, ticker, qv, last, abs_pct)"""
+    out = []
     for sym, t in tickers.items():
         if not sym.endswith(f"/{QUOTE}") or ":" in sym:
             continue
         m = ex.rest.markets.get(sym) or {}
-        if m.get("contract") or m.get("spot") is False:
+        if m.get("contract") or m.get("spot") is False or m.get("active") is False:
             continue
         base = sym.split("/")[0].upper()
-        if base in SKIP_BASES or m.get("active") is False:
+        if base in SKIP_BASES:
             continue
         qv = float(t.get("quoteVolume") or 0)
         if qv < MIN_QUOTE_VOL_BNB:
@@ -616,50 +696,77 @@ def pick_movers(
         last = float(t.get("last") or t.get("close") or 0)
         if last <= 0:
             continue
-        sc = score_ticker(t)
-        if sym in recent:
-            sc *= 0.40
-        if sc <= 0:
+        try:
+            pct = abs(float(t.get("percentage") or 0))
+        except Exception:
+            pct = 0.0
+        out.append((sym, t, qv, last, pct))
+    return out
+
+
+def pick_movers(
+    ex: Exchange,
+    tickers: Dict[str, dict],
+    state: State,
+    n: int = TOP_N,
+) -> List[Tuple[str, float, float]]:
+    """
+    En az n coin: yarısı hacim lideri + yarısı en hareketli (|%|).
+    Eksik kalırsa skor havuzundan tamamla — logdaki 4'lük listeyi önler.
+    """
+    rows = _bnb_spot_rows(ex, tickers)
+    if not rows:
+        return []
+
+    by_vol = sorted(rows, key=lambda r: -r[2])
+    by_move = sorted(rows, key=lambda r: (-r[4], -r[2]))
+    recent = set(state.recently_scanned[-30:])
+
+    picked: List[str] = []
+    meta: Dict[str, Tuple[float, float]] = {}
+
+    half = max(1, n // 2)
+    for sym, _t, qv, last, _p in by_vol[:half]:
+        if sym not in picked:
+            picked.append(sym)
+            meta[sym] = (qv, last)
+    for sym, _t, qv, last, _p in by_move[:half + 5]:
+        if sym not in picked:
+            picked.append(sym)
+            meta[sym] = (qv, last)
+        if len(picked) >= n:
+            break
+
+    # skor ile tamamla (rotasyon: recent cezalı ama eleme yok)
+    scored = sorted(
+        (
+            (score_ticker(t) * (0.55 if sym in recent else 1.0), sym, qv, last)
+            for sym, t, qv, last, _ in rows
+        ),
+        key=lambda x: -x[0],
+    )
+    for _sc, sym, qv, last in scored:
+        if sym in picked:
             continue
-        rows.append((sc, sym, qv, last))
+        picked.append(sym)
+        meta[sym] = (qv, last)
+        if len(picked) >= n:
+            break
 
-    rows.sort(key=lambda x: -x[0])
-    pool = rows[: max(CANDIDATE_POOL, n)]
+    # pozisyonlar her zaman listede
+    for sym in list(state.positions.keys()) + list(state.pending.keys()):
+        if sym not in picked:
+            t = tickers.get(sym) or {}
+            picked.append(sym)
+            meta[sym] = (float(t.get("quoteVolume") or 1), float(t.get("last") or 0))
 
-    if len(pool) > n:
-        weights = [max(0.01, r[0]) for r in pool]
-        chosen: Set[int] = set()
-        out: List[Tuple[float, str, float, float]] = []
-        for i, r in enumerate(pool[:8]):
-            out.append(r)
-            chosen.add(i)
-        while len(out) < n and len(chosen) < len(pool):
-            i = random.choices(range(len(pool)), weights=weights, k=1)[0]
-            if i in chosen:
-                weights[i] *= 0.5
-                continue
-            chosen.add(i)
-            out.append(pool[i])
-        selected = out
-    else:
-        selected = pool[:n]
-
-    have = {r[1] for r in selected}
-    for sym in list(state.positions.keys()):
-        if sym in have:
-            continue
-        t = tickers.get(sym) or {}
-        selected.append((999.0, sym, float(t.get("quoteVolume") or 1), float(t.get("last") or 0)))
-        have.add(sym)
-
-    uniq: List[Tuple[str, float, float]] = []
-    seen: Set[str] = set()
-    for _sc, sym, qv, last in selected:
-        if sym in seen:
-            continue
-        seen.add(sym)
-        uniq.append((sym, qv, last))
-    return uniq[: max(TOP_N, len(state.positions))]
+    result = [(s, meta[s][0], meta[s][1]) for s in picked[: max(n, len(state.positions))]]
+    log.info(
+        "watchlist aday=%d → seçilen=%d (hacim+hareket)",
+        len(rows),
+        len(result),
+    )
+    return result
 
 
 def volume_weights(items: List[Tuple[str, float, float]]) -> Dict[str, float]:
@@ -738,6 +845,22 @@ async def analyze_symbol(
         reasons.append(f"RSI={rsi_v:.1f}")
     else:
         reasons.append(f"RSI_fail={rsi_v}")
+
+    # HARD VETO: aşırı alımda ALMA (logdaki HBAR RSI78 hatası)
+    if rsi_v is not None and rsi_v > RSI_MAX_BUY:
+        return SignalReport(
+            symbol, 0, 0, total,
+            [f"VETO_RSI={rsi_v:.1f}>{RSI_MAX_BUY}"] + reasons,
+            qv, last, bid, ask, mid, rsi_v,
+        )
+
+    # HARD VETO: güçlü yeşil pump kovalama
+    if pct > 4.0:
+        return SignalReport(
+            symbol, 0, 0, total,
+            [f"VETO_pump%={pct:+.2f}"] + reasons,
+            qv, last, bid, ask, mid, rsi_v,
+        )
 
     if ema_f is not None and ema_s is not None and ema_f <= ema_s * 1.002 and last <= (ema_f or last):
         # EMA fast altında / death-cross yakın → dip AL
@@ -864,13 +987,32 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
     if qty < min_qty or qty * price < min_cost:
         return False
 
-    # iptal + emir peş peşe (hız)
+    # iptal + emir peş peşe (hız) — kârda market SAT (hız + fill)
     await ex.cancel_all(symbol)
-    o = await ex.place_fast(symbol, "sell", qty, price, state.stats)
+    try:
+        say_order(f"MARKET SELL {symbol} qty≈{qty:.6f}")
+        o = await ex.run(
+            ex.rest.create_order,
+            symbol,
+            "market",
+            "sell",
+            qty,
+            None,
+            {"newClientOrderId": coid()},
+        )
+        if state.stats is not None:
+            state.stats.ensure_today()
+            state.stats.orders += 1
+            state.stats.fees_bnb += est_fee(qty * bid) * (TAKER_FEE / MAKER_FEE)
+        log.info("MARKET SELL %s qty=%.6f id=%s", symbol, qty, o.get("id"))
+    except Exception as e:
+        log.warning("market sell fail → limit: %s", e)
+        o = await ex.place_fast(symbol, "sell", qty, price, state.stats)
     if not o:
         return False
 
-    pnl = (price - entry) * qty
+    fill_px = float(o.get("average") or o.get("price") or price)
+    pnl = (fill_px - entry) * qty
     state.realized_bnb += pnl
     state.positions.pop(symbol, None)
     state.sell_block_until[symbol] = now + SELL_COOLDOWN_SEC
@@ -901,23 +1043,60 @@ async def buy_one(
     state: State,
     sig: SignalReport,
     budget: float,
+    *,
+    force_fill: bool = False,
 ) -> bool:
     now = time.time()
-    if sig.symbol in state.positions:
+    if sig.symbol in state.positions or sig.symbol in state.pending:
         return False
     if now < state.buy_block_until.get(sig.symbol, 0):
         return False
     if budget < MIN_BNB_FREE:
         return False
-    # spread fee guard
+    if sig.rsi is not None and sig.rsi > RSI_MAX_BUY:
+        return False
     spread_bps = (sig.ask - sig.bid) / sig.mid * 10000.0 if sig.mid > 0 else 999
     if spread_bps > MAX_SPREAD_BPS:
         return False
-    if sig.passed < MIN_METHODS_PASS and len(state.positions) >= MIN_OPEN_COINS:
+
+    need = MIN_METHODS_FORCE if force_fill else MIN_METHODS_PASS
+    if sig.passed < need:
         return False
 
+    # min 5 için: maker doldurmazsa market (kesin al)
+    use_market = force_fill and ALLOW_TAKER_TO_FILL and (
+        len(state.positions) + len(state.pending) < MIN_OPEN_COINS
+    )
+
+    methods = ",".join(sig.reasons[:5])
+    await ex.cancel_all(sig.symbol)
+
+    if use_market:
+        o = await ex.place_market_buy(sig.symbol, budget * 0.96, state.stats)
+        if not o:
+            return False
+        # market → hemen pozisyon (balance sync sonra düzeltir)
+        fill_px = float(o.get("average") or o.get("price") or sig.ask or sig.mid)
+        filled = float(o.get("filled") or 0)
+        if filled <= 0 and fill_px > 0:
+            filled = (budget * 0.96) / fill_px
+        state.positions[sig.symbol] = Pos(
+            symbol=sig.symbol, entry=fill_px, qty=filled, bought_at=now, methods=methods
+        )
+        state.buy_block_until[sig.symbol] = now + BUY_COOLDOWN_SEC
+        st = state.stats
+        st.ensure_today()
+        st.buys += 1
+        say_buy(
+            f"{sig.symbol} MARKET @≈{fill_px:.8f} bud={budget:.4f}BNB | "
+            f"methods={sig.passed}/{sig.total} RSI={sig.rsi} | bugün AL={st.buys}"
+        )
+        st.save()
+        return True
+
+    # maker: bid'e yapış (tick altı değil — fill şansı yüksek)
     tick = ex.tick(sig.symbol)
-    price = ex.px(sig.symbol, sig.bid - tick)
+    price = ex.px(sig.symbol, max(sig.bid - tick, sig.bid * 0.9995))
     if price <= 0:
         return False
     min_qty, min_cost = ex.limits(sig.symbol)
@@ -925,40 +1104,92 @@ async def buy_one(
     if qty < min_qty or qty * price < max(min_cost, MIN_BNB_FREE * 0.4):
         return False
 
-    await ex.cancel_all(sig.symbol)
     o = await ex.place_fast(sig.symbol, "buy", qty, price, state.stats)
     if not o:
         return False
 
-    state.positions[sig.symbol] = Pos(
+    oid = str(o.get("id") or "") or None
+    state.pending[sig.symbol] = PendingBuy(
         symbol=sig.symbol,
-        entry=price,
+        order_id=oid,
+        price=price,
         qty=qty,
-        bought_at=now,
-        methods=",".join(sig.reasons[:5]),
+        budget=budget,
+        placed_at=now,
+        methods=methods,
     )
-    state.buy_block_until[sig.symbol] = now + BUY_COOLDOWN_SEC
-    st = state.stats
-    st.ensure_today()
-    st.buys += 1
-    say_buy(
-        f"{sig.symbol} @ {price:.8f} qty={qty:.6f} bud={budget:.4f}BNB | "
-        f"methods={sig.passed}/{sig.total} | bugün alış={st.buys} emir={st.orders}"
-    )
-    st.save()
-    log.info("%s AL methods=%d/%d", sig.symbol, sig.passed, sig.total)
+    say_order(f"PENDING BUY {sig.symbol} @ {price:.8f} (fill bekleniyor ≤{PENDING_MAX_SEC:.0f}s)")
+    log.info("%s AL emir methods=%d/%d pending", sig.symbol, sig.passed, sig.total)
     return True
 
 
+async def manage_pending(ex: Exchange, state: State) -> None:
+    """Pending maker fill kontrol — dolmazsa market ile tamamla (min 5)."""
+    if not state.pending:
+        return
+    bal = await ex.balance(force=True)
+    if not bal:
+        return
+    now = time.time()
+    for sym in list(state.pending.keys()):
+        pb = state.pending[sym]
+        base = sym.split("/")[0]
+        tot = ex.total(bal, base)
+        min_cost = ex.limits(sym)[1]
+        # fill oldu mu?
+        bt = await ex.book_ticker(sym)
+        mid = ((bt[0] + bt[1]) / 2.0) if bt else pb.price
+        if tot > 0 and (mid <= 0 or tot * mid >= min_cost * 0.5):
+            state.positions[sym] = Pos(
+                symbol=sym, entry=pb.price, qty=tot, bought_at=pb.placed_at, methods=pb.methods
+            )
+            state.pending.pop(sym, None)
+            state.buy_block_until[sym] = now + BUY_COOLDOWN_SEC
+            st = state.stats
+            st.ensure_today()
+            st.buys += 1
+            say_buy(f"{sym} FILL @≈{pb.price:.8f} qty={tot:.6f} | bugün AL={st.buys}")
+            st.save()
+            continue
+
+        age = now - pb.placed_at
+        if age < PENDING_MAX_SEC:
+            continue
+
+        # timeout
+        await ex.cancel_all(sym)
+        need_force = len(state.positions) < MIN_OPEN_COINS
+        if need_force and ALLOW_TAKER_TO_FILL and ex.free(bal, QUOTE) >= MIN_BNB_FREE:
+            o = await ex.place_market_buy(sym, min(pb.budget, ex.free(bal, QUOTE) * 0.9), state.stats)
+            state.pending.pop(sym, None)
+            if o:
+                fill_px = float(o.get("average") or o.get("price") or pb.price)
+                filled = float(o.get("filled") or pb.qty)
+                state.positions[sym] = Pos(
+                    symbol=sym, entry=fill_px, qty=filled, bought_at=now, methods=pb.methods
+                )
+                state.buy_block_until[sym] = now + BUY_COOLDOWN_SEC
+                st = state.stats
+                st.ensure_today()
+                st.buys += 1
+                say_buy(f"{sym} MARKET-FILL timeout | bugün AL={st.buys}")
+                st.save()
+            else:
+                log.warning("%s pending iptal — market de olmadı", sym)
+        else:
+            state.pending.pop(sym, None)
+            log.info("%s pending timeout iptal", sym)
+
+
 async def fast_loop(ex: Exchange, state: State) -> None:
-    """Açık pozisyon SAT — tarama beklemez, hız korunur."""
+    """SAT + pending fill — tarama beklemez."""
     while not state.kill:
         try:
+            await manage_pending(ex, state)
             if state.positions:
                 bal = await ex.balance()
                 if bal:
                     await sync_positions(ex, state, bal)
-                # paralel sat kontrol (hız)
                 syms = list(state.positions.keys())
                 await asyncio.gather(*(sell_one(ex, state, s) for s in syms), return_exceptions=True)
             await asyncio.sleep(FAST_SEC)
@@ -969,7 +1200,7 @@ async def fast_loop(ex: Exchange, state: State) -> None:
             if ban_until_ms(e):
                 await sleep_ban(e)
             else:
-                await asyncio.sleep(5)
+                await asyncio.sleep(3)
 
 
 async def scan_once(ex: Exchange, state: State) -> None:
@@ -987,14 +1218,15 @@ async def scan_once(ex: Exchange, state: State) -> None:
 
     free_bnb = ex.free(bal, QUOTE)
     open_n = len(state.positions)
+    pending_n = len(state.pending)
     log.info(
-        "SCAN | BNB=%.4f açık=%d min=%d rise≥%.1fbps fee≈%.1fbps realize=%.5f",
+        "SCAN | BNB=%.4f açık=%d pending=%d min=%d rise≥%.1fbps fee≈%.1fbps",
         free_bnb,
         open_n,
+        pending_n,
         MIN_OPEN_COINS,
         min_rise_bps(),
         roundtrip_fee_bps(),
-        state.realized_bnb,
     )
 
     tickers = await ex.tickers()
@@ -1009,11 +1241,14 @@ async def scan_once(ex: Exchange, state: State) -> None:
         state.recently_scanned.append(sym)
     state.recently_scanned = state.recently_scanned[-80:]
     state.watchlist = [s for s, _, _ in movers[:TOP_N]]
-    print("TOP20:", ", ".join(s.replace(f"/{QUOTE}", "") for s in state.watchlist))
+    print(
+        f"TOP{len(state.watchlist)}:",
+        ", ".join(s.replace(f"/{QUOTE}", "") for s in state.watchlist),
+    )
 
     weights = volume_weights(movers[:TOP_N])
+    busy = set(state.positions) | set(state.pending)
 
-    # Multi-method analiz (sadece watchlist — paralel, tarama turunda)
     async def _one(sym: str, qv: float) -> Optional[SignalReport]:
         try:
             return await analyze_symbol(ex, sym, tickers.get(sym) or {}, qv)
@@ -1022,13 +1257,12 @@ async def scan_once(ex: Exchange, state: State) -> None:
             return None
 
     reports = await asyncio.gather(
-        *[_one(sym, qv) for sym, qv, _ in movers[:TOP_N] if sym not in state.positions],
+        *[_one(sym, qv) for sym, qv, _ in movers[:TOP_N] if sym not in busy],
         return_exceptions=True,
     )
     signals: List[SignalReport] = []
     for r in reports:
-        if isinstance(r, SignalReport) and r.passed > 0:
-            signals.append(r)
+        if isinstance(r, SignalReport):
             log.info(
                 "sig %s pass=%d/%d score=%.2f RSI=%s | %s",
                 r.symbol,
@@ -1038,48 +1272,56 @@ async def scan_once(ex: Exchange, state: State) -> None:
                 f"{r.rsi:.1f}" if r.rsi is not None else "?",
                 ", ".join(r.reasons[:5]),
             )
+            if r.passed > 0 and not (r.reasons and str(r.reasons[0]).startswith("VETO")):
+                signals.append(r)
 
-    # en az MIN_METHODS_PASS (min 5 doldururken 2 yeter)
-    force = open_n < MIN_OPEN_COINS
-    need_pass = 2 if force else MIN_METHODS_PASS
+    force = (open_n + pending_n) < MIN_OPEN_COINS
+    need_pass = MIN_METHODS_FORCE if force else MIN_METHODS_PASS
     signals = [s for s in signals if s.passed >= need_pass]
     signals.sort(key=lambda s: -s.score)
 
     slots_left = 0
     if free_bnb >= MIN_BNB_FREE:
-        if open_n < MIN_OPEN_COINS:
-            slots_left = MIN_OPEN_COINS - open_n
+        if force:
+            slots_left = MIN_OPEN_COINS - open_n - pending_n
         else:
-            slots_left = min(3, TOP_N - open_n)
+            slots_left = min(3, TOP_N - open_n - pending_n)
 
     bought = 0
     for sig in signals:
-        if bought >= slots_left:
+        if bought >= max(0, slots_left):
             break
-        bal = await ex.balance()
+        bal = await ex.balance(force=True)
         if not bal:
             break
         free_bnb = ex.free(bal, QUOTE)
         remain = max(1, slots_left - bought)
-        w = weights.get(sig.symbol, 1.0 / TOP_N)
-        budget = min(free_bnb * min(0.40, max(0.08, w * 2.2)), free_bnb / remain)
+        if force:
+            budget = free_bnb / remain
+        else:
+            w = weights.get(sig.symbol, 1.0 / TOP_N)
+            budget = min(free_bnb * min(0.35, max(0.08, w * 2.0)), free_bnb / remain)
         if budget < MIN_BNB_FREE:
             continue
-        ok = await buy_one(ex, state, sig, budget)
+        ok = await buy_one(ex, state, sig, budget, force_fill=force)
         if ok:
             bought += 1
-            # emirden sonra kısa nefes — ban için; SAT loop bağımsız çalışıyor
-            await asyncio.sleep(0.35)
+            await asyncio.sleep(0.25)
 
-    log.info("SCAN bitti | AL=%d | açık≈%d", bought, len(state.positions))
+    log.info(
+        "SCAN bitti | emir/AL=%d | açık=%d pending=%d",
+        bought,
+        len(state.positions),
+        len(state.pending),
+    )
     state.stats.print_live()
     state.stats.save()
 
 
 async def main_async() -> None:
     print("=" * 64)
-    print("BNB TOP20 · multi-method (RSI/EMA/tape/avg/book) · fee-safe")
-    print(f"SCAN={SCAN_SEC:.0f}s | FAST_SELL={FAST_SEC:.0f}s | min_rise={min_rise_bps():.1f}bps")
+    print("BNB TOP20 · hacim+hareket · multi-method · fee-safe · min5 fill")
+    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | min_rise={min_rise_bps():.1f}bps | RSI_max_buy={RSI_MAX_BUY}")
     print(f"CCXT {ccxt.__version__}")
     print("Binance: Pay fees with BNB AÇIK olsun")
     print("=" * 64)
