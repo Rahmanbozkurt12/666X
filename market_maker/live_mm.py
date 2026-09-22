@@ -16,6 +16,7 @@ Mimari (hız düşmesin diye ayrıldı):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -24,8 +25,9 @@ import re
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import ccxt
@@ -118,6 +120,9 @@ def est_fee(notional: float) -> float:
     return abs(notional) * MAKER_FEE
 
 
+STATS_PATH = Path(__file__).resolve().parent.parent / "output" / "live_mm_day_stats.json"
+
+
 @dataclass
 class DayStats:
     day: str = field(default_factory=utc_day)
@@ -152,15 +157,17 @@ class DayStats:
             "=" * 64,
             _c(_BOLD, f"GÜNLÜK ÖZET  ({self.day} UTC)"),
             "-" * 64,
-            f"  Emir sayısı      : {_c(_ORANGE, str(self.orders))}",
-            f"  Alış (fill/ack)  : {_c(_GREEN, str(self.buys))}",
-            f"  Satış            : {_c(_RED, str(self.sells))}",
-            f"  İşlem (roundtrip): {self.sells}  | kazanılan {self.win_trades} / kaybedilen {self.loss_trades}",
-            f"  Kazanç (brüt)    : {_c(_GREEN, f'+{self.won_bnb:.6f} BNB')}",
-            f"  Kayıp (brüt)     : {_c(_RED, f'-{self.lost_bnb:.6f} BNB')}",
-            f"  Komisyon (tahmini): {_c(_ORANGE, f'{self.fees_bnb:.6f} BNB')}  (maker≈{MAKER_FEE*100:.3f}%)",
-            f"  Net              : {_c(net_c, f'{net:+.6f} BNB')}",
-            f"  Süre             : {mins:.1f} dk",
+            f"  İşlem (roundtrip SAT): {_c(_BOLD, str(self.sells))}",
+            f"  Emir sayısı          : {_c(_ORANGE, str(self.orders))}",
+            f"  Alış                 : {_c(_GREEN, str(self.buys))}",
+            f"  Satış                : {_c(_RED, str(self.sells))}",
+            f"  Kazanan işlem        : {_c(_GREEN, str(self.win_trades))}",
+            f"  Kaybeden işlem       : {_c(_RED, str(self.loss_trades))}",
+            f"  Kazanç (brüt)        : {_c(_GREEN, f'+{self.won_bnb:.6f} BNB')}",
+            f"  Kayıp (brüt)         : {_c(_RED, f'-{self.lost_bnb:.6f} BNB')}",
+            f"  Komisyon (tahmini)   : {_c(_ORANGE, f'{self.fees_bnb:.6f} BNB')}  (maker≈{MAKER_FEE*100:.3f}%)",
+            f"  Net (kazanç-kayıp-fee): {_c(net_c, f'{net:+.6f} BNB')}",
+            f"  Süre                 : {mins:.1f} dk",
             "=" * 64,
         ]
         return lines
@@ -168,6 +175,58 @@ class DayStats:
     def print_summary(self) -> None:
         for line in self.summary_lines():
             print(line, flush=True)
+
+    def print_live(self) -> None:
+        """Her turda tek satır canlı bilanço."""
+        self.ensure_today()
+        net = self.net()
+        net_c = _GREEN if net >= 0 else _RED
+        print(
+            _c(_DIM, "── bilanço ── ")
+            + f"işlem={self.sells} "
+            + _c(_GREEN, f"kazanç=+{self.won_bnb:.5f}")
+            + " "
+            + _c(_RED, f"kayıp=-{self.lost_bnb:.5f}")
+            + " "
+            + _c(_ORANGE, f"fee={self.fees_bnb:.5f}")
+            + " "
+            + _c(net_c, f"net={net:+.5f} BNB")
+            + f" | AL={self.buys} SAT={self.sells} emir={self.orders}",
+            flush=True,
+        )
+
+    def save(self) -> None:
+        try:
+            STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            payload = asdict(self)
+            payload["net_bnb"] = self.net()
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+            STATS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as e:
+            log.warning("stats kaydedilemedi: %s", e)
+
+    @classmethod
+    def load(cls) -> "DayStats":
+        try:
+            if STATS_PATH.exists():
+                raw = json.loads(STATS_PATH.read_text(encoding="utf-8"))
+                st = cls(
+                    day=str(raw.get("day") or utc_day()),
+                    orders=int(raw.get("orders") or 0),
+                    buys=int(raw.get("buys") or 0),
+                    sells=int(raw.get("sells") or 0),
+                    win_trades=int(raw.get("win_trades") or 0),
+                    loss_trades=int(raw.get("loss_trades") or 0),
+                    won_bnb=float(raw.get("won_bnb") or 0),
+                    lost_bnb=float(raw.get("lost_bnb") or 0),
+                    fees_bnb=float(raw.get("fees_bnb") or 0),
+                    started_at=float(raw.get("started_at") or time.time()),
+                )
+                st.ensure_today()
+                return st
+        except Exception as e:
+            log.warning("stats okunamadı: %s", e)
+        return cls()
 
 
 def clean(s: str) -> str:
@@ -832,6 +891,7 @@ async def sell_one(ex: Exchange, state: State, symbol: str) -> bool:
         f"{symbol} +{rise:.1f}bps need≥{need:.1f} RSI={rsi_s} "
         f"pnl={pnl:+.6f}BNB | bugün satış={st.sells} net≈{st.net():+.5f}BNB"
     )
+    st.save()
     log.info("%s SAT +%.1fbps pnl≈%.5fBNB fee-safe", symbol, rise, pnl)
     return True
 
@@ -885,6 +945,7 @@ async def buy_one(
         f"{sig.symbol} @ {price:.8f} qty={qty:.6f} bud={budget:.4f}BNB | "
         f"methods={sig.passed}/{sig.total} | bugün alış={st.buys} emir={st.orders}"
     )
+    st.save()
     log.info("%s AL methods=%d/%d", sig.symbol, sig.passed, sig.total)
     return True
 
@@ -1011,6 +1072,8 @@ async def scan_once(ex: Exchange, state: State) -> None:
             await asyncio.sleep(0.35)
 
     log.info("SCAN bitti | AL=%d | açık≈%d", bought, len(state.positions))
+    state.stats.print_live()
+    state.stats.save()
 
 
 async def main_async() -> None:
@@ -1035,11 +1098,12 @@ async def main_async() -> None:
     if free < MIN_BNB_FREE * MIN_OPEN_COINS:
         print(f"UYARI: düşük BNB ({free:.4f})")
 
-    state = State()
+    state = State(stats=DayStats.load())
     await sync_positions(ex, state, bal)
     print(f"Açık pozisyon≈{len(state.positions)}")
     print(_c(_GREEN, "AL=yeşil"), "|", _c(_RED, "SAT=kırmızı"), "|", _c(_ORANGE, "EMİR=turuncu"))
-    print("Ctrl+C dur → günlük özet")
+    print("Bilanço: her SCAN + Ctrl+C özet | dosya: output/live_mm_day_stats.json")
+    state.stats.print_live()
     print("=" * 64)
 
     fast_task = asyncio.create_task(fast_loop(ex, state))
@@ -1076,7 +1140,9 @@ async def main_async() -> None:
             except Exception:
                 pass
         state.stats.print_summary()
+        state.stats.save()
         print("Kapandı | realize≈%.5f BNB" % state.realized_bnb)
+        print(f"Özet dosya: {STATS_PATH}")
 
 
 def main() -> None:
