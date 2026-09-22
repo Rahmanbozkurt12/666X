@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — BNB · GENİŞ TARAMA · PROF EDGE
+Binance Spot Market Maker — BNB+USDT HİBRİT · 5m YEŞİL
 
-Hafif filtre → çok coin. Skor: yükselen hacim / yüksek+yükselen / ~-20 dip / 5m yeşil.
-≥15 odak, aynı coine 1dk AL yok. Maker fee+edge+toxic kilitleri açık.
+Binance'te ~6 */BNB market var → yükselen coinleri */USDT ile de açar (≥15).
+BNB tercih; USDT pad. Fee+edge+toxic+1dk aynı-coin AL kilidi.
 
-1) API KEY yaz  (BNB + Pay fees with BNB AÇIK)
+Hesapta BNB + biraz USDT olsun (USDT pair'ler için).
+
+1) API KEY yaz  (BNB fee + Pay with BNB AÇIK)
 2) pip install "ccxt[pro]"
 3) python live_mm.py
 """
