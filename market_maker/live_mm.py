@@ -41,13 +41,15 @@ BINANCE_API_KEY = "BURAYA_API_KEY"
 BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
-QUOTE = "BNB"
+QUOTE = "BNB"                   # tercih + fee
+ALT_QUOTES = ("USDT", "USDC", "FDUSD")  # BNB market yoksa bunlarla ≥15 doldur
+ALLOW_ALT_QUOTE = True          # sadece 6 BNB pair var — USDT şart
 SCAN_ALL = True
 FORCE_MIN_OPEN = True
-MAX_OPEN = 20                   # daha fazla odak
-MIN_OPEN = 15                   # KESİN en az 15 coin
-CANDIDATE_POOL = 120            # geniş havuz → daha çok coin
-SCAN_SEC = 90.0                 # sık tarama (çok coin yakala)
+MAX_OPEN = 20
+MIN_OPEN = 15
+CANDIDATE_POOL = 120
+SCAN_SEC = 90.0
 REPLACE_SEC = 75.0
 BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 20.0
@@ -57,30 +59,30 @@ HOLD_QUOTE_MULT = 5.0
 LOOP_SLEEP_SEC = 1.5
 USE_WS = False
 API_RATE_MS = 400
-ROTATE_COOLDOWN_SEC = 5 * 60    # kısa cooldown → yeni coinlere yer
+ROTATE_COOLDOWN_SEC = 5 * 60
 KEEP_GRACE_SEC = 45.0
-SAME_COIN_BUY_SEC = 60.0        # AYNI coine 1 dk içinde tekrar AL YOK
+SAME_COIN_BUY_SEC = 60.0
 KLINE_TF = "5m"
 KLINE_LIMIT = 12
-KLINE_TOP_N = 50                # daha fazla 5m kontrol
+KLINE_TOP_N = 50
 
 # Tabana HAFİF — çok coin tarasın
-MIN_USDT_VOL = 500.0            # düşük eşik (500 USDT+)
+MIN_USDT_VOL = 500.0
 SOFT_USDT_VOL = 2_000.0
 FLOOR_USDT_VOL = 500.0
-HIGH_USDT_VOL = 150_000.0       # yüksek hacim + yükseliyor
-MAX_BOOK_SPREAD_BPS = 120.0     # daha geniş book kabul
-MIN_BOOK_SPREAD_BPS = 6.0       # dar book'a da izin
+HIGH_USDT_VOL = 150_000.0
+MAX_BOOK_SPREAD_BPS = 120.0
+MIN_BOOK_SPREAD_BPS = 6.0
 QUOTE_MOVE_BPS = 40.0
 JOIN_TOUCH = False
-MIN_VOL_RISE_PCT = 0.03         # +%3 hacim artışı yeter
+MIN_VOL_RISE_PCT = 0.03
 MIN_VOL_RISE_USDT = 1_500.0
-DIP_PCT_LO = -25.0              # dip bandı geniş
+DIP_PCT_LO = -25.0
 DIP_PCT_HI = -5.0
-MAX_ABS_24H_PCT = 28.0          # daha fazla coin
+MAX_ABS_24H_PCT = 28.0
 MIN_24H_PCT = 0.2
 
-# PROF MM — fee + edge (koru) ama tarama gevşek
+# PROF MM
 MAKER_FEE = 0.00075
 FEE_SAFETY = 2.0
 MIN_EDGE_BPS = 65.0
@@ -90,22 +92,26 @@ BEHIND_TICKS = 2.0
 MAX_HALF_SPREAD_BPS = 120.0
 MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
-MIN_QUOTE_FREE = 0.0020
+MIN_QUOTE_FREE = 0.0020         # BNB slot min
+MIN_USDT_FREE = 6.0             # USDT slot min (~min notional)
 RESERVE_BNB = 0.0002
+RESERVE_USDT = 2.0
 USE_QUOTE_FRAC = 0.999
 MIN_BNB_PER_SLOT = 0.008
+MIN_USDT_PER_SLOT = 6.0
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
-MAX_PAIR_HOLD_SEC = 15 * 60     # daha hızlı rotasyon
+MAX_PAIR_HOLD_SEC = 15 * 60
 MAX_BUY_LEAD = 2
 MIN_WR_TO_BUY = 0.42
 MIN_TRADES_FOR_WR = 8
 TOXIC_LOSS_STREAK = 2
 TOXIC_PAUSE_SEC = 10 * 60
-MOMENTUM_BUY_BPS = -12.0        # biraz daha toleranslı
+MOMENTUM_BUY_BPS = -12.0
 POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC
 VOL_WIDEN_MULT = 2.2
 SKEW_STRENGTH = 0.85
+W_BNB_PAIR = 1.12               # */BNB varsa skor bonusu
 
 # Skor — yükselen / yüksek+yükselen / dip / 5m yeşil
 W_VOL_RISE = 4.5
@@ -382,36 +388,76 @@ class Exchange:
         self._bal_lock = asyncio.Lock()
         self._order_lock = asyncio.Lock()
         self._fee: Dict[str, float] = {}
-        self._buy_reserved: Dict[str, float] = {}  # symbol -> resting AL BNB
+        self._buy_reserved: Dict[str, float] = {}  # symbol -> resting AL in quote ccy
         self.n_pairs = 1
+        self.n_bnb_pairs = 1
+        self.n_usdt_pairs = 1
+        self._bnb_usd = 0.0
         self.stats = DayStats.load()
         self.stopped = False
 
-    def deployable_bnb(self, bal: Optional[dict] = None) -> float:
+    def quote_of(self, symbol: str) -> str:
+        return symbol.split("/")[1].upper() if "/" in symbol else QUOTE
+
+    def deployable_asset(self, asset: str, bal: Optional[dict] = None) -> float:
         b = bal if bal is not None else self._bal
         if not b:
             return 0.0
-        return max(0.0, self.free(b, QUOTE) - RESERVE_BNB) * USE_QUOTE_FRAC
+        if asset == "BNB":
+            return max(0.0, self.free(b, "BNB") - RESERVE_BNB) * USE_QUOTE_FRAC
+        if asset in ALT_QUOTES:
+            return max(0.0, self.free(b, asset) - RESERVE_USDT) * USE_QUOTE_FRAC
+        return max(0.0, self.free(b, asset)) * USE_QUOTE_FRAC
 
-    def slot_budget(self, bal: Optional[dict] = None) -> float:
-        return self.deployable_bnb(bal) / max(1, self.n_pairs)
+    def deployable_bnb(self, bal: Optional[dict] = None) -> float:
+        return self.deployable_asset("BNB", bal)
 
-    def reserved_bnb(self, exclude: str = "") -> float:
-        return sum(v for s, v in self._buy_reserved.items() if s != exclude)
+    def deployable_usdt(self, bal: Optional[dict] = None) -> float:
+        b = bal if bal is not None else self._bal
+        if not b:
+            return 0.0
+        total = 0.0
+        for a in ALT_QUOTES:
+            total += max(0.0, self.free(b, a) - (RESERVE_USDT if a == "USDT" else 0.0))
+        return total * USE_QUOTE_FRAC
 
-    def set_buy_reserve(self, symbol: str, bnb: float) -> None:
-        if bnb <= 0:
+    def slot_budget(self, bal: Optional[dict] = None, symbol: str = "") -> float:
+        if symbol and self.quote_of(symbol) != "BNB":
+            return self.deployable_usdt(bal) / max(1, self.n_usdt_pairs)
+        return self.deployable_bnb(bal) / max(1, self.n_bnb_pairs)
+
+    def reserved_for_quote(self, quote: str, exclude: str = "") -> float:
+        s = 0.0
+        for sym, v in self._buy_reserved.items():
+            if sym == exclude:
+                continue
+            if self.quote_of(sym) == quote or (quote in ALT_QUOTES and self.quote_of(sym) in ALT_QUOTES):
+                s += v
+        return s
+
+    def set_buy_reserve(self, symbol: str, amt: float) -> None:
+        if amt <= 0:
             self._buy_reserved.pop(symbol, None)
         else:
-            self._buy_reserved[symbol] = bnb
+            self._buy_reserved[symbol] = amt
 
     def free_quote_for(self, symbol: str, bal: Optional[dict] = None) -> float:
-        """Bu slotun kullanabileceği serbest BNB (diğer slot rezervleri düşülmüş)."""
+        q = self.quote_of(symbol)
         b = bal if bal is not None else self._bal
         if not b:
             return 0.0
-        raw = max(0.0, self.free(b, QUOTE) - RESERVE_BNB) * USE_QUOTE_FRAC
-        return max(0.0, raw - self.reserved_bnb(exclude=symbol))
+        if q == "BNB":
+            raw = max(0.0, self.free(b, "BNB") - RESERVE_BNB) * USE_QUOTE_FRAC
+            return max(0.0, raw - self.reserved_for_quote("BNB", exclude=symbol))
+        raw = max(0.0, self.free(b, q) - (RESERVE_USDT if q == "USDT" else 0.0)) * USE_QUOTE_FRAC
+        return max(0.0, raw - self.reserved_for_quote(q, exclude=symbol))
+
+    def to_bnb(self, amount: float, quote: str) -> float:
+        if quote == "BNB" or amount == 0:
+            return amount
+        if self._bnb_usd > 1e-9:
+            return amount / self._bnb_usd
+        return amount
 
     async def run(self, fn, *a, **kw):
         await wait_if_banned()
@@ -825,11 +871,15 @@ def scan_all_binance(
             row = {
                 "base": base, "usdt_vol": 0.0, "pct": 0.0, "pct_signed": 0.0,
                 "t": t, "spr": spr, "best_sym": sym, "bnb_sym": None, "bnb_spr": 9e9,
+                "usdt_sym": None, "usdt_spr": 9e9,
             }
             per_base[base] = row
         row["usdt_vol"] = max(float(row["usdt_vol"]), usdt_vol)
-        if quote in ("USDT", "USDC", "FDUSD") and usdt_vol >= float(row.get("ref_vol") or 0):
-            row.update(t=t, spr=spr, best_sym=sym, pct=pct, pct_signed=pct_signed, ref_vol=usdt_vol)
+        if quote in ALT_QUOTES and usdt_vol >= float(row.get("ref_vol") or 0):
+            row.update(
+                t=t, spr=spr, best_sym=sym, pct=pct, pct_signed=pct_signed, ref_vol=usdt_vol,
+                usdt_sym=sym, usdt_spr=spr,
+            )
         elif not row.get("ref_vol") and usdt_vol > 0:
             row.update(t=t, spr=spr, best_sym=sym, pct=max(row["pct"], pct), pct_signed=pct_signed)
         if quote == QUOTE:
@@ -839,22 +889,25 @@ def scan_all_binance(
     ranked: List[Tuple[float, str, str, float]] = []
     for base, row in per_base.items():
         bnb_sym = row.get("bnb_sym") or ""
-        if not bnb_sym:
+        usdt_sym = row.get("usdt_sym") or row.get("best_sym") or ""
+        # BNB tercih; yoksa USDT/USDC (aynı 6 coine mahkum olma)
+        trade_sym = bnb_sym if bnb_sym else (usdt_sym if ALLOW_ALT_QUOTE else "")
+        if not trade_sym:
+            continue
+        if trade_sym.endswith("/BNB") is False and not ALLOW_ALT_QUOTE:
             continue
         usdt_vol = float(row["usdt_vol"])
         now_vols[base] = usdt_vol
         if usdt_vol < min_usdt_vol:
             continue
-        # BNB book spread öncelikli (asıl trade ettiğimiz market)
-        eff_spr = float(row.get("bnb_spr") or 9e9)
-        if eff_spr >= 9e9:
-            eff_spr = float(row["spr"])
+        if bnb_sym:
+            eff_spr = float(row.get("bnb_spr") or row["spr"])
+        else:
+            eff_spr = float(row.get("usdt_spr") or row["spr"])
         if eff_spr > max_spread:
             continue
         pct_signed = float(row.get("pct_signed") or row["t"].get("percentage") or 0)
-        if pct_signed > MAX_ABS_24H_PCT:
-            continue
-        if pct_signed < -abs(MAX_ABS_24H_PCT):
+        if pct_signed > MAX_ABS_24H_PCT or pct_signed < -abs(MAX_ABS_24H_PCT):
             continue
         prev_v = float(prev.get(base) or 0.0)
         if prev_v > 1e-9:
@@ -866,13 +919,14 @@ def scan_all_binance(
         is_dip = DIP_PCT_LO <= pct_signed <= DIP_PCT_HI
         is_high_rising = usdt_vol >= HIGH_USDT_VOL and rise_pct > 0
         rising_ok = rise_pct >= MIN_VOL_RISE_PCT or rise_abs >= MIN_VOL_RISE_USDT or rise_pct > 0
-        # require_rise=True iken bile: yükselen VEYA dip VEYA yüksek+yükselen VEYA ilk snap
         if require_rise and prev and not (rising_ok or is_dip or is_high_rising):
             continue
         score, npass, _ = method_scores(row["t"], eff_spr, usdt_vol, rise_pct, rise_abs)
         if min_pass > 0 and npass < min_pass and not (is_dip or is_high_rising or rising_ok):
             continue
-        ranked.append((score, base, bnb_sym, usdt_vol))
+        if bnb_sym:
+            score *= W_BNB_PAIR
+        ranked.append((score, base, trade_sym, usdt_vol))
     ranked.sort(key=lambda x: -x[0])
     save_vol_snap(now_vols)
     return ranked, scanned, spot_n
@@ -906,26 +960,45 @@ async def enrich_ranked_5m(
     return enriched
 
 
-def all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, str]]:
-    """Tüm aktif */BNB marketleri — last yoksa bile pad için dahil."""
+def all_trade_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, str]]:
+    """Pad listesi: önce */BNB, sonra likit */USDT — aynı 6 BNB'ye mahkum olma."""
     out: List[Tuple[float, str]] = []
     fx = usdt_fx(tickers)
     bnb_usd = fx.get("BNB") or 0.0
+    seen_base: Set[str] = set()
+    # 1) BNB pairs
     for sym, base, quote, _m in iter_spot(ex):
         if quote != QUOTE or skip_base(base):
             continue
         t = _ticker(tickers, sym)
-        last = float(
-            t.get("last") or t.get("close") or t.get("bid") or t.get("ask") or 0
-        )
+        last = float(t.get("last") or t.get("close") or t.get("bid") or t.get("ask") or 0)
         qv = float(t.get("quoteVolume") or 0)
         usdt_vol = qv * bnb_usd if bnb_usd > 0 else qv
         pct = abs(float(t.get("percentage") or 0))
-        # last yoksa skor 0 ama yine listeye gir (zorunlu 15 pad)
-        score = (usdt_vol * (1.0 + min(pct, 15.0) / 30.0)) if last > 0 else 0.0
+        score = (usdt_vol * (1.0 + min(pct, 15.0) / 30.0) + 1e12) if last > 0 else 1e11
         out.append((score, sym))
+        seen_base.add(base)
+    # 2) USDT pad
+    if ALLOW_ALT_QUOTE:
+        for sym, base, quote, _m in iter_spot(ex):
+            if quote not in ALT_QUOTES or skip_base(base) or base in seen_base:
+                continue
+            t = _ticker(tickers, sym)
+            last = float(t.get("last") or t.get("close") or t.get("bid") or t.get("ask") or 0)
+            if last <= 0:
+                continue
+            usdt_vol = quote_vol_usdt(t, quote, fx)
+            if usdt_vol < FLOOR_USDT_VOL:
+                continue
+            pct = abs(float(t.get("percentage") or 0))
+            out.append((usdt_vol * (1.0 + min(pct, 15.0) / 30.0), sym))
+            seen_base.add(base)
     out.sort(key=lambda x: -x[0])
     return out
+
+
+def all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[float, str]]:
+    return all_trade_pairs(ex, tickers)
 
 
 async def pick_open_pairs(
@@ -1015,15 +1088,21 @@ async def pick_open_pairs(
             if len(out) >= n:
                 break
 
-    names = ", ".join(x.replace(f"/{QUOTE}", "") for x in out)
+    names = ", ".join(
+        s.replace("/BNB", "*").replace("/USDT", "$").replace("/USDC", "$") for s in out
+    )
+    n_bnb = sum(1 for s in out if s.endswith("/BNB"))
+    n_alt = len(out) - n_bnb
     log.info(
-        "TARAMA | spot=%d taranan=%d bnb=%d havuz=%d odak=%d (≥%d) 5m+hacim+dip → %s",
+        "TARAMA | spot=%d taranan=%d pad=%d havuz=%d odak=%d (≥%d) BNB=%d ALT=%d → %s",
         spot_n,
         scanned,
         len(bnb_all),
         len(pool),
         len(out),
         MIN_OPEN,
+        n_bnb,
+        n_alt,
         names or "-",
     )
     return out, scanned, len(pool)
@@ -1079,6 +1158,10 @@ class Slot:
     @property
     def base(self) -> str:
         return self.symbol.split("/")[0]
+
+    @property
+    def quote_asset(self) -> str:
+        return self.symbol.split("/")[1].upper() if "/" in self.symbol else QUOTE
 
     def on_book(self, ob: dict) -> None:
         bids, asks = ob.get("bids") or [], ob.get("asks") or []
@@ -1171,7 +1254,7 @@ class Slot:
         if not b:
             return
         self.base_free = self.ex.free(b, self.base)
-        self.quote_free = self.ex.free(b, QUOTE)
+        self.quote_free = self.ex.free(b, self.quote_asset)
         self.base_total = self.ex.total(b, self.base)
 
     async def prime_fills(self) -> None:
@@ -1202,13 +1285,16 @@ class Slot:
             px = float(t.get("price") or 0)
             fee_raw = t.get("fee") or {}
             fee_cost = float(fee_raw.get("cost") or 0)
-            fee_ccy = str(fee_raw.get("currency") or QUOTE).upper()
-            if fee_cost and fee_ccy == QUOTE:
+            fee_ccy = str(fee_raw.get("currency") or self.quote_asset).upper()
+            if fee_cost and fee_ccy == self.quote_asset:
                 fee = fee_cost
             elif fee_cost and fee_ccy == self.base:
                 fee = fee_cost * px
+            elif fee_cost and fee_ccy == "BNB" and self.quote_asset != "BNB":
+                # fee BNB ile ödendi → quote cinsine çevir
+                fee = fee_cost * (self.ex._bnb_usd or 0.0)
             else:
-                fee = fee_cost * px if fee_ccy != QUOTE else fee_cost
+                fee = fee_cost * px if fee_ccy not in (self.quote_asset, "BNB") else fee_cost
             if amt <= 0 or px <= 0:
                 continue
             st = self.ex.stats
@@ -1232,13 +1318,15 @@ class Slot:
                 else:
                     cost = amt * (self.book.mid or px)
                 pnl = amt * px - fee - cost
+                # bilanço BNB cinsinden
+                pnl_bnb = self.ex.to_bnb(pnl, self.quote_asset) if self.quote_asset != "BNB" else pnl
                 self.realized += pnl
                 if pnl >= 0:
-                    st.won += pnl
+                    st.won += abs(pnl_bnb)
                     st.win_trades += 1
                     self.loss_streak = 0
                 else:
-                    st.lost += -pnl
+                    st.lost += abs(pnl_bnb)
                     st.loss_trades += 1
                     self.loss_streak += 1
                     if self.loss_streak >= TOXIC_LOSS_STREAK:
@@ -1248,8 +1336,8 @@ class Slot:
                             self.symbol, int(TOXIC_PAUSE_SEC), self.loss_streak,
                         )
                 st.sells += 1
-                say_sell(f"{self.symbol} FILL {amt:.6g} @ {px:.8g} pnl={pnl:+.6f}")
-            st.fees += abs(fee)
+                say_sell(f"{self.symbol} FILL {amt:.6g} @ {px:.8g} pnl={pnl:+.6f} {self.quote_asset}")
+            st.fees += abs(self.ex.to_bnb(fee, self.quote_asset) if self.quote_asset != "BNB" else fee)
             st.save()
             self.peak_equity = max(self.peak_equity, self.equity())
             await self.ex.balance(force=False)
@@ -1314,13 +1402,15 @@ class Slot:
             if bid >= ask:
                 return None
 
-        # Slot bütçesi — envanter tavanı düşük (pro)
-        alloc = max(self.slot_bnb, MIN_QUOTE_FREE)
-        inv_bnb = self.base_total * mid
-        buy_budget = max(0.0, alloc * MAX_INVENTORY_RATIO - inv_bnb)
+        # Slot bütçesi — quote cinsinden (BNB veya USDT)
+        alloc = max(self.slot_bnb, MIN_QUOTE_FREE if self.quote_asset == "BNB" else MIN_USDT_FREE)
+        inv_bnb = self.base_total * mid  # aslında quote cinsinden envanter değeri
+        inv_quote = inv_bnb
+        buy_budget = max(0.0, alloc * MAX_INVENTORY_RATIO - inv_quote)
         free_left = self.ex.free_quote_for(self.symbol)
-        buy_budget = min(buy_budget, free_left, max(0.0, alloc - inv_bnb))
-        if buy_budget < min_cost:
+        buy_budget = min(buy_budget, free_left, max(0.0, alloc - inv_quote))
+        min_need = min_cost if min_cost > 0 else (MIN_BNB_PER_SLOT if self.quote_asset == "BNB" else MIN_USDT_PER_SLOT)
+        if buy_budget < min_need:
             buy_budget = 0.0
 
         # PROF kapıları: WR / buy-lead / toxic / momentum / post-fill cooldown
@@ -1477,11 +1567,13 @@ class Engine:
         if not tickers:
             log.warning("ticker boş")
             return
+        fx = usdt_fx(tickers)
+        self.ex._bnb_usd = float(fx.get("BNB") or 0.0)
         bal = await self.ex.balance(force=True)
-        spend = self.ex.deployable_bnb(bal)
-        cap = max_open_for_balance(spend)
-        if cap <= 0:
-            log.error("BNB yetersiz (≈%.5f)", spend)
+        spend_bnb = self.ex.deployable_bnb(bal)
+        spend_usdt = self.ex.deployable_usdt(bal) if ALLOW_ALT_QUOTE else 0.0
+        if spend_bnb <= RESERVE_BNB and spend_usdt < MIN_USDT_PER_SLOT:
+            log.error("bakiye yetersiz BNB≈%.5f USDT≈%.2f", spend_bnb, spend_usdt)
             return
 
         now = time.time()
@@ -1490,75 +1582,63 @@ class Engine:
         for sym, sl in list(self.slots.items()):
             age = now - sl.opened_at
             if sl.has_inventory() and not sl.kill:
-                keep.add(sym)  # envanter bitmeden çıkma
+                keep.add(sym)
             elif age < KEEP_GRACE_SEC:
                 keep.add(sym)
             elif age >= MAX_PAIR_HOLD_SEC and not sl.has_inventory():
-                force_out.add(sym)  # uzun kaldı, rotasyon
+                force_out.add(sym)
 
-        want_n = MAX_OPEN if FORCE_MIN_OPEN else min(MAX_OPEN, cap)
-        want_n = max(want_n, MIN_OPEN)  # hedef ≥15
-        # Bakiye yetmiyorsa: min notional altı slot AL basamaz → kaç coin fonlanabilir?
-        fundable = max(1, int(spend / max(MIN_BNB_PER_SLOT, MIN_QUOTE_FREE)))
+        fundable_bnb = max(0, int(spend_bnb / max(MIN_BNB_PER_SLOT, MIN_QUOTE_FREE)))
+        fundable_usdt = max(0, int(spend_usdt / MIN_USDT_PER_SLOT)) if ALLOW_ALT_QUOTE else 0
+        fundable = max(1, fundable_bnb + fundable_usdt)
+        want_n = max(MIN_OPEN, MAX_OPEN if FORCE_MIN_OPEN else min(MAX_OPEN, fundable))
+        want_n = min(want_n, max(fundable, MIN_OPEN if FORCE_MIN_OPEN else fundable), MAX_OPEN)
         if fundable < MIN_OPEN:
             log.warning(
-                "BNB düşük ≈%.5f → en fazla %d coin AL basabilir (15 için ≥%.3f BNB lazım). Yine %d açılacak.",
-                spend,
-                fundable,
-                MIN_OPEN * MIN_BNB_PER_SLOT,
-                max(fundable, min(want_n, fundable)),
+                "fonlanabilir≈%d <15 (BNB slot≤%d USDT slot≤%d) — mümkün olan kadar açılacak",
+                fundable, fundable_bnb, fundable_usdt,
             )
-            want_n = max(fundable, 1)
-        else:
-            want_n = min(want_n, fundable, MAX_OPEN)
+            want_n = max(fundable, len(keep), 1)
 
         picked, scanned, pool_n = await pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
         )
-        # force_out olanları yeni listeden düş (yeniden aynı turda alma)
         picked = [s for s in picked if s not in force_out or s in keep]
-        # hâlâ want_n değilse doğrudan tüm */BNB ile doldur
         if len(picked) < want_n:
-            more, _, _ = await pick_open_pairs(self.ex, tickers, want_n + 10, keep=keep, cooldown=self.cooldown)
+            more, _, _ = await pick_open_pairs(self.ex, tickers, want_n + 20, keep=keep, cooldown=self.cooldown)
             for s in more:
                 if s not in picked and s not in force_out and s not in self.banned:
                     picked.append(s)
                 if len(picked) >= want_n:
                     break
         if FORCE_MIN_OPEN and len(picked) < want_n:
-            for _qv, sym in all_bnb_pairs(self.ex, tickers):
+            for _qv, sym in all_trade_pairs(self.ex, tickers):
                 if sym in picked or sym in self.banned or (sym in force_out and sym not in keep):
                     continue
                 picked.append(sym)
                 if len(picked) >= want_n:
                     break
-        # min_cost > slot bütçesi olanları ele (AL hiç basılmaz)
-        self.ex.n_pairs = max(1, len(picked) or 1)
-        budget = self.ex.slot_budget(bal)
-        funded: List[str] = []
-        deferred: List[str] = []
-        for sym in picked:
-            if sym in keep:
-                funded.append(sym)
-                continue
-            try:
-                _, mc = self.ex.limits(sym)
-            except Exception:
-                mc = MIN_BNB_PER_SLOT
-            if budget + 1e-12 >= max(mc, MIN_QUOTE_FREE * 0.5):
-                funded.append(sym)
-            else:
-                deferred.append(sym)
-        if len(funded) < want_n:
-            for sym in deferred:
-                funded.append(sym)
-                if len(funded) >= want_n:
-                    break
-        picked = [s for s in funded if s not in self.banned][:MAX_OPEN]
-        if len(picked) < MIN_OPEN and fundable >= MIN_OPEN:
-            log.warning("odak %d < MIN_OPEN=%d — BNB market/min_cost elemesi", len(picked), MIN_OPEN)
+
+        # quote bazlı slot sayısı
+        picked = [s for s in picked if s not in self.banned][:MAX_OPEN]
+        bnb_syms = [s for s in picked if s.endswith("/BNB")]
+        alt_syms = [s for s in picked if not s.endswith("/BNB")]
+        # BNB bakiyesi yetmiyorsa fazla BNB pair'i USDT'ye çevir / at
+        if len(bnb_syms) > max(1, fundable_bnb) and fundable_bnb >= 0:
+            keep_bnb = set(s for s in bnb_syms if s in keep) 
+            extra = [s for s in bnb_syms if s not in keep_bnb]
+            bnb_syms = list(keep_bnb) + extra[: max(0, fundable_bnb - len(keep_bnb))]
+        if len(alt_syms) > max(0, fundable_usdt) and ALLOW_ALT_QUOTE:
+            keep_alt = set(s for s in alt_syms if s in keep)
+            extra = [s for s in alt_syms if s not in keep_alt]
+            alt_syms = list(keep_alt) + extra[: max(0, fundable_usdt - len(keep_alt))]
+        picked = (bnb_syms + alt_syms)[:MAX_OPEN]
+        if FORCE_MIN_OPEN and len(picked) < MIN_OPEN:
+            log.warning("odak %d < MIN_OPEN=%d — market/bakiye sınırı", len(picked), MIN_OPEN)
+
         self.ex.n_pairs = max(1, len(picked))
-        budget = self.ex.slot_budget(bal)
+        self.ex.n_bnb_pairs = max(1, len([s for s in picked if s.endswith("/BNB")]))
+        self.ex.n_usdt_pairs = max(1, len([s for s in picked if not s.endswith("/BNB")]))
         self.ex._buy_reserved = {s: v for s, v in self.ex._buy_reserved.items() if s in picked}
         current, target = set(self.slots), set(picked)
 
@@ -1578,6 +1658,7 @@ class Engine:
             self.slots.pop(sym, None)
 
         for i, sym in enumerate(picked):
+            budget = self.ex.slot_budget(bal, sym)
             if sym in self.slots:
                 self.slots[sym].slot_bnb = budget
                 continue
@@ -1585,16 +1666,17 @@ class Engine:
             self.slots[sym] = sl
             self.tasks[sym] = asyncio.create_task(self._boot(sl, i * WORKER_STAGGER_SEC))
 
-        live = ", ".join(s.replace(f"/{QUOTE}", "") for s in self.slots)
+        live = ", ".join(
+            s.replace("/BNB", "*").replace("/USDT", "$").replace("/USDC", "$") for s in self.slots
+        )
         log.info(
-            "ODAK %d/%d | taranan≈%d aday_havuz=%d | slot≈%.5f %s (fonlanabilir≤%d) → %s",
+            "ODAK %d/%d | taranan≈%d havuz=%d | BNB_slot=%d USDT_slot=%d → %s",
             len(self.slots),
             MAX_OPEN,
             scanned,
             pool_n,
-            budget,
-            QUOTE,
-            fundable,
+            self.ex.n_bnb_pairs,
+            self.ex.n_usdt_pairs if any(not s.endswith("/BNB") for s in self.slots) else 0,
             live,
         )
 
