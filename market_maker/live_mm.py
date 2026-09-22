@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
-Binance Spot — BNB TOP20 · multi-method AL · hızlı SAT · CANLI
+Binance Spot — BNB · 50 coin tarama · min 15 AL/SAT · CANLI
 
-1) API KEY / SECRET yaz (+ BNB bakiye)
-2) Pay fees with BNB AÇIK
-3) python live_mm.py
-
-SCAN/FAST saniyeleri sabit; AL daha agresif (min 7, gevşek filtre, market fill).
+Her tur: yükselen / düşen / hacim oynaklığı → 50 arama → en az 15 coine dağıt.
+SCAN=65s FAST=3s | Pay fees with BNB AÇIK
 """
 
 from __future__ import annotations
@@ -1303,21 +1300,21 @@ async def scan_once(ex: Exchange, state: State) -> None:
     tickers = await ex.tickers()
     if not tickers:
         return
-    movers = pick_movers(ex, tickers, state, TOP_N)
+    movers = pick_movers(ex, tickers, state, SCAN_POOL)
     if not movers:
         log.warning("hareketli pair yok")
         return
 
     for sym, _, _ in movers:
         state.recently_scanned.append(sym)
-    state.recently_scanned = state.recently_scanned[-80:]
-    state.watchlist = [s for s, _, _ in movers[:TOP_N]]
+    state.recently_scanned = state.recently_scanned[-120:]
+    state.watchlist = [s for s, _, _ in movers[:SCAN_POOL]]
     print(
-        f"TOP{len(state.watchlist)}:",
-        ", ".join(s.replace(f"/{QUOTE}", "") for s in state.watchlist),
+        f"HAVUZ{len(state.watchlist)} → hedef AL/SAT ≥{MIN_OPEN_COINS}",
+        flush=True,
     )
 
-    weights = volume_weights(movers[:TOP_N])
+    weights = volume_weights(movers[:SCAN_POOL])
     busy = set(state.positions) | set(state.pending)
 
     async def _one(sym: str, qv: float) -> Optional[SignalReport]:
@@ -1328,7 +1325,7 @@ async def scan_once(ex: Exchange, state: State) -> None:
             return None
 
     reports = await asyncio.gather(
-        *[_one(sym, qv) for sym, qv, _ in movers[:TOP_N] if sym not in busy],
+        *[_one(sym, qv) for sym, qv, _ in movers[:SCAN_POOL] if sym not in busy],
         return_exceptions=True,
     )
     signals: List[SignalReport] = []
@@ -1364,23 +1361,23 @@ async def scan_once(ex: Exchange, state: State) -> None:
                 signals.append(r)
     signals.sort(key=lambda s: -s.score)
 
-    # Tüm serbest BNB'yi TOP_N boş slotlara böl
+    # Tüm serbest BNB'yi en az MIN_OPEN (15) / TOP_N slota böl
     spendable = max(0.0, free_bnb - RESERVE_BNB)
-    empty = max(0, TOP_N - open_n - pending_n)
+    empty = max(0, max(TOP_N, MIN_OPEN_COINS) - open_n - pending_n)
     slots_left = 0
     if DEPLOY_ALL_BNB and spendable >= MIN_QUOTE_FREE and empty > 0:
         max_by_cash = max(1, int(spendable // max(MIN_QUOTE_FREE, 1e-12)))
-        slots_left = min(empty, max_by_cash)  # sinyal sayısına kilitleme — watchlist doldurur
+        slots_left = min(empty, max_by_cash)
         log.info(
-            "DAĞITIM | free=%.4f reserve=%.4f spend=%.4f → %d slota (açık=%d / %d)",
-            free_bnb, RESERVE_BNB, spendable, slots_left, open_n, TOP_N,
+            "DAĞITIM | free=%.4f spend=%.4f → %d slota (açık=%d hedef≥%d / tarama=%d)",
+            free_bnb, spendable, slots_left, open_n, MIN_OPEN_COINS, SCAN_POOL,
         )
 
     bought = 0
     # sinyal yetmezse watchlist'ten doldur
     buy_queue: List[Any] = list(signals)
     if len(buy_queue) < slots_left:
-        for sym, qv, last in movers[:TOP_N]:
+        for sym, qv, last in movers[:SCAN_POOL]:
             if sym in busy or any(getattr(s, "symbol", None) == sym for s in buy_queue):
                 continue
             # sahte SignalReport — force market
@@ -1424,8 +1421,8 @@ async def scan_once(ex: Exchange, state: State) -> None:
 
 async def main_async() -> None:
     print("=" * 64)
-    print("BNB · bakiyeyi TOP20'ye dağıt · 3-5'e takılma")
-    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | hedef={TOP_N} coin | reserve={RESERVE_BNB}")
+    print("BNB · 50 arama (UP/DOWN/VOLAT) · min 15 coin AL/SAT")
+    print(f"SCAN={SCAN_SEC:.0f}s | FAST={FAST_SEC:.0f}s | havuz={SCAN_POOL} | hedef≥{MIN_OPEN_COINS}")
     print(f"CCXT {ccxt.__version__}")
     print("Binance: Pay fees with BNB AÇIK olsun")
     print("=" * 64)
@@ -1440,9 +1437,9 @@ async def main_async() -> None:
     if not bal:
         raise SystemExit("Bakiye yok / ban")
     free = ex.free(bal, QUOTE)
-    print(f"{QUOTE} free≈{free:.4f} | hepsi ~{TOP_N} coine bölünecek (kenarda {RESERVE_BNB})")
-    if free < MIN_QUOTE_FREE * 5:
-        print(f"UYARI: düşük {QUOTE} ({free:.4f})")
+    print(f"{QUOTE} free≈{free:.4f} | ≥{MIN_OPEN_COINS} coine dağıt (reserve {RESERVE_BNB})")
+    if free < MIN_QUOTE_FREE * MIN_OPEN_COINS:
+        print(f"UYARI: düşük {QUOTE} ({free:.4f}) — 15 coin için BNB artır")
 
     state = State(stats=DayStats.load())
     await sync_positions(ex, state, bal)
