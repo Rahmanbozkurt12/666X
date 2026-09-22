@@ -45,66 +45,67 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 QUOTE = "USDT"                  # SADECE USDT
 SCAN_ALL = True
 FORCE_MIN_OPEN = True           # her taramada ≥15 kesin
-MAX_OPEN = 20
+MAX_OPEN = 15                   # 20→15: pool dolmasın + min notional
 MIN_OPEN = 15
 CANDIDATE_POOL = 200
 SCAN_SEC = 189.0                # 189 sn'de bir tarama
-REPLACE_SEC = 75.0
+REPLACE_SEC = 90.0
 BALANCE_CACHE_SEC = 8.0
-FILL_POLL_SEC = 20.0
-BOOK_REST_SEC = 12.0
-WORKER_STAGGER_SEC = 0.6
-HOLD_QUOTE_MULT = 5.0
-LOOP_SLEEP_SEC = 1.5
+FILL_POLL_SEC = 25.0
+BOOK_REST_SEC = 15.0
+WORKER_STAGGER_SEC = 1.2        # API pool dolmasın
+HOLD_QUOTE_MULT = 8.0           # emir book'ta daha uzun kalsın
+LOOP_SLEEP_SEC = 2.0
 USE_WS = False
-API_RATE_MS = 400
+API_RATE_MS = 450
 ROTATE_COOLDOWN_SEC = 5 * 60
 KEEP_GRACE_SEC = 45.0
 SAME_COIN_BUY_SEC = 60.0        # aynı coine 1 dk ara
 KLINE_TF = "5m"
 KLINE_LIMIT = 12
-KLINE_TOP_N = 80                # daha çok coine 5m yeşil bak
+KLINE_TOP_N = 80
 
 MIN_USDT_VOL = 400.0
 SOFT_USDT_VOL = 1_000.0
 FLOOR_USDT_VOL = 400.0
-HIGH_USDT_VOL = 100_000.0       # yüksek hacim eşiği
+HIGH_USDT_VOL = 100_000.0
 MAX_BOOK_SPREAD_BPS = 140.0
 MIN_BOOK_SPREAD_BPS = 6.0
-QUOTE_MOVE_BPS = 40.0
+QUOTE_MOVE_BPS = 55.0           # daha az iptal → emir görünür kalsın
 JOIN_TOUCH = False
-MIN_VOL_RISE_PCT = 0.02         # hacim yükselmeye başladı
+MIN_VOL_RISE_PCT = 0.02
 MIN_VOL_RISE_USDT = 800.0
-DIP_PCT_LO = -28.0              # ~-20 dip bandı
+DIP_PCT_LO = -28.0
 DIP_PCT_HI = -8.0
 MAX_ABS_24H_PCT = 35.0
 MIN_24H_PCT = 0.0
 
 MAKER_FEE = 0.00075
-FEE_SAFETY = 2.8                # komisyon tamponu ↑ — paramız eksilmesin
-MIN_EDGE_BPS = 90.0             # net edge yüksek
+FEE_SAFETY = 2.8
+MIN_EDGE_BPS = 90.0
 MIN_SELL_EDGE_BPS = 80.0
 BASE_SPREAD_TICKS = 5.0
 BEHIND_TICKS = 2.0
 MAX_HALF_SPREAD_BPS = 150.0
 MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
-MIN_QUOTE_FREE = 5.0            # USDT slot min (≥15 için)
+MIN_QUOTE_FREE = 5.0
 RESERVE_USDT = 2.0
 USE_QUOTE_FRAC = 0.999
 MIN_USDT_PER_SLOT = 5.0
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
 MAX_PAIR_HOLD_SEC = 15 * 60
-MAX_BUY_LEAD = 2
-MIN_WR_TO_BUY = 0.42
-MIN_TRADES_FOR_WR = 8
-TOXIC_LOSS_STREAK = 2
-TOXIC_PAUSE_SEC = 10 * 60
-MOMENTUM_BUY_BPS = -12.0
+MAX_BUY_LEAD = 8
+MIN_WR_TO_BUY = 0.25
+MIN_TRADES_FOR_WR = 20
+TOXIC_LOSS_STREAK = 3
+TOXIC_PAUSE_SEC = 5 * 60
+MOMENTUM_BUY_BPS = -25.0
 POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC
 VOL_WIDEN_MULT = 2.4
 SKEW_STRENGTH = 0.85
+BUY_GATES_OFF = True            # AL kilidi KAPALI — emirler Binance'te görünsün
 
 # Tüm giriş metodları (skor ağırlıkları)
 W_VOL_RISE = 5.0                # hacim yükseliyor
@@ -291,12 +292,9 @@ class DayStats:
         return (self.win_trades / n) if n else 0.0
 
     def allow_buys(self, flat: bool = False) -> bool:
-        """
-        flat=True → envanter yok; SADECE-SAT kilidi Binance'te sıfır emir bırakır.
-        Bu durumda AL serbest (aksi halde hiç order görünmez).
-        """
+        """flat veya BUY_GATES_OFF → AL serbest (yoksa emir görünmez)."""
         self.ensure_today()
-        if flat:
+        if BUY_GATES_OFF or flat:
             return True
         if self.buys > self.sells + MAX_BUY_LEAD:
             return False
@@ -306,27 +304,34 @@ class DayStats:
         return True
 
     def unlock_stale_gates(self) -> None:
-        """Önceki oturum AL>>SAT / düşük WR kilidini kır — flat'te emir görünsün."""
+        """Her açılışta eski oturum kilidini kır — Binance'te emir görünsün."""
         self.ensure_today()
-        if self.buys > self.sells + MAX_BUY_LEAD:
-            log.warning(
-                "stats unlock: AL lead %d→%d (eski oturum kilidi kırıldı)",
-                self.buys, self.sells,
-            )
+        changed = False
+        if self.buys > self.sells:
+            log.warning("stats unlock: AL %d → SAT %d hizalandı", self.buys, self.sells)
             self.buys = self.sells
-            self.save()
+            changed = True
         n = self.win_trades + self.loss_trades
-        if n >= MIN_TRADES_FOR_WR and self.win_rate() < MIN_WR_TO_BUY:
-            log.warning(
-                "stats: WR=%.0f%% düşük — envanter yokken AL yine açılır (flat unlock)",
-                self.win_rate() * 100.0,
-            )
+        if n >= 1 and self.win_rate() < MIN_WR_TO_BUY:
+            log.warning("stats unlock: WR=%.0f%% sıfırlandı (AL kilidi kırıldı)", self.win_rate() * 100)
+            self.win_trades = 0
+            self.loss_trades = 0
+            self.won = 0.0
+            self.lost = 0.0
+            changed = True
+        if changed:
+            self.save()
+        log.info(
+            "AL kapıları | lead_ok=%s wr_ok=%s flat_unlock=ON",
+            self.buys <= self.sells + MAX_BUY_LEAD,
+            True,
+        )
 
     def print_live(self) -> None:
         self.ensure_today()
         net = self.net()
         wr = self.win_rate()
-        mode = "AL+SAT" if self.allow_buys() else "SADECE-SAT (flat→AL açık)"
+        mode = "AL+SAT" if self.allow_buys(flat=True) else "SADECE-SAT"
         print(
             _c(_DIM, "── bilanço ── ")
             + f"emir={self.orders} iptal={self.cancels} "
@@ -391,6 +396,15 @@ class Exchange:
         }
         self.rest = ccxt.binance(opts)
         self.rest.set_sandbox_mode(False)
+        # 20 paralel slot → connection pool dolmasın
+        try:
+            from requests.adapters import HTTPAdapter
+
+            adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50, max_retries=1)
+            self.rest.session.mount("https://", adapter)
+            self.rest.session.mount("http://", adapter)
+        except Exception as e:
+            log.warning("session pool ayarlanamadı: %s", e)
         self.ws = None
         if USE_WS and ccxtpro is not None:
             try:
