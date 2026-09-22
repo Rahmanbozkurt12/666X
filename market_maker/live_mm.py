@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — BNB · HIZLI · CANLI
+Binance Spot Market Maker — BNB · TÜM CEX TARAMA · CANLI
 
-Gerçek MM gibi: her pair'de aynı anda AL (bid) + SAT (ask) LIMIT_MAKER.
-50 coin zorunluluğu YOK — varsayılan 6 likit pair (hız + az ban).
+Tüm Binance spot BNB pair'lerini tarar; en iyi skorluları LIMIT_MAKER
+bid+ask ile açar; periyodik yeniden tarayıp rotasyon yapar.
 
 1) API KEY yaz  (+ BNB bakiye, Pay fees with BNB AÇIK)
 2) pip install "ccxt[pro]"
@@ -40,30 +40,33 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
 QUOTE = "BNB"
-# Az pair = her slota daha çok BNB + gerçek AL/SAT (0.06 BNB için 3 ideal)
-NUM_PAIRS = 3
-MIN_QUOTE_VOL = 5.0
-REPLACE_SEC = 14.0              # emir dinlensin — sık iptal = alım yok
-BALANCE_CACHE_SEC = 8.0         # iptal sonrası taze bakiye
+# TÜM Binance BNB spot tarama — keşif üst sınırı yok
+SCAN_ALL = True
+MAX_OPEN = 20                   # aynı anda açık MM (bakiyeye göre düşer)
+MIN_OPEN = 8                    # hedef minimum açık
+SCAN_SEC = 90.0                 # tüm CEX yeniden tara + rotasyon
+MIN_QUOTE_VOL = 0.3             # BNB 24h hacim eşiği (düşük = daha çok pair)
+REPLACE_SEC = 14.0
+BALANCE_CACHE_SEC = 8.0
 FILL_POLL_SEC = 12.0
 BOOK_REST_SEC = 8.0
-WORKER_STAGGER_SEC = 2.0
-MAX_BOOK_SPREAD_BPS = 55.0      # OPEN gibi 80bps pair'leri alma
-QUOTE_MOVE_BPS = 15.0           # mid bu kadar oynamazsa emir yenileme
-JOIN_BID = True                 # best bid'e yapış — 1 tick geride kalma
+WORKER_STAGGER_SEC = 0.8
+MAX_BOOK_SPREAD_BPS = 80.0      # tarama — ince kitapları da aday yap
+QUOTE_MOVE_BPS = 15.0
+JOIN_BID = True
 
 # Spread: komisyonu geçsin
 MAKER_FEE = 0.00075
 FEE_SAFETY = 1.5
-MIN_EDGE_BPS = 12.0             # fee üstü
+MIN_EDGE_BPS = 12.0
 BASE_SPREAD_TICKS = 3.0
 MAX_INVENTORY_RATIO = 0.99
-TARGET_INVENTORY_RATIO = 0.50   # iki yön MM hedefi
-MIN_QUOTE_FREE = 0.003
-RESERVE_BNB = 0.0003            # sadece fee tozu — gerisini deploy
-USE_QUOTE_FRAC = 0.998          # serbest BNB'nin neredeyse tamamı
+TARGET_INVENTORY_RATIO = 0.50
+MIN_QUOTE_FREE = 0.0025
+RESERVE_BNB = 0.0003
+USE_QUOTE_FRAC = 0.998
 POST_ONLY = True
-MAX_DRAWDOWN_RATIO = 0.18       # mark-to-market (nakit alış ≠ zarar)
+MAX_DRAWDOWN_RATIO = 0.18
 
 SKIP_BASES = {
     "BNB", "USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDE", "USD1",
@@ -71,6 +74,7 @@ SKIP_BASES = {
 }
 
 STATS_PATH = Path(__file__).resolve().parent.parent / "output" / "live_mm_day_stats.json"
+NUM_PAIRS = MAX_OPEN  # geriye uyum
 
 # =============================================================================
 
@@ -281,11 +285,12 @@ class Exchange:
             try:
                 await self.run(self.rest.load_markets)
                 log.info(
-                    "CANLI MM | markets=%d WS=%s min_spread≈%.1fbps pairs≤%d",
+                    "CANLI MM | markets=%d WS=%s min_spread≈%.1fbps max_open=%d SCAN_ALL=%s",
                     len(self.rest.markets),
                     bool(self.ws),
                     min_spread_bps(),
-                    NUM_PAIRS,
+                    MAX_OPEN,
+                    SCAN_ALL,
                 )
                 return
             except Exception as e:
@@ -458,31 +463,95 @@ class Exchange:
                     await sleep_ban(e)
 
 
-def pick_liquid_pairs(ex: Exchange, tickers: Dict[str, dict], n: int = NUM_PAIRS) -> List[str]:
+def scan_all_bnb_pairs(ex: Exchange, tickers: Dict[str, dict]) -> Tuple[List[Tuple[float, str]], int]:
+    """
+    Binance'teki TÜM spot BNB pair'lerini tara.
+    Dönüş: (skor, symbol) sıralı liste + taranan ham adet.
+    """
     rows: List[Tuple[float, str]] = []
-    for sym, t in tickers.items():
+    scanned = 0
+    # Önce markets üzerinden — ticker'da olmayanları da say
+    markets = ex.rest.markets or {}
+    for sym, m in markets.items():
         if not sym.endswith(f"/{QUOTE}") or ":" in sym:
             continue
-        m = ex.rest.markets.get(sym) or {}
         if m.get("contract") or m.get("spot") is False or m.get("active") is False:
             continue
         base = sym.split("/")[0].upper()
         if base in SKIP_BASES:
             continue
+        scanned += 1
+        t = tickers.get(sym) or {}
         qv = float(t.get("quoteVolume") or 0)
         if qv < MIN_QUOTE_VOL:
             continue
-        # spread kaba filtre (ticker)
         bid = float(t.get("bid") or 0)
         ask = float(t.get("ask") or 0)
-        if bid > 0 and ask > bid:
-            spr = (ask - bid) / ((ask + bid) / 2) * 10000.0
+        last = float(t.get("last") or t.get("close") or 0)
+        if bid <= 0 or ask <= bid:
+            if last <= 0:
+                continue
+            mid = last
+            spr = 999.0
+        else:
+            mid = (bid + ask) / 2.0
+            spr = (ask - bid) / mid * 10000.0
             if spr > MAX_BOOK_SPREAD_BPS:
                 continue
-        rows.append((qv, sym))
+        # skor: hacim ↑, spread ↓ (dar spread = daha iyi MM)
+        score = qv / max(1.0, spr / 10.0)
+        ch = abs(float(t.get("percentage") or 0))
+        score *= 1.0 + min(ch, 25.0) / 100.0  # hareket bonus
+        rows.append((score, sym))
     rows.sort(key=lambda x: -x[0])
-    out = [s for _, s in rows[:n]]
-    log.info("MM pairs (%d): %s", len(out), ", ".join(x.replace(f"/{QUOTE}", "") for x in out))
+    return rows, scanned
+
+
+def pick_open_pairs(
+    ex: Exchange,
+    tickers: Dict[str, dict],
+    n: int,
+    keep: Optional[Set[str]] = None,
+) -> Tuple[List[str], int, int]:
+    """Tüm CEX tara → en iyi n pair. keep: mümkünse tut (envanterli)."""
+    ranked, scanned = scan_all_bnb_pairs(ex, tickers)
+    qualified = len(ranked)
+    keep = keep or set()
+    out: List[str] = []
+    # önce elde envanter/keep olanları koru (skor listesindeyse)
+    ranked_syms = [s for _, s in ranked]
+    ranked_set = set(ranked_syms)
+    for s in keep:
+        if s in ranked_set and len(out) < n:
+            out.append(s)
+    for s in ranked_syms:
+        if s not in out and len(out) < n:
+            out.append(s)
+    names = ", ".join(x.replace(f"/{QUOTE}", "") for x in out)
+    log.info(
+        "CEX TARAMA | taranan=%d aday=%d açılacak=%d → %s",
+        scanned,
+        qualified,
+        len(out),
+        names or "-",
+    )
+    return out, scanned, qualified
+
+
+def max_open_for_balance(spend: float) -> int:
+    """Bakiyeye göre kaç slot açılabilir (min notional koru)."""
+    if spend < MIN_QUOTE_FREE * 2:
+        return 0
+    n = int(spend / MIN_QUOTE_FREE)
+    n = max(2, min(MAX_OPEN, n))
+    # MIN_OPEN hedefi — bakiye yetiyorsa
+    if spend >= MIN_QUOTE_FREE * MIN_OPEN:
+        n = max(n, min(MAX_OPEN, MIN_OPEN))
+    return n
+
+
+def pick_liquid_pairs(ex: Exchange, tickers: Dict[str, dict], n: int = MAX_OPEN) -> List[str]:
+    out, _, _ = pick_open_pairs(ex, tickers, n)
     return out
 
 
@@ -902,8 +971,11 @@ class Slot:
 
 async def main_async() -> None:
     print("=" * 64)
-    print("Binance REAL MM · BNB · LIMIT_MAKER bid+ask · hızlı")
-    print(f"pairs≤{NUM_PAIRS} | replace={REPLACE_SEC:.0f}s | min_spread≈{min_spread_bps():.1f}bps")
+    print("Binance REAL MM · BNB · TÜM CEX TARAMA · LIMIT_MAKER")
+    print(
+        f"SCAN_ALL | max_open={MAX_OPEN} min_open={MIN_OPEN} | "
+        f"rescan={SCAN_SEC:.0f}s | min_spread≈{min_spread_bps():.1f}bps"
+    )
     print(f"CCXT {ccxt.__version__} | Pro={'var' if ccxtpro else 'YOK — pip install ccxt[pro]'}")
     print("Pay fees with BNB AÇIK olsun")
     print("=" * 64)
@@ -920,33 +992,128 @@ async def main_async() -> None:
     print(f"{QUOTE} free≈{free:.6f} | deploy≈{spend:.6f} (fee tozu {RESERVE_BNB})")
 
     tickers = await ex.tickers()
-    symbols = pick_liquid_pairs(ex, tickers, NUM_PAIRS)
+    want = max_open_for_balance(spend)
+    if want < 2:
+        raise SystemExit(f"BNB yetersiz (deploy={spend:.5f}) — en az {MIN_QUOTE_FREE * 2:.4f} lazım")
+
+    symbols, scanned, qualified = pick_open_pairs(ex, tickers, want)
     if len(symbols) < 2:
-        raise SystemExit("Yeterli likit BNB pair yok")
+        raise SystemExit(
+            f"Yeterli likit BNB pair yok (taranan={scanned} aday={qualified})"
+        )
 
     n = len(symbols)
     ex.n_pairs = n
     slot = spend / n if n else 0.0
-    if slot < MIN_QUOTE_FREE:
-        raise SystemExit(f"Slot {slot:.5f} {QUOTE} küçük — BNB ekle veya NUM_PAIRS düşür")
-
-    print(f"{n}×{slot:.6f} {QUOTE} | TÜM serbest BNB deploy | Ctrl+C dur")
+    print(
+        f"TARAMA OK | Binance spot BNB: {scanned} pair tarandı, {qualified} aday, "
+        f"{n} açık × {slot:.6f} {QUOTE}"
+    )
     print(_c(_GREEN, "AL=yeşil"), "|", _c(_RED, "SAT=kırmızı"), "|", _c(_ORANGE, "EMİR=turuncu"))
     print("=" * 64)
 
-    slots = [Slot(ex, s, slot) for s in symbols]
-    tasks = [asyncio.create_task(s.run(i * WORKER_STAGGER_SEC)) for i, s in enumerate(slots)]
+    active: Dict[str, Tuple[Slot, asyncio.Task]] = {}
+    stop_all = asyncio.Event()
+
+    async def start_slot(sym: str, delay: float, slot_bnb: float) -> None:
+        if sym in active:
+            return
+        s = Slot(ex, sym, slot_bnb)
+        t = asyncio.create_task(s.run(delay))
+        active[sym] = (s, t)
+
+    async def stop_slot(sym: str) -> None:
+        pair = active.pop(sym, None)
+        if not pair:
+            return
+        s, t = pair
+        s.running = False
+        s.kill = True
+        try:
+            await ex.cancel_all(sym)
+        except Exception:
+            pass
+        t.cancel()
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    for i, sym in enumerate(symbols):
+        await start_slot(sym, i * WORKER_STAGGER_SEC, slot)
+
+    async def rotator() -> None:
+        while not stop_all.is_set():
+            try:
+                await asyncio.wait_for(stop_all.wait(), timeout=SCAN_SEC)
+                break
+            except asyncio.TimeoutError:
+                pass
+            try:
+                bal2 = await ex.balance(force=True)
+                spend2 = ex.deployable_bnb(bal2) if bal2 else spend
+                want2 = max_open_for_balance(spend2)
+                # envanteri olan pair'leri tut
+                keep: Set[str] = set()
+                for sym, (s, _) in list(active.items()):
+                    if s.base_total * max(s.book.mid, 0) >= MIN_QUOTE_FREE * 0.5:
+                        keep.add(sym)
+                    if s.kill:
+                        await stop_slot(sym)
+                tickers2 = await ex.tickers()
+                new_syms, sc, qu = pick_open_pairs(ex, tickers2, want2, keep=keep)
+                if len(new_syms) < 2:
+                    log.warning("rescan zayıf: taranan=%d aday=%d", sc, qu)
+                    continue
+                new_set = set(new_syms)
+                # fazla/kötü slotları kapat (envanterli keep hariç mümkün olduğunca)
+                for sym in list(active.keys()):
+                    if sym not in new_set:
+                        if sym in keep and len(active) <= want2:
+                            continue
+                        log.info("ROTasyon OUT %s", sym)
+                        await stop_slot(sym)
+                n_now = max(1, len(new_set | set(active.keys())))
+                ex.n_pairs = max(len(new_syms), len(active), 1)
+                slot2 = spend2 / ex.n_pairs if ex.n_pairs else slot
+                for i, sym in enumerate(new_syms):
+                    if sym not in active:
+                        log.info("ROTasyon IN %s slot=%.5f", sym, slot2)
+                        await start_slot(sym, i * 0.4, slot2)
+                    else:
+                        active[sym][0].slot_bnb = slot2
+                log.info(
+                    "RESCAN | taranan=%d aday=%d açık=%d slot≈%.5f",
+                    sc,
+                    qu,
+                    len(active),
+                    slot2,
+                )
+            except Exception as e:
+                log.error("rotator: %s", e)
+                if ban_until_ms(e):
+                    await sleep_ban(e)
+
+    rot_task = asyncio.create_task(rotator())
     try:
-        await asyncio.gather(*tasks)
+        while active and not stop_all.is_set():
+            done = [sym for sym, (s, t) in active.items() if t.done() or not s.running]
+            for sym in done:
+                await stop_slot(sym)
+            if not active:
+                break
+            await asyncio.sleep(2.0)
     except asyncio.CancelledError:
         pass
     finally:
-        for s in slots:
-            s.running = False
-            try:
-                await ex.cancel_all(s.symbol)
-            except Exception:
-                pass
+        stop_all.set()
+        rot_task.cancel()
+        try:
+            await rot_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        for sym in list(active.keys()):
+            await stop_slot(sym)
         await ex.close()
         ex.stats.print_summary()
         ex.stats.save()
