@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — BNB · KÂR KİLİTLİ · 20 COİN · CANLI
+Binance Spot Market Maker — BNB · PROF MM · KÂR ÖNCELİKLİ
 
-Tüm Binance spot coinleri tarar (USDT hacim × oynaklık). Emir */BNB.
-FORCE_MIN_OPEN≥15. Hacim YÜKSELEN coinler. Tüm BNB bakiyesi. Maker only.
+Tüm Binance spot tarar → hacmi yükselen */BNB.
+Prof kurallar: fee+edge spread, inventory skew, adverse-selection pause,
+momentum gate, maliyet floor. Maker only (LIMIT_MAKER).
 
 1) API KEY yaz  (BNB + Pay fees with BNB AÇIK)
 2) pip install "ccxt[pro]"
@@ -60,37 +61,45 @@ API_RATE_MS = 450
 ROTATE_COOLDOWN_SEC = 15 * 60
 KEEP_GRACE_SEC = 60.0
 
-# Tabana düşük — asıl filtre "hacim YÜKSELİYOR"
+# Tabana — likit + yükselen; dar/toksik book'a girme
 MIN_USDT_VOL = 25_000.0
 SOFT_USDT_VOL = 8_000.0
 FLOOR_USDT_VOL = 2_000.0
-MAX_BOOK_SPREAD_BPS = 100.0
-QUOTE_MOVE_BPS = 55.0
+MAX_BOOK_SPREAD_BPS = 80.0
+MIN_BOOK_SPREAD_BPS = 12.0      # çok dar book = fee yer, edge yok
+QUOTE_MOVE_BPS = 35.0
 JOIN_TOUCH = False
-MIN_VOL_RISE_PCT = 0.08         # önceki tarama vs şimdi ≥ +%8
-MIN_VOL_RISE_USDT = 5_000.0     # veya en az +5k USDT hacim artışı
+MIN_VOL_RISE_PCT = 0.08
+MIN_VOL_RISE_USDT = 5_000.0
 
-# KÂR KİLİDİ
+# PROF MM — fee + edge + inventory + adverse selection
 MAKER_FEE = 0.00075
-FEE_SAFETY = 1.55
-MIN_EDGE_BPS = 48.0
-MIN_SELL_EDGE_BPS = 42.0
-BASE_SPREAD_TICKS = 3.0
-MAX_HALF_SPREAD_BPS = 85.0
-MAX_INVENTORY_RATIO = 0.98      # slot payının neredeyse tamamı envanter olabilir
-TARGET_INVENTORY_RATIO = 0.35
+FEE_SAFETY = 2.0
+MIN_EDGE_BPS = 65.0             # round-trip fee üstü net edge
+MIN_SELL_EDGE_BPS = 55.0        # maliyet+fee+edge altında SAT yok
+BASE_SPREAD_TICKS = 4.0
+BEHIND_TICKS = 2.0              # best'ten 2 tick geride (daha az toksik fill)
+MAX_HALF_SPREAD_BPS = 120.0
+MAX_INVENTORY_RATIO = 0.45      # pro: envanter riski sınırlı
+TARGET_INVENTORY_RATIO = 0.15
 MIN_QUOTE_FREE = 0.0020
-RESERVE_BNB = 0.0002            # sadece fee tozu
-USE_QUOTE_FRAC = 0.999          # KESİN: serbest BNB'nin tamamı
-MIN_BNB_PER_SLOT = 0.008        # */BNB min notional ≈ bu; altı AL basamaz
+RESERVE_BNB = 0.0002
+USE_QUOTE_FRAC = 0.999
+MIN_BNB_PER_SLOT = 0.008
 POST_ONLY = True
-MAX_DRAWDOWN_RATIO = 0.12
-MAX_ABS_24H_PCT = 18.0
-MIN_24H_PCT = 1.2
+MAX_DRAWDOWN_RATIO = 0.08
+MAX_ABS_24H_PCT = 12.0
+MIN_24H_PCT = 1.0
 MAX_PAIR_HOLD_SEC = 22 * 60
-MAX_BUY_LEAD = 8
-MIN_WR_TO_BUY = 0.25
-MIN_TRADES_FOR_WR = 30          # eski fill'ler WR'yi hemen kilitlemesin
+MAX_BUY_LEAD = 2
+MIN_WR_TO_BUY = 0.45
+MIN_TRADES_FOR_WR = 8
+TOXIC_LOSS_STREAK = 2           # peş peşe zararlı SAT → AL durdur
+TOXIC_PAUSE_SEC = 12 * 60
+MOMENTUM_BUY_BPS = -8.0         # kısa vade mid düşüyorsa AL yok
+POST_FILL_COOLDOWN_SEC = 25.0   # AL fill sonrası yeni AL yok
+VOL_WIDEN_MULT = 2.2
+SKEW_STRENGTH = 0.85
 
 # Skor: yükselen hacim birincil — mutlak hacim cezalı/ikincil
 W_VOL_RISE = 4.5
@@ -944,6 +953,9 @@ class Slot:
     last_ask_sz: float = 0.0
     last_fill_poll: float = 0.0
     last_bal_poll: float = 0.0
+    last_buy_fill_ts: float = 0.0
+    loss_streak: int = 0
+    toxic_until: float = 0.0
     seen: Set[str] = field(default_factory=set)
     last_tid: Optional[str] = None
     kill: bool = False
@@ -987,11 +999,35 @@ class Slot:
             return 0.0
         return max(-1.0, min(1.0, (self.base_total - target) / target))
 
+    def mid_momentum_bps(self, lookback: int = 12) -> float:
+        """Kısa vade mid değişimi (bps). Negatif = düşüş → AL toksik."""
+        if len(self.hist) < max(4, lookback):
+            return 0.0
+        recent = list(self.hist)[-lookback:]
+        a, b = recent[0][1], recent[-1][1]
+        if a <= 0 or b <= 0:
+            return 0.0
+        return (b - a) / a * 10000.0
+
+    def is_toxic(self) -> bool:
+        return time.time() < self.toxic_until
+
     def min_full_spread(self) -> float:
         mid = self.book.mid
         tick = self.ex.tick(self.symbol)
         fee = max(self.ex.maker(self.symbol), MAKER_FEE) * FEE_SAFETY * 2.0
-        return max(mid * fee + mid * (MIN_EDGE_BPS / 10000.0), tick * max(2.0, BASE_SPREAD_TICKS))
+        # Vol genişletmesi — profesyonel MM: risk ↑ → spread ↑
+        vol_extra = min(max(self.vol(), 0.0) * VOL_WIDEN_MULT, MAX_HALF_SPREAD_BPS / 10000.0) * mid
+        edge = mid * (MIN_EDGE_BPS / 10000.0)
+        return max(mid * fee + edge + vol_extra, tick * max(2.0, BASE_SPREAD_TICKS))
+
+    def sell_floor(self) -> float:
+        """Maliyet + round-trip fee + net edge — altında SAT yok."""
+        if self.inv_qty <= 1e-12:
+            return 0.0
+        avg = self.inv_cost / self.inv_qty
+        fee = max(self.ex.maker(self.symbol), MAKER_FEE) * FEE_SAFETY * 2.0
+        return avg * (1.0 + fee + MIN_SELL_EDGE_BPS / 10000.0)
 
     def equity(self) -> float:
         mid = self.book.mid
@@ -1067,6 +1103,7 @@ class Slot:
                 self.inv_cost += amt * px + fee
                 self.inv_qty += amt
                 st.buys += 1
+                self.last_buy_fill_ts = time.time()
                 say_buy(f"{self.symbol} FILL {amt:.6g} @ {px:.8g}")
             else:
                 if self.inv_qty > 1e-12:
@@ -1085,9 +1122,17 @@ class Slot:
                 if pnl >= 0:
                     st.won += pnl
                     st.win_trades += 1
+                    self.loss_streak = 0
                 else:
                     st.lost += -pnl
                     st.loss_trades += 1
+                    self.loss_streak += 1
+                    if self.loss_streak >= TOXIC_LOSS_STREAK:
+                        self.toxic_until = time.time() + TOXIC_PAUSE_SEC
+                        log.warning(
+                            "%s TOXIC pause %ds (loss_streak=%d)",
+                            self.symbol, int(TOXIC_PAUSE_SEC), self.loss_streak,
+                        )
                 st.sells += 1
                 say_sell(f"{self.symbol} FILL {amt:.6g} @ {px:.8g} pnl={pnl:+.6f}")
             st.fees += abs(fee)
@@ -1111,80 +1156,83 @@ class Slot:
         mid = self.book.mid
         if mid <= 0:
             return None
+        nat_bps = 0.0
         if self.book.bid > 0 and self.book.ask > self.book.bid:
-            nat = (self.book.ask - self.book.bid) / mid * 10000.0
-            if nat > MAX_BOOK_SPREAD_BPS * 1.15:
+            nat_bps = (self.book.ask - self.book.bid) / mid * 10000.0
+            # Illikid veya edge yok → quote etme
+            if nat_bps > MAX_BOOK_SPREAD_BPS:
                 return None
+            if nat_bps < MIN_BOOK_SPREAD_BPS and not self.has_inventory():
+                return None  # dar book'ta fee'ye yenilirsin
 
         tick = self.ex.tick(self.symbol)
-        vol_half = min(2.0 * max(self.vol(), 0.0003) * mid * 0.03, mid * (MAX_HALF_SPREAD_BPS / 10000.0))
-        half = max(self.min_full_spread() / 2.0, BASE_SPREAD_TICKS * tick / 2.0, mid * 0.00035, vol_half)
+        half = self.min_full_spread() / 2.0
         half = min(half, mid * (MAX_HALF_SPREAD_BPS / 10000.0))
         ip = self.inv_pos()
-        skew = max(-half * 0.40, min(half * 0.40, -ip * half * 0.55))
+        # Inventory skew (pro MM): fazla base → bid↓ ask↓ (satmaya zorla)
+        skew = max(-half * 0.55, min(half * 0.55, -ip * half * SKEW_STRENGTH))
         bid = mid - half + skew
         ask = mid + half + skew
         if ask - bid < self.min_full_spread():
             half = self.min_full_spread() / 2.0
-            bid, ask = mid - half + skew * 0.35, mid + half + skew * 0.35
+            bid, ask = mid - half + skew * 0.4, mid + half + skew * 0.4
         bid = self.ex.px(self.symbol, bid)
         ask = self.ex.px(self.symbol, ask)
 
-        # Maker kal — best'e yapışma
-        if self.book.bid > 0 and bid >= self.book.bid:
-            bid = self.ex.px(self.symbol, self.book.bid - tick)
-        if self.book.ask > 0 and ask <= self.book.ask:
-            ask = self.ex.px(self.symbol, self.book.ask + tick)
+        # Best'e yapışma — BEHIND_TICKS geride (adverse selection ↓)
+        behind = max(1.0, BEHIND_TICKS) * tick
+        if self.book.bid > 0 and bid >= self.book.bid - behind + tick * 0.5:
+            bid = self.ex.px(self.symbol, self.book.bid - behind)
+        if self.book.ask > 0 and ask <= self.book.ask + behind - tick * 0.5:
+            ask = self.ex.px(self.symbol, self.book.ask + behind)
 
         min_qty, min_cost = self.ex.limits(self.symbol)
         sell_base = max(self.base_free, 0.0)
-        if ask <= bid or ask - bid < self.min_full_spread():
-            if sell_base * mid < min_cost * 0.95:
+        floor = self.sell_floor()
+        if floor > 0:
+            ask = self.ex.px(self.symbol, max(ask, floor))
+            if self.book.ask > 0 and ask <= self.book.ask:
+                ask = self.ex.px(self.symbol, max(floor, self.book.ask + behind))
+
+        if ask <= bid or ask - bid < self.min_full_spread() * 0.95:
+            if sell_base * mid < min_cost * 0.95 and floor <= 0:
                 return None
-            ask = self.ex.px(self.symbol, max(ask, (self.book.ask + tick) if self.book.ask else mid * 1.001))
+            ask = self.ex.px(self.symbol, max(ask, floor, (self.book.ask + behind) if self.book.ask else mid * 1.002))
             bid = self.ex.px(self.symbol, ask - self.min_full_spread())
             if bid >= ask:
                 return None
 
-        # Her slot SADECE kendi slot_bnb bütçesini kullanır (diğerleriyle yarışmaz)
+        # Slot bütçesi — envanter tavanı düşük (pro)
         alloc = max(self.slot_bnb, MIN_QUOTE_FREE)
         inv_bnb = self.base_total * mid
-        buy_budget = max(0.0, alloc - inv_bnb)
-        # Gerçek serbest BNB (başka slotların rezervi düşülmüş)
+        buy_budget = max(0.0, alloc * MAX_INVENTORY_RATIO - inv_bnb)
         free_left = self.ex.free_quote_for(self.symbol)
-        buy_budget = min(buy_budget, free_left)
-        if buy_budget < min_cost or inv_bnb >= alloc * MAX_INVENTORY_RATIO:
-            buy_budget = 0.0
-        # Boş/az dolu slotlara her zaman AL izni (sermaye 15'e dağılsın)
-        underfilled = inv_bnb < alloc * 0.40
-        if not self.ex.stats.allow_buys() and not underfilled:
+        buy_budget = min(buy_budget, free_left, max(0.0, alloc - inv_bnb))
+        if buy_budget < min_cost:
             buy_budget = 0.0
 
-        avg_cost = (self.inv_cost / self.inv_qty) if self.inv_qty > 1e-12 else 0.0
-        if avg_cost > 0:
-            floor = avg_cost * (
-                1.0
-                + max(self.ex.maker(self.symbol), MAKER_FEE) * FEE_SAFETY * 2.0
-                + MIN_SELL_EDGE_BPS / 10000.0
-            )
-            if ask < floor:
-                ask = self.ex.px(self.symbol, floor)
-            if self.book.ask > 0 and ask <= self.book.ask:
-                ask = self.ex.px(self.symbol, max(floor, self.book.ask + tick))
-            if ask <= bid:
-                buy_budget = 0.0
-                bid = self.ex.px(self.symbol, max(tick, ask - self.min_full_spread()))
-
-        if ip > 0.65:
+        # PROF kapıları: WR / buy-lead / toxic / momentum / post-fill cooldown
+        now = time.time()
+        mom = self.mid_momentum_bps()
+        if not self.ex.stats.allow_buys():
             buy_budget = 0.0
+        if self.is_toxic():
+            buy_budget = 0.0
+        if mom < MOMENTUM_BUY_BPS:
+            buy_budget = 0.0  # düşen bıçağa AL yok
+        if self.last_buy_fill_ts > 0 and now - self.last_buy_fill_ts < POST_FILL_COOLDOWN_SEC:
+            buy_budget = 0.0  # fill sonrası fiyat aleyhe döner — bekle
+        if inv_bnb >= alloc * MAX_INVENTORY_RATIO or ip > 0.35:
+            buy_budget = 0.0
+        if floor > 0 and ask <= bid:
+            buy_budget = 0.0
+            bid = self.ex.px(self.symbol, max(tick, ask - self.min_full_spread()))
 
         bid_sz = (buy_budget / bid) if (buy_budget > 0 and bid > 0) else 0.0
         ask_sz = sell_base * 0.995 if sell_base * (ask or mid) >= min_cost else 0.0
-        # Zararlı satışı asla basma: ask hâlâ floor altındaysa satma
-        if avg_cost > 0 and ask > 0:
-            floor = avg_cost * (1.0 + MAKER_FEE * FEE_SAFETY * 2.0 + MIN_SELL_EDGE_BPS / 10000.0)
-            if ask + 1e-15 < floor:
-                ask_sz = 0.0
+        # Floor altında satma
+        if floor > 0 and ask + 1e-15 < floor:
+            ask_sz = 0.0
 
         bid_sz = self.ex.amt(self.symbol, bid_sz)
         ask_sz = self.ex.amt(self.symbol, ask_sz)
@@ -1192,7 +1240,6 @@ class Slot:
             bid_sz = 0.0
         if ask <= 0 or ask_sz * ask < min_cost or ask_sz < min_qty:
             ask_sz = 0.0
-        # rezerv = gerçek resting AL maliyeti
         self.ex.set_buy_reserve(self.symbol, (bid_sz * bid) if bid_sz > 0 and bid > 0 else 0.0)
         if bid_sz <= 0 and ask_sz <= 0:
             return None
@@ -1243,11 +1290,14 @@ class Slot:
         tick = self.ex.tick(self.symbol)
         min_qty, min_cost = self.ex.limits(self.symbol)
         avg = (self.inv_cost / self.inv_qty) if self.inv_qty > 1e-12 else mid
-        floor = (avg or mid or 0) * (1.0 + MAKER_FEE * FEE_SAFETY * 2.0 + MIN_SELL_EDGE_BPS / 10000.0)
+        floor = self.sell_floor() or (
+            (avg or mid or 0) * (1.0 + MAKER_FEE * FEE_SAFETY * 2.0 + MIN_SELL_EDGE_BPS / 10000.0)
+        )
         if self.base_free > 0 and mid > 0:
+            behind = max(1.0, BEHIND_TICKS) * tick
             px = self.ex.px(
                 self.symbol,
-                max(floor, (self.book.ask + tick) if self.book.ask > 0 else mid * 1.002),
+                max(floor, (self.book.ask + behind) if self.book.ask > 0 else mid * 1.002),
             )
             amt = self.ex.amt(self.symbol, self.base_free * 0.995)
             if amt >= min_qty and amt * px >= min_cost and px >= floor:
