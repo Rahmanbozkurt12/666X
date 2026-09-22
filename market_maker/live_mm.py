@@ -34,37 +34,37 @@ BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
 QUOTE = "BNB"
-TOP_N = 20
-MIN_OPEN_COINS = 20             # tüm bakiyeyi 20 coine dağıt (3-5'e takılma)
-SCAN_SEC = 65.0                 # saniye aynı
+SCAN_POOL = 50                  # her turda 50 coin ara (iniş/çıkış/hacim)
+TOP_N = 15                      # en az 15 coine al/sat dağıt
+MIN_OPEN_COINS = 15
+SCAN_SEC = 65.0
 FAST_SEC = 3.0
 BUY_COOLDOWN_SEC = 480.0
 SELL_COOLDOWN_SEC = 25.0
 
 MAKER_FEE = 0.00075
 TAKER_FEE = 0.00075
-FEE_SAFETY = 1.6                # komisyonu geçsin diye sıkı
-MIN_EDGE_BPS = 40.0             # fee üstü net kâr hedefi (önce 8 — yetmiyordu)
-# min SAT ≈ roundtrip_fee*safety + 40bps → fee'ye ezilmesin
+FEE_SAFETY = 1.6
+MIN_EDGE_BPS = 40.0
 
 DIP_BPS = 18.0
-MIN_QUOTE_VOL = 1.0
-CANDIDATE_POOL = 120
+MIN_QUOTE_VOL = 0.5
+CANDIDATE_POOL = 200
 MIN_QUOTE_FREE = 0.003
 RESERVE_BNB = 0.002
 MAX_DRAWDOWN_QUOTE = 0.35
-MAX_SPREAD_BPS = 35.0           # geniş spread = gizli komisyon
-MAX_SPREAD_FORCE_BPS = 55.0     # 180/429 gibi çiftlere girme
+MAX_SPREAD_BPS = 35.0
+MAX_SPREAD_FORCE_BPS = 55.0
 ALLOW_TAKER_TO_FILL = True
 PENDING_MAX_SEC = 12.0
 FORCE_MARKET_UNDER_MIN = True
 DEPLOY_ALL_BNB = True
-SELL_USE_MARKET = False         # SAT'ta maker tercih (fee düşük)
+SELL_USE_MARKET = False
 
 RSI_PERIOD = 14
 RSI_OVERSOLD = 48.0
 RSI_MAX_BUY = 58.0
-RSI_EXIT = 62.0                 # daha geç / daha yüksekte sat
+RSI_EXIT = 62.0
 EMA_FAST = 7
 EMA_SLOW = 21
 MIN_METHODS_PASS = 2
@@ -665,6 +665,7 @@ class Exchange:
 
 
 def score_ticker(t: dict) -> float:
+    """Genel oynaklık skoru: |%| × log(hacim)."""
     try:
         ch = abs(float(t.get("percentage") or 0))
     except Exception:
@@ -675,8 +676,28 @@ def score_ticker(t: dict) -> float:
     return ch * math.log10(qv + 10.0) + (ch ** 1.2) * 0.5
 
 
-def _bnb_spot_rows(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[str, dict, float, float, float]]:
-    """(sym, ticker, qv, last, abs_pct)"""
+def vol_volatility_score(t: dict) -> float:
+    """Hacim oynaklığı: yüksek hacim + geniş high-low aralığı."""
+    qv = float(t.get("quoteVolume") or 0)
+    last = float(t.get("last") or t.get("close") or 0)
+    hi = float(t.get("high") or 0)
+    lo = float(t.get("low") or 0)
+    if qv <= 0 or last <= 0:
+        return 0.0
+    rng = 0.0
+    if hi > 0 and lo > 0 and hi >= lo:
+        rng = (hi - lo) / last * 100.0
+    try:
+        pct = abs(float(t.get("percentage") or 0))
+    except Exception:
+        pct = 0.0
+    return math.log10(qv + 10.0) * (1.0 + rng) * (1.0 + pct * 0.15)
+
+
+def _bnb_spot_rows(
+    ex: Exchange, tickers: Dict[str, dict]
+) -> List[Tuple[str, dict, float, float, float]]:
+    """(sym, ticker, qv, last, signed_pct)"""
     out = []
     for sym, t in tickers.items():
         if not sym.endswith(f"/{QUOTE}") or ":" in sym:
@@ -694,7 +715,7 @@ def _bnb_spot_rows(ex: Exchange, tickers: Dict[str, dict]) -> List[Tuple[str, di
         if last <= 0:
             continue
         try:
-            pct = abs(float(t.get("percentage") or 0))
+            pct = float(t.get("percentage") or 0)
         except Exception:
             pct = 0.0
         out.append((sym, t, qv, last, pct))
@@ -705,63 +726,72 @@ def pick_movers(
     ex: Exchange,
     tickers: Dict[str, dict],
     state: State,
-    n: int = TOP_N,
+    n: int = SCAN_POOL,
 ) -> List[Tuple[str, float, float]]:
     """
-    En az n coin: yarısı hacim lideri + yarısı en hareketli (|%|).
-    Eksik kalırsa skor havuzundan tamamla — logdaki 4'lük listeyi önler.
+    50 arama: yükselen + düşen + hacim oynaklığı + hacim.
     """
     rows = _bnb_spot_rows(ex, tickers)
     if not rows:
         return []
 
+    gainers = sorted(rows, key=lambda r: -r[4])
+    losers = sorted(rows, key=lambda r: r[4])
     by_vol = sorted(rows, key=lambda r: -r[2])
-    by_move = sorted(rows, key=lambda r: (-r[4], -r[2]))
-    recent = set(state.recently_scanned[-30:])
+    by_vol_vol = sorted(rows, key=lambda r: -vol_volatility_score(r[1]))
+    recent = set(state.recently_scanned[-40:])
 
     picked: List[str] = []
     meta: Dict[str, Tuple[float, float]] = {}
+    tags: Dict[str, str] = {}
 
-    half = max(1, n // 2)
-    for sym, _t, qv, last, _p in by_vol[:half]:
-        if sym not in picked:
-            picked.append(sym)
-            meta[sym] = (qv, last)
-    for sym, _t, qv, last, _p in by_move[:half + 5]:
-        if sym not in picked:
-            picked.append(sym)
-            meta[sym] = (qv, last)
-        if len(picked) >= n:
-            break
+    def _add(sym: str, qv: float, last: float, tag: str) -> None:
+        if sym in picked:
+            return
+        picked.append(sym)
+        meta[sym] = (qv, last)
+        tags[sym] = tag
 
-    # skor ile tamamla (rotasyon: recent cezalı ama eleme yok)
+    chunk = max(8, n // 4)
+    for sym, _t, qv, last, _p in gainers[:chunk]:
+        _add(sym, qv, last, "UP")
+    for sym, _t, qv, last, _p in losers[:chunk]:
+        _add(sym, qv, last, "DOWN")
+    for sym, _t, qv, last, _p in by_vol_vol[:chunk]:
+        _add(sym, qv, last, "VOLAT")
+    for sym, _t, qv, last, _p in by_vol[:chunk]:
+        _add(sym, qv, last, "VOL")
+
     scored = sorted(
         (
-            (score_ticker(t) * (0.55 if sym in recent else 1.0), sym, qv, last)
+            (score_ticker(t) * (0.6 if sym in recent else 1.0), sym, qv, last)
             for sym, t, qv, last, _ in rows
         ),
         key=lambda x: -x[0],
     )
     for _sc, sym, qv, last in scored:
-        if sym in picked:
-            continue
-        picked.append(sym)
-        meta[sym] = (qv, last)
         if len(picked) >= n:
             break
+        _add(sym, qv, last, "SCORE")
 
-    # pozisyonlar her zaman listede
     for sym in list(state.positions.keys()) + list(state.pending.keys()):
-        if sym not in picked:
+        if sym not in meta:
             t = tickers.get(sym) or {}
-            picked.append(sym)
-            meta[sym] = (float(t.get("quoteVolume") or 1), float(t.get("last") or 0))
+            _add(sym, float(t.get("quoteVolume") or 1), float(t.get("last") or 0), "POS")
 
     result = [(s, meta[s][0], meta[s][1]) for s in picked[: max(n, len(state.positions))]]
+    up_n = sum(1 for s, _, _ in result if tags.get(s) == "UP")
+    dn_n = sum(1 for s, _, _ in result if tags.get(s) == "DOWN")
+    vv_n = sum(1 for s, _, _ in result if tags.get(s) == "VOLAT")
     log.info(
-        "watchlist aday=%d → seçilen=%d (hacim+hareket)",
-        len(rows),
-        len(result),
+        "50-arama aday=%d → seçilen=%d | UP=%d DOWN=%d VOLAT=%d",
+        len(rows), len(result), up_n, dn_n, vv_n,
+    )
+    print(
+        f"TARAMA{len(result)}: "
+        + ", ".join(f"{s.replace(f'/{QUOTE}', '')}:{tags.get(s, '?')}" for s, _, _ in result[:24])
+        + (" …" if len(result) > 24 else ""),
+        flush=True,
     )
     return result
 
