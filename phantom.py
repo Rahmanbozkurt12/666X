@@ -47,17 +47,22 @@ if _env_helius:
 DRY_RUN = True                      # Canlı için False yap
 RESET_STATE_ON_START = True         # True = eski hayalet pozisyonları sil, temiz başla
 BUY_USD = 0.50                      # her yeni havuza giriş
-SELL_USD = 0.65                     # ~%30 kâr → sat (küçük kâr, sık çık)
-STOP_LOSS_USD = 0.35                # ~%30 zarar → çık
+SELL_USD = 0.70                     # komisyon sonrası küçük kâr (~%40 brüt)
+STOP_LOSS_USD = 0.35
 MAX_OPEN = 5
-MIN_SOL_RESERVE_USD = 0.15          # gas için az SOL yeter (~$0.15)
-SLIPPAGE_BPS = 250
+MIN_SOL_RESERVE_USD = 0.15
+SLIPPAGE_BPS = 150                  # daha sıkı slippage (büyük havuz)
 PRIORITY_FEE = "auto"
+ROUNDTRIP_FEE_USD = 0.08            # ~komisyon+slippage tamponu ($0.50 işlemde)
+MAX_PRICE_IMPACT_PCT = 1.5          # tek başına market hareket ettirme
 
-MIN_LIQ_USD = 400.0
-MAX_LIQ_USD = 300_000.0
-MAX_PAIR_AGE_MIN = 120              # son 2 saat
-MIN_PAIR_AGE_SEC = 15
+# Havuz kalitesi — yalnız dolu Raydium
+MIN_LIQ_USD = 10_000.0              # en az $10k havuz
+MAX_LIQ_USD = 2_000_000.0
+MIN_VOL_H1_USD = 5_000.0            # son 1s hacim (başkaları da alıyor olsun)
+ALLOWED_DEX = {"raydium", "raydium-clmm", "raydium-cp", "raydium-launchlab"}
+MAX_PAIR_AGE_MIN = 24 * 60          # büyük havuz için süre gevşek (1 gün)
+MIN_PAIR_AGE_SEC = 60               # 1 dk otursun
 REQUIRE_JUPITER_SELL_ROUTE = True
 SKIP_IF_MINT_AUTHORITY = False
 SKIP_IF_FREEZE_AUTHORITY = True
@@ -65,8 +70,8 @@ REQUIRE_SOL_QUOTE = True
 
 POLL_SEC = 15.0
 SCAN_SEC = 25.0
-MAX_HOLD_MIN = 60
-RPC_MIN_GAP_SEC = 0.35              # public RPC ban olmasın
+MAX_HOLD_MIN = 90
+RPC_MIN_GAP_SEC = 0.35
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 JUP_BASE = "https://lite-api.jup.ag/swap/v1"
@@ -290,38 +295,45 @@ def send_swap(kp: Keypair, quote: dict) -> str:
 
 
 def discover_new_pools() -> list[dict[str, Any]]:
+    """Yeni + trending Solana havuzları (yüksek liq Raydium için trending şart)."""
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    r = HTTP.get(f"{GT_BASE}/networks/solana/new_pools?page=1", timeout=30)
-    if r.status_code != 200:
-        log(f"new_pools HTTP {r.status_code}")
-        return []
-    for item in (r.json() or {}).get("data") or []:
-        at = item.get("attributes") or {}
-        pool = at.get("address") or ""
-        if not pool or pool in seen:
+    for path in (
+        "/networks/solana/trending_pools?page=1",
+        "/networks/solana/new_pools?page=1",
+    ):
+        r = HTTP.get(f"{GT_BASE}{path}", timeout=30)
+        if r.status_code != 200:
+            log(f"GT {path} HTTP {r.status_code}")
             continue
-        name = (at.get("name") or "").upper()
-        if REQUIRE_SOL_QUOTE and "/ SOL" not in name and not name.endswith("/SOL"):
-            qid = (((item.get("relationships") or {}).get("quote_token") or {}).get("data") or {}).get("id") or ""
-            if SOL_MINT not in qid:
+        for item in (r.json() or {}).get("data") or []:
+            at = item.get("attributes") or {}
+            pool = at.get("address") or ""
+            if not pool or pool in seen:
                 continue
-        base_id = (((item.get("relationships") or {}).get("base_token") or {}).get("data") or {}).get("id") or ""
-        base = base_id.split("solana_", 1)[-1] if "solana_" in base_id else base_id
-        vol = at.get("volume_usd") or {}
-        rows.append(
-            {
-                "pool": pool,
-                "name": at.get("name") or "?",
-                "base_mint": base,
-                "created_at": at.get("pool_created_at"),
-                "vol_m5": float(vol.get("m5") or 0),
-                "reserve_usd": float(at.get("reserve_in_usd") or 0)
-                if at.get("reserve_in_usd") not in (None, "")
-                else 0.0,
-            }
-        )
-        seen.add(pool)
+            name = (at.get("name") or "").upper()
+            if REQUIRE_SOL_QUOTE and "/ SOL" not in name and not name.endswith("/SOL"):
+                qid = (((item.get("relationships") or {}).get("quote_token") or {}).get("data") or {}).get("id") or ""
+                if SOL_MINT not in qid:
+                    continue
+            base_id = (((item.get("relationships") or {}).get("base_token") or {}).get("data") or {}).get("id") or ""
+            base = base_id.split("solana_", 1)[-1] if "solana_" in base_id else base_id
+            vol = at.get("volume_usd") or {}
+            rows.append(
+                {
+                    "pool": pool,
+                    "name": at.get("name") or "?",
+                    "base_mint": base,
+                    "created_at": at.get("pool_created_at"),
+                    "vol_m5": float(vol.get("m5") or 0),
+                    "vol_h1": float(vol.get("h1") or 0),
+                    "reserve_usd": float(at.get("reserve_in_usd") or 0)
+                    if at.get("reserve_in_usd") not in (None, "")
+                    else 0.0,
+                    "source": path,
+                }
+            )
+            seen.add(pool)
     return rows
 
 
@@ -344,18 +356,29 @@ def enrich(row: dict) -> Optional[dict]:
     liq = float(row.get("reserve_usd") or 0)
     price_usd = 0.0
     created_ms = None
+    vol_h1 = float(row.get("vol_h1") or 0)
+    dex = ""
     if ds:
         liq = float(((ds.get("liquidity") or {}).get("usd")) or liq or 0)
         base_mint = (ds.get("baseToken") or {}).get("address") or base_mint
         symbol = (ds.get("baseToken") or {}).get("symbol") or symbol
         price_usd = float(ds.get("priceUsd") or 0)
         created_ms = ds.get("pairCreatedAt")
+        vol_h1 = float(((ds.get("volume") or {}).get("h1")) or vol_h1 or 0)
+        dex = str(ds.get("dexId") or "").lower()
         quote = ((ds.get("quoteToken") or {}).get("address") or "").strip()
         if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
             return None
+        if ALLOWED_DEX and dex not in ALLOWED_DEX:
+            return None
+    else:
+        # DexScreener yoksa Raydium doğrulanamaz → atla
+        return None
     if not base_mint or base_mint == SOL_MINT:
         return None
     if liq < MIN_LIQ_USD or liq > MAX_LIQ_USD:
+        return None
+    if vol_h1 < MIN_VOL_H1_USD:
         return None
 
     age_min = None
@@ -378,6 +401,8 @@ def enrich(row: dict) -> Optional[dict]:
         "base_mint": base_mint,
         "symbol": symbol,
         "liq_usd": liq,
+        "vol_h1": vol_h1,
+        "dex": dex,
         "price_usd": price_usd,
         "age_min": age_min,
     }
@@ -484,17 +509,32 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
         st.seen_pools[pool] = time.time()
         return
 
+    impact = float(buy_q.get("priceImpactPct") or 0)
+    if impact > MAX_PRICE_IMPACT_PCT:
+        log(f"{sym} SKIP impact={impact:.2f}% > {MAX_PRICE_IMPACT_PCT}% (havuz ince / yalnız alıcı)")
+        st.seen_pools[pool] = time.time()
+        return
+
     if REQUIRE_JUPITER_SELL_ROUTE:
         try:
-            jup_quote(mint, SOL_MINT, max(out_raw // 10, 1))
+            # round-trip: AL sonrası hemen satsan komisyon/slippage ne kadar yer
+            sell_full = jup_quote(mint, SOL_MINT, out_raw)
+            back_usd = (int(sell_full["outAmount"]) / 1e9) * sol_usd()
+            if back_usd + 1e-9 < BUY_USD - ROUNDTRIP_FEE_USD:
+                log(
+                    f"{sym} SKIP fee/impact: hemen satsan ≈${back_usd:.2f} "
+                    f"(giriş ${BUY_USD:.2f}, tampon ${ROUNDTRIP_FEE_USD:.2f})"
+                )
+                st.seen_pools[pool] = time.time()
+                return
         except Exception as ex:
             log(f"{sym} SKIP SAT route yok: {ex}")
             st.seen_pools[pool] = time.time()
             return
 
     log(
-        f"AL ${BUY_USD:.2f} → {sym} | pool={pool[:10]}… liq=${e['liq_usd']:.0f} "
-        f"age={e.get('age_min')} hedef_sat=${SELL_USD:.2f}"
+        f"AL ${BUY_USD:.2f} → {sym} | {e.get('dex')} liq=${e['liq_usd']:.0f} "
+        f"vol1h=${e.get('vol_h1', 0):.0f} impact={impact:.2f}% → hedef ${SELL_USD:.2f}"
     )
 
     if DRY_RUN:
@@ -614,6 +654,9 @@ def scan_new(kp: Keypair, st: State) -> None:
 
 def main() -> None:
     kp = load_keypair()
+    if RESET_STATE_ON_START and STATE_PATH.exists():
+        STATE_PATH.unlink()
+        log("eski state silindi (hayalet poz temiz)")
     st = State.load()
     purge_ghosts(kp, st)
     bal = sol_balance(str(kp.pubkey()))
@@ -621,7 +664,9 @@ def main() -> None:
     log("=" * 56)
     log(f"YENİ COİN | ${BUY_USD} AL → ${SELL_USD} SAT (küçük kâr) | DRY_RUN={DRY_RUN}")
     log(f"pubkey={kp.pubkey()} | SOL≈${sol_usd():.2f}")
-    log(f"bakiye={bal:.4f} SOL | 1 işlem için min≈{need:.4f} SOL")
+    log(f"bakiye={bal:.4f} SOL | 1 işlem için min≈{need:.4f} SOL | açık_poz={len(st.positions)}/{MAX_OPEN}")
+    if DRY_RUN:
+        log("UYARI: DRY_RUN=True → gerçek AL/SAT YOK (sadece simülasyon).")
     if bal < need:
         log("UYARI: SOL yetersiz — bu pubkey'e SOL yolla, sonra tekrar aç.")
     if not HELIUS_API_KEY:
