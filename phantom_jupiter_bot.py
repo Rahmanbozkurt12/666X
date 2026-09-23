@@ -86,9 +86,27 @@ HTTP.headers.update({"User-Agent": "phantom-050-bot/2.0", "Accept": "application
 _sol_px_cache = {"ts": 0.0, "px": 0.0}
 _rpc_last_ts = 0.0
 
+# Terminal renkleri (Windows Terminal / VS Code destekler)
+_GREEN = "\033[92m"
+_RED = "\033[91m"
+_YELLOW = "\033[93m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
 
-def log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+def log(msg: str, color: str = "") -> None:
+    if color:
+        print(f"[{time.strftime('%H:%M:%S')}] {color}{msg}{_RESET}", flush=True)
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def log_buy(msg: str) -> None:
+    log(msg, _GREEN + _BOLD)
+
+
+def log_sell(msg: str) -> None:
+    log(msg, _RED + _BOLD)
 
 
 def load_keys_file() -> None:
@@ -532,13 +550,13 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
             st.seen_pools[pool] = time.time()
             return
 
-    log(
-        f"AL ${BUY_USD:.2f} → {sym} | {e.get('dex')} liq=${e['liq_usd']:.0f} "
+    log_buy(
+        f"🟢 AL ${BUY_USD:.2f} → {sym} | {e.get('dex')} liq=${e['liq_usd']:.0f} "
         f"vol1h=${e.get('vol_h1', 0):.0f} impact={impact:.2f}% → hedef ${SELL_USD:.2f}"
     )
 
     if DRY_RUN:
-        log(f"{sym} DRY_RUN AL (gönderilmedi)")
+        log_buy(f"🟢 {sym} DRY_RUN AL (gönderilmedi)")
         st.positions[mint] = Position(
             mint=mint, pool=pool, symbol=sym, cost_usd=BUY_USD, entry_ts=time.time(), paper_raw=out_raw
         )
@@ -547,7 +565,7 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
         return
 
     sig = send_swap(kp, buy_q)
-    log(f"{sym} AL OK https://solscan.io/tx/{sig}")
+    log_buy(f"🟢 {sym} AL OK https://solscan.io/tx/{sig}")
     time.sleep(2.0)
     raw = token_raw_balance(pub, mint)
     st.positions[mint] = Position(
@@ -566,18 +584,18 @@ def try_sell(kp: Keypair, st: State, pos: Position, reason: str, value_usd: floa
     try:
         q = jup_quote(pos.mint, SOL_MINT, raw)
     except Exception as e:
-        log(f"{pos.symbol} SAT quote fail: {e}")
+        log(f"{pos.symbol} SAT quote fail: {e}", _YELLOW)
         return
     out_sol = int(q["outAmount"]) / 1e9
-    log(f"SAT {pos.symbol} ({reason}) değer≈${value_usd:.2f} → {out_sol:.5f} SOL")
+    log_sell(f"🔴 SAT {pos.symbol} ({reason}) değer≈${value_usd:.2f} → {out_sol:.5f} SOL")
     if DRY_RUN:
-        log(f"{pos.symbol} DRY_RUN SAT")
+        log_sell(f"🔴 {pos.symbol} DRY_RUN SAT")
         st.positions.pop(pos.mint, None)
         st.cooldown[pos.mint] = time.time() + 10 * 60
         st.save()
         return
     sig = send_swap(kp, q)
-    log(f"{pos.symbol} SAT OK https://solscan.io/tx/{sig}")
+    log_sell(f"🔴 {pos.symbol} SAT OK https://solscan.io/tx/{sig}")
     st.positions.pop(pos.mint, None)
     st.cooldown[pos.mint] = time.time() + 10 * 60
     st.save()
@@ -634,7 +652,7 @@ def purge_ghosts(kp: Keypair, st: State) -> None:
 
 def scan_new(kp: Keypair, st: State) -> None:
     raw = discover_new_pools()
-    log(f"yeni coin tarama={len(raw)} | SOL=${sol_usd():.2f} | ${BUY_USD}→${SELL_USD}")
+    log(f"tarama={len(raw)} | min_liq=${MIN_LIQ_USD:.0f} raydium | SOL=${sol_usd():.2f} | ${BUY_USD}→${SELL_USD}")
     cut = time.time() - 6 * 3600
     st.seen_pools = {k: v for k, v in st.seen_pools.items() if v >= cut}
 
@@ -645,7 +663,10 @@ def scan_new(kp: Keypair, st: State) -> None:
         if not e:
             st.seen_pools[row["pool"]] = time.time()
             continue
-        log(f"aday {e['symbol']} liq=${e['liq_usd']:.0f} age={e.get('age_min')} pool={e['pool'][:10]}…")
+        log(
+            f"aday {e['symbol']} {e.get('dex')} liq=${e['liq_usd']:.0f} "
+            f"vol1h=${e.get('vol_h1', 0):.0f} age={e.get('age_min')}"
+        )
         try_buy(kp, st, e)
         if len(st.positions) >= MAX_OPEN:
             break
