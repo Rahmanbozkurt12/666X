@@ -56,13 +56,22 @@ PRIORITY_FEE = "auto"
 ROUNDTRIP_FEE_USD = 0.08            # ~komisyon+slippage tamponu ($0.50 işlemde)
 MAX_PRICE_IMPACT_PCT = 1.5          # tek başına market hareket ettirme
 
-# Havuz kalitesi — yalnız dolu Raydium
+# Havuz kalitesi — yüksek likidite (yalnız alıcı olma)
 MIN_LIQ_USD = 10_000.0              # en az $10k havuz
-MAX_LIQ_USD = 2_000_000.0
-MIN_VOL_H1_USD = 5_000.0            # son 1s hacim (başkaları da alıyor olsun)
-ALLOWED_DEX = {"raydium", "raydium-clmm", "raydium-cp", "raydium-launchlab"}
-MAX_PAIR_AGE_MIN = 24 * 60          # büyük havuz için süre gevşek (1 gün)
-MIN_PAIR_AGE_SEC = 60               # 1 dk otursun
+MAX_LIQ_USD = 5_000_000.0
+MIN_VOL_H1_USD = 3_000.0            # başkaları da işlem yapsın
+# Raydium + likit alternatifler (çoğu yeni coin pumpswap/meteora)
+ALLOWED_DEX = {
+    "raydium",
+    "raydium-clmm",
+    "raydium-cp",
+    "raydium-launchlab",
+    "pumpswap",
+    "meteora",
+    "orca",
+}
+MAX_PAIR_AGE_MIN = 7 * 24 * 60      # 7 gün
+MIN_PAIR_AGE_SEC = 45
 REQUIRE_JUPITER_SELL_ROUTE = True
 SKIP_IF_MINT_AUTHORITY = False
 SKIP_IF_FREEZE_AUTHORITY = True
@@ -364,43 +373,73 @@ def discover_new_pools() -> list[dict[str, Any]]:
                 path,
             )
 
-    # DexScreener: son boost'lanan Solana token'ların pair'leri
+    # DexScreener boost + kısa arama (likit SOL çiftleri)
     try:
         br = HTTP.get("https://api.dexscreener.com/token-boosts/latest/v1", timeout=25)
+        tokens: list[str] = []
         if br.status_code == 200:
             for item in br.json() or []:
                 if str(item.get("chainId") or "").lower() != "solana":
                     continue
                 mint = item.get("tokenAddress") or ""
-                if not mint:
+                if mint:
+                    tokens.append(mint)
+        # arama ile ekstra aday
+        for q in ("pump", "bonk", "meme"):
+            sr = HTTP.get(f"{DS_BASE}/search", params={"q": q}, timeout=25)
+            if sr.status_code != 200:
+                continue
+            for p in (sr.json() or {}).get("pairs") or []:
+                if p.get("chainId") != "solana":
                     continue
-                pr = HTTP.get(f"{DS_BASE}/tokens/{mint}", timeout=20)
-                if pr.status_code != 200:
+                dex = str(p.get("dexId") or "").lower()
+                if dex not in ALLOWED_DEX:
                     continue
-                for p in (pr.json() or {}).get("pairs") or []:
-                    if p.get("chainId") != "solana":
-                        continue
-                    dex = str(p.get("dexId") or "").lower()
-                    if dex not in ALLOWED_DEX:
-                        continue
-                    quote = ((p.get("quoteToken") or {}).get("address") or "").strip()
-                    if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
-                        continue
-                    liq = float(((p.get("liquidity") or {}).get("usd")) or 0)
-                    if liq < MIN_LIQ_USD:
-                        continue
-                    add_row(
-                        p.get("pairAddress") or "",
-                        (p.get("baseToken") or {}).get("symbol") or "?",
-                        (p.get("baseToken") or {}).get("address") or mint,
-                        p.get("pairCreatedAt"),
-                        float(((p.get("volume") or {}).get("m5")) or 0),
-                        float(((p.get("volume") or {}).get("h1")) or 0),
-                        liq,
-                        "dexscreener-boost",
-                    )
+                quote = ((p.get("quoteToken") or {}).get("address") or "").strip()
+                if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
+                    continue
+                liq = float(((p.get("liquidity") or {}).get("usd")) or 0)
+                if liq < MIN_LIQ_USD:
+                    continue
+                add_row(
+                    p.get("pairAddress") or "",
+                    (p.get("baseToken") or {}).get("symbol") or "?",
+                    (p.get("baseToken") or {}).get("address") or "",
+                    p.get("pairCreatedAt"),
+                    float(((p.get("volume") or {}).get("m5")) or 0),
+                    float(((p.get("volume") or {}).get("h1")) or 0),
+                    liq,
+                    f"ds-search:{q}",
+                )
+
+        for mint in tokens[:25]:
+            pr = HTTP.get(f"{DS_BASE}/tokens/{mint}", timeout=20)
+            if pr.status_code != 200:
+                continue
+            for p in (pr.json() or {}).get("pairs") or []:
+                if p.get("chainId") != "solana":
+                    continue
+                dex = str(p.get("dexId") or "").lower()
+                if dex not in ALLOWED_DEX:
+                    continue
+                quote = ((p.get("quoteToken") or {}).get("address") or "").strip()
+                if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
+                    continue
+                liq = float(((p.get("liquidity") or {}).get("usd")) or 0)
+                if liq < MIN_LIQ_USD:
+                    continue
+                add_row(
+                    p.get("pairAddress") or "",
+                    (p.get("baseToken") or {}).get("symbol") or "?",
+                    (p.get("baseToken") or {}).get("address") or mint,
+                    p.get("pairCreatedAt"),
+                    float(((p.get("volume") or {}).get("m5")) or 0),
+                    float(((p.get("volume") or {}).get("h1")) or 0),
+                    liq,
+                    "dexscreener-boost",
+                )
     except Exception as e:
-        log(f"dex boost: {e}")
+        log(f"dex discover: {e}")
 
     return rows
 
@@ -702,7 +741,10 @@ def purge_ghosts(kp: Keypair, st: State) -> None:
 
 def scan_new(kp: Keypair, st: State) -> None:
     raw = discover_new_pools()
-    log(f"tarama={len(raw)} | min_liq=${MIN_LIQ_USD:.0f} raydium | SOL=${sol_usd():.2f} | ${BUY_USD}→${SELL_USD}")
+    log(
+        f"tarama={len(raw)} | min_liq=${MIN_LIQ_USD:.0f} dex={','.join(sorted(ALLOWED_DEX)[:4])}… "
+        f"| SOL=${sol_usd():.2f} | ${BUY_USD}→${SELL_USD}"
+    )
     cut = time.time() - 6 * 3600
     st.seen_pools = {k: v for k, v in st.seen_pools.items() if v >= cut}
 
