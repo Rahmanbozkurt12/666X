@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -53,6 +54,25 @@ GITHUB_URL_RE = re.compile(
 SKIP_BASES = {
     "USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI", "USDP", "USDD", "EUR", "TRY",
     "AEUR", "EURI", "BFUSD", "USD1", "XUSD", "PAXG",
+}
+
+# Mega-cap / her zaman aktif projeler — GitHub gürültüsü trade sinyali değildir
+MEGA_CAP_BASES = {
+    "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "DOT", "LINK", "BCH", "LTC", "SHIB", "SUI", "NEAR", "APT", "PEPE", "WIF",
+}
+
+# ACTIONABLE için zorunlu hard gate'ler
+TRADE_GATES = {
+    "min_repo_confidence": 0.7,
+    "min_accel_7": 2.0,          # 7g commit / prior 7g
+    "min_commits_7": 3,
+    "max_change_pct_24h": 15.0,  # kaçırma — pump peşinde koşma
+    "min_change_pct_24h": -6.0,
+    "min_cvd_ratio": -0.02,      # hafif sell'e izin; agresif sell veto
+    "min_book_imbalance": 0.48,
+    "max_days_since_commit": 10,
+    "min_quote_volume": 1_500_000,
 }
 
 
@@ -667,12 +687,16 @@ class CoinReport:
     github_score: float
     market_score: float
     combined_score: float
+    tier: str  # ACTIONABLE | WATCH | NOISE
+    vetoes: list[str]
     signals: list[str]
+    risk: dict[str, Any]
     market: dict[str, Any]
     github: dict[str, Any]
 
 
 def score_github(act: RepoActivity) -> tuple[float, list[str]]:
+    """Sadece anomali puanlanır. 'Her gün commit var' puan değil, kapı koşuludur."""
     if not act.exists:
         return 0.0, ["no_repo"]
 
@@ -682,65 +706,59 @@ def score_github(act: RepoActivity) -> tuple[float, list[str]]:
     accel7 = act.commit_accel_7_vs_prior or 0.0
     accel90 = act.commit_accel_7_vs_90avg or 0.0
     accel30 = act.commit_accel_30_vs_prior or 0.0
+    w7 = act.windows["7"]
+    w30 = act.windows["30"]
 
-    # Commit velocity spikes
-    if accel7 >= 3 and act.windows["7"].commits >= 3:
+    # --- Asıl alpha: hız anomalisi ---
+    if accel7 >= 4 and w7.commits >= 4:
+        score += 36
+        signals.append(f"commit_spike_7d_x{accel7:.1f}")
+    elif accel7 >= 3 and w7.commits >= 3:
         score += 28
         signals.append(f"commit_spike_7d_x{accel7:.1f}")
-    elif accel7 >= 2 and act.windows["7"].commits >= 2:
+    elif accel7 >= 2 and w7.commits >= 3:
         score += 18
         signals.append(f"commit_up_7d_x{accel7:.1f}")
 
-    if accel90 >= 2.5 and act.windows["7"].commits >= 3:
-        score += 18
+    if accel90 >= 3 and w7.commits >= 3:
+        score += 16
+        signals.append(f"vs_90d_avg_x{accel90:.1f}")
+    elif accel90 >= 2 and w7.commits >= 3:
+        score += 8
         signals.append(f"vs_90d_avg_x{accel90:.1f}")
 
-    if accel30 >= 2 and act.windows["30"].commits >= 8:
-        score += 12
+    if accel30 >= 2.5 and w30.commits >= 8:
+        score += 10
         signals.append(f"commit_spike_30d_x{accel30:.1f}")
 
-    # Recency
-    dsc = act.days_since_commit
-    if dsc is not None:
-        if dsc <= 1:
-            score += 10
-            signals.append("commit_last_24h")
-        elif dsc <= 3:
-            score += 6
-            signals.append("commit_last_3d")
-        elif dsc > 60:
-            score -= 8
-            signals.append("stale_repo")
+    # Release anomali (sessiz repodan ani release)
+    if w7.releases >= 1 and (act.windows["90"].releases <= 2 or accel7 >= 1.5):
+        score += 14
+        signals.append(f"release_7d_{w7.releases}")
+    elif w30.releases >= 3 and act.windows["90"].releases <= w30.releases:
+        score += 6
+        signals.append(f"releases_30d_{w30.releases}")
 
-    # Contributors
-    if (act.contributor_delta_30 or 0) >= 3:
+    # Yeni contributor + hız birlikte anlamlı
+    if (act.contributor_delta_30 or 0) >= 3 and accel7 >= 1.8:
         score += 10
         signals.append(f"new_contributors_+{act.contributor_delta_30}")
-    elif (act.contributor_delta_30 or 0) >= 1 and act.windows["7"].commits >= 2:
-        score += 5
-        signals.append("contributor_growth")
 
-    # Releases
-    if act.windows["7"].releases >= 1:
+    # Büyük diff ancak spike ile
+    if accel7 >= 1.8 and (act.large_change_ratio_7 or 0) >= 0.35 and w7.large_commits >= 2:
         score += 12
-        signals.append(f"release_7d_{act.windows['7'].releases}")
-    elif act.windows["30"].releases >= 2:
-        score += 7
-        signals.append(f"releases_30d_{act.windows['30'].releases}")
-
-    # Large code changes
-    if (act.large_change_ratio_7 or 0) >= 0.35 and act.windows["7"].large_commits >= 2:
-        score += 14
         signals.append("large_code_changes_7d")
-    elif act.windows["7"].additions + act.windows["7"].deletions >= 2000:
-        score += 8
+    elif accel7 >= 1.8 and (w7.additions + w7.deletions) >= 3000:
+        score += 6
         signals.append("heavy_diff_7d")
 
-    # Absolute activity floor
-    if act.windows["7"].commits >= 10:
-        score += 6
-        signals.append("high_abs_commits_7d")
+    # Stale cezası
+    dsc = act.days_since_commit
+    if dsc is not None and dsc > 45:
+        score -= 15
+        signals.append("stale_repo")
 
+    # Mutlak aktivite tek başına puan DEĞİL (BTC/ETH gürültüsü buradan geliyordu)
     return clamp(score), signals
 
 
@@ -752,50 +770,156 @@ def score_market(mkt: dict[str, Any]) -> tuple[float, list[str]]:
     cvd_r = float((mkt.get("cvd") or {}).get("cvd_ratio") or 0)
     imb = float((mkt.get("orderbook") or {}).get("imbalance") or 0.5)
 
-    # Volume rank already filtered by --top; still reward very high volume
-    if vol >= 50_000_000:
-        score += 10
-        signals.append("high_volume")
-    elif vol >= 10_000_000:
-        score += 5
+    if 2_000_000 <= vol < 80_000_000:
+        score += 8
+        signals.append("tradable_liquidity")
+    elif vol >= 80_000_000:
+        score += 3
+        signals.append("very_high_volume")
+    elif vol < 1_000_000:
+        score -= 10
+        signals.append("thin_liquidity")
 
-    # Early pump bias: mild green + buy pressure better than already +30%
-    if 2 <= chg <= 12:
-        score += 12
-        signals.append("early_uptrend")
-    elif 12 < chg <= 25:
+    # Erken trend — uzamış pump'ı ödüllendirme
+    if 0 <= chg <= 8:
+        score += 14
+        signals.append("pre_pump_zone")
+    elif 8 < chg <= 15:
         score += 6
-        signals.append("momentum")
-    elif chg > 40:
-        score -= 5
-        signals.append("extended_pump")
-    elif chg < -8:
+        signals.append("early_uptrend")
+    elif 15 < chg <= 25:
         score -= 4
+        signals.append("late_momentum")
+    elif chg > 25:
+        score -= 18
+        signals.append("extended_pump_no_chase")
+    elif chg < -10:
+        score -= 10
         signals.append("dumping")
 
-    if cvd_r >= 0.15:
-        score += 14
+    if cvd_r >= 0.12:
+        score += 16
         signals.append(f"cvd_buy_{cvd_r:.2f}")
-    elif cvd_r >= 0.05:
-        score += 7
+    elif cvd_r >= 0.04:
+        score += 8
         signals.append(f"cvd_mild_buy_{cvd_r:.2f}")
-    elif cvd_r <= -0.15:
-        score -= 8
+    elif cvd_r <= -0.12:
+        score -= 16
         signals.append(f"cvd_sell_{cvd_r:.2f}")
 
-    if imb >= 0.62:
-        score += 10
+    if imb >= 0.60:
+        score += 12
         signals.append(f"book_bid_{imb:.2f}")
-    elif imb <= 0.38:
-        score -= 6
+    elif imb <= 0.40:
+        score -= 12
         signals.append(f"book_ask_{imb:.2f}")
 
     return clamp(score), signals
 
 
 def combine_scores(gh: float, mkt: float) -> float:
-    # GitHub anomali ağırlığı yüksek — amaç erken geliştirme sinyali
-    return clamp(0.62 * gh + 0.38 * mkt)
+    # Anomali yoksa market tek başına trade açtırmasın
+    if gh < 18:
+        return clamp(0.25 * gh + 0.20 * mkt)
+    return clamp(0.58 * gh + 0.42 * mkt)
+
+
+def classify_tier(
+    *,
+    base: str,
+    repo_confidence: float,
+    gh_score: float,
+    mkt_score: float,
+    combined: float,
+    gh_signals: list[str],
+    market: dict[str, Any],
+    github: dict[str, Any],
+    allow_mega: bool,
+) -> tuple[str, list[str]]:
+    """ACTIONABLE = trade adayı. WATCH = izle. NOISE = işlem yok."""
+    vetoes: list[str] = []
+    g = TRADE_GATES
+    chg = float(market.get("change_pct_24h") or 0)
+    vol = float(market.get("quote_volume_24h") or 0)
+    cvd_r = float((market.get("cvd") or {}).get("cvd_ratio") or 0)
+    imb = float((market.get("orderbook") or {}).get("imbalance") or 0.5)
+    accel7 = float(github.get("commit_accel_7_vs_prior") or 0)
+    commits7 = int(((github.get("windows") or {}).get("7") or {}).get("commits") or 0)
+    dsc = github.get("days_since_commit")
+    has_spike = any(
+        s.startswith("commit_spike_7d") or s.startswith("commit_up_7d") or s.startswith("vs_90d_avg")
+        or s.startswith("release_7d")
+        for s in gh_signals
+    )
+
+    if not allow_mega and base in MEGA_CAP_BASES:
+        vetoes.append("mega_cap_noise")
+    if repo_confidence < g["min_repo_confidence"]:
+        vetoes.append("low_repo_confidence")
+    if not github.get("exists"):
+        vetoes.append("no_repo")
+    if not has_spike or accel7 < g["min_accel_7"] or commits7 < g["min_commits_7"]:
+        # release_7d tek başına spike sayılabilir
+        if not any(s.startswith("release_7d") for s in gh_signals):
+            vetoes.append("no_dev_anomaly")
+        elif commits7 < 1 and accel7 < 1.2:
+            vetoes.append("weak_release_only")
+    if chg > g["max_change_pct_24h"]:
+        vetoes.append("already_pumped")
+    if chg < g["min_change_pct_24h"]:
+        vetoes.append("dumping")
+    if cvd_r < g["min_cvd_ratio"]:
+        vetoes.append("cvd_sell_pressure")
+    if imb < g["min_book_imbalance"]:
+        vetoes.append("ask_heavy_book")
+    if dsc is not None and float(dsc) > g["max_days_since_commit"]:
+        vetoes.append("stale_dev")
+    if vol < g["min_quote_volume"]:
+        vetoes.append("thin_volume")
+    if gh_score < 18:
+        vetoes.append("weak_github_score")
+
+    if not vetoes and combined >= 45 and gh_score >= 22 and mkt_score >= 20:
+        return "ACTIONABLE", vetoes
+    if not vetoes and combined >= 35:
+        return "WATCH", vetoes
+    if has_spike and "mega_cap_noise" not in vetoes and combined >= 30:
+        return "WATCH", vetoes
+    return "NOISE", vetoes
+
+
+def build_risk_hint(http: Http, symbol: str, market: dict[str, Any]) -> dict[str, Any]:
+    """Son 24x1h mumdan basit stop / invalidation önerisi (otomatik emir yok)."""
+    price = float(market.get("price") or 0)
+    data = http.get(
+        f"{BINANCE_BASE}/api/v3/klines",
+        params={"symbol": symbol, "interval": "1h", "limit": 36},
+    )
+    if not isinstance(data, list) or len(data) < 10 or price <= 0:
+        return {
+            "entry_zone": price,
+            "invalidation": None,
+            "risk_pct": None,
+            "note": "klines_unavailable — max risk %1-2 hesabın, chase etme",
+        }
+    lows = [float(k[3]) for k in data]
+    highs = [float(k[2]) for k in data]
+    recent_low = min(lows[-12:])
+    recent_high = max(highs[-12:])
+    invalidation = recent_low * 0.992
+    risk_pct = safe_div(price - invalidation, price) * 100.0
+    if risk_pct <= 0 or risk_pct > 12:
+        invalidation = price * 0.97
+        risk_pct = 3.0
+    return {
+        "entry_zone": round(price, 8),
+        "invalidation": round(invalidation, 8),
+        "risk_pct": round(risk_pct, 2),
+        "range_high_12h": round(recent_high, 8),
+        "range_low_12h": round(recent_low, 8),
+        "position_hint": "risk_per_trade_max_1pct_equity",
+        "note": "Sinyal ≠ emir. Stop yoksa işleme girme.",
+    }
 
 
 def windows_to_dict(windows: dict[str, WindowStats]) -> dict[str, Any]:
@@ -817,16 +941,24 @@ def telegram_send(token: str, chat_id: str, text: str) -> bool:
 
 
 def format_top_telegram(rows: list[CoinReport], limit: int = 8) -> str:
-    lines = ["<b>Binance × GitHub Dev Anomaly</b>"]
-    for i, r in enumerate(rows[:limit], 1):
+    actionable = [r for r in rows if r.tier == "ACTIONABLE"]
+    watch = [r for r in rows if r.tier == "WATCH"]
+    lines = ["<b>Binance × GitHub — TRADE FILTER</b>"]
+    if not actionable:
+        lines.append("ACTIONABLE yok — işlem açma.")
+    for i, r in enumerate(actionable[:limit], 1):
         sig = ", ".join(r.signals[:4]) or "—"
-        repo = r.repo or "—"
+        risk = r.risk or {}
         lines.append(
-            f"{i}. <b>{r.symbol}</b> score={r.combined_score:.0f} "
-            f"(gh={r.github_score:.0f} mkt={r.market_score:.0f})\n"
-            f"   <code>{repo}</code>\n"
+            f"{i}. <b>{r.symbol}</b> [{r.tier}] score={r.combined_score:.0f}\n"
+            f"   gh={r.github_score:.0f} mkt={r.market_score:.0f}\n"
+            f"   stop≈{risk.get('invalidation')} risk≈{risk.get('risk_pct')}%\n"
             f"   {sig}"
         )
+    if watch and not actionable:
+        lines.append("\nWATCH (işlem yok):")
+        for r in watch[:5]:
+            lines.append(f"• {r.symbol} {r.combined_score:.0f} — {', '.join(r.signals[:2])}")
     return "\n".join(lines)
 
 
@@ -840,17 +972,28 @@ def select_tickers(
     *,
     top: int | None,
     symbols: list[str] | None,
+    rank_from: int = 1,
+    rank_to: int | None = None,
+    exclude_mega: bool = True,
 ) -> list[dict[str, Any]]:
+    pool = list(tickers)
+    if exclude_mega:
+        pool = [t for t in pool if t["base"] not in MEGA_CAP_BASES]
+
     if symbols:
         want = {s.upper().replace("/", "") for s in symbols}
         want = {s if s.endswith("USDT") else f"{s}USDT" for s in want}
-        picked = [t for t in tickers if t["symbol"] in want]
+        picked = [t for t in tickers if t["symbol"] in want]  # explicit symbols keep mega if asked
         missing = want - {t["symbol"] for t in picked}
         if missing:
             print(f"[warn] bulunamayan semboller: {sorted(missing)}", file=sys.stderr)
         return picked
-    n = top or 25
-    return tickers[:n]
+
+    start = max(0, (rank_from or 1) - 1)
+    end = rank_to if rank_to is not None else (start + (top or 40))
+    if top and rank_to is None:
+        end = start + top
+    return pool[start:end]
 
 
 def run_scan(args: argparse.Namespace) -> dict[str, Any]:
@@ -862,8 +1005,19 @@ def run_scan(args: argparse.Namespace) -> dict[str, Any]:
 
     http = Http(token)
     tickers = binance_usdt_tickers(http)
-    selected = select_tickers(tickers, top=args.top, symbols=args.symbols)
-    print(f"[scan] Binance USDT={len(tickers)} seçilen={len(selected)}", file=sys.stderr)
+    selected = select_tickers(
+        tickers,
+        top=args.top,
+        symbols=args.symbols,
+        rank_from=args.rank_from,
+        rank_to=args.rank_to,
+        exclude_mega=not args.include_mega,
+    )
+    print(
+        f"[scan] Binance USDT={len(tickers)} seçilen={len(selected)} "
+        f"mode={args.mode} mega={'on' if args.include_mega else 'off'}",
+        file=sys.stderr,
+    )
 
     manual, cache = load_repo_maps()
     cg_index: dict[str, str] = {}
@@ -888,21 +1042,16 @@ def run_scan(args: argparse.Namespace) -> dict[str, Any]:
             refresh=args.refresh_map,
         )
         repo = mapping.get("repo")
+        repo_conf = float(mapping.get("confidence") or 0)
 
-        # market microstructure
         ob = binance_orderbook(http, symbol)
         cvd = binance_cvd(http, symbol)
-        market = {
-            **t,
-            "orderbook": ob,
-            "cvd": cvd,
-        }
+        market = {**t, "orderbook": ob, "cvd": cvd}
         mkt_score, mkt_signals = score_market(market)
 
-        gh_payload: dict[str, Any]
         if not repo:
             gh_score, gh_signals = 0.0, ["repo_unresolved"]
-            gh_payload = {"repo": None, "exists": False}
+            gh_payload: dict[str, Any] = {"repo": None, "exists": False}
         else:
             act = analyze_repo(http, repo, detail_commits=args.detail_commits)
             gh_score, gh_signals = score_github(act)
@@ -927,17 +1076,35 @@ def run_scan(args: argparse.Namespace) -> dict[str, Any]:
 
         combined = combine_scores(gh_score, mkt_score)
         signals = gh_signals + mkt_signals
+        tier, vetoes = classify_tier(
+            base=base,
+            repo_confidence=repo_conf,
+            gh_score=gh_score,
+            mkt_score=mkt_score,
+            combined=combined,
+            gh_signals=gh_signals,
+            market=market,
+            github=gh_payload,
+            allow_mega=bool(args.include_mega),
+        )
+        risk = build_risk_hint(http, symbol, market) if tier in {"ACTIONABLE", "WATCH"} else {
+            "note": "tier_noise — risk hesabı yok",
+        }
+
         reports.append(
             CoinReport(
                 symbol=symbol,
                 base=base,
                 repo=repo,
                 repo_source=str(mapping.get("source") or "none"),
-                repo_confidence=float(mapping.get("confidence") or 0),
+                repo_confidence=repo_conf,
                 github_score=gh_score,
                 market_score=mkt_score,
                 combined_score=combined,
+                tier=tier,
+                vetoes=vetoes,
                 signals=signals,
+                risk=risk,
                 market=market,
                 github=gh_payload,
             )
@@ -945,36 +1112,78 @@ def run_scan(args: argparse.Namespace) -> dict[str, Any]:
         time.sleep(0.2)
 
     save_repo_cache_safe(cache)
-    reports.sort(key=lambda r: r.combined_score, reverse=True)
-    filtered = [r for r in reports if r.combined_score >= args.min_score]
+    reports.sort(key=lambda r: (r.tier != "ACTIONABLE", r.tier != "WATCH", -r.combined_score))
+
+    actionable = [r for r in reports if r.tier == "ACTIONABLE"]
+    watch = [r for r in reports if r.tier == "WATCH"]
+    if args.mode == "trade":
+        display = actionable
+        filtered = actionable
+    elif args.mode == "watch":
+        display = actionable + watch
+        filtered = display
+    else:
+        display = reports
+        filtered = [r for r in reports if r.combined_score >= args.min_score or r.tier != "NOISE"]
 
     payload = {
         "generated_at": iso(now_utc()),
         "binance_base": BINANCE_BASE,
+        "warning": (
+            "Bu araç otomatik alım satım botu DEĞİLDİR. ACTIONABLE dışı sinyallerle işlem "
+            "açmak zarar üretir. Mega-cap GitHub aktivitesi normal gürültüdür."
+        ),
         "params": {
             "top": args.top,
             "symbols": args.symbols,
             "min_score": args.min_score,
             "detail_commits": args.detail_commits,
+            "mode": args.mode,
+            "rank_from": args.rank_from,
+            "rank_to": args.rank_to,
+            "include_mega": args.include_mega,
         },
+        "gates": TRADE_GATES,
         "github_rate_remaining": http.gh_remaining,
         "scanned": len(reports),
+        "actionable": len(actionable),
+        "watch": len(watch),
         "hits": len(filtered),
         "results": [asdict(r) for r in reports],
-        "anomalies": [asdict(r) for r in filtered],
+        "trade_candidates": [asdict(r) for r in actionable],
+        "watchlist": [asdict(r) for r in watch],
     }
     out_path = Path(args.output) if args.output else REPORT_PATH
     save_json(out_path, payload)
 
-    print_console(reports, args.min_score)
-    print(f"\n[report] {out_path} | anomalies>={args.min_score}: {len(filtered)}", file=sys.stderr)
+    print_console(display if args.mode != "research" else reports, args.min_score, args.mode)
+    if args.mode == "trade" and watch and not actionable:
+        print("\n--- WATCH (ALMA, sadece izle) ---")
+        for r in watch[:8]:
+            print(f"  {r.symbol} comb={r.combined_score:.0f} gh={r.github_score:.0f} | {', '.join(r.signals[:3])}")
+    if args.mode == "trade" and not actionable:
+        # En sık veto — kullanıcı neden boş döndüğünü anlasın
+        c = Counter(v for r in reports for v in r.vetoes)
+        if c:
+            print("\n--- En sık veto ---")
+            for k, n in c.most_common(6):
+                print(f"  {k}: {n}")
+    print(
+        f"\n[report] {out_path} | ACTIONABLE={len(actionable)} WATCH={len(watch)} "
+        f"NOISE={len(reports) - len(actionable) - len(watch)}",
+        file=sys.stderr,
+    )
+    if args.mode == "trade" and not actionable:
+        print(
+            "[guard] ACTIONABLE yok — bugün işlem açma. Eski skor tablosunu trade sinyali sanma.",
+            file=sys.stderr,
+        )
 
     if args.telegram:
         tg = env("TELEGRAM_BOT_TOKEN")
         chat = env("TELEGRAM_CHAT_ID")
         if tg and chat:
-            top_rows = filtered[:8] if filtered else reports[:5]
-            telegram_send(tg, chat, format_top_telegram(top_rows))
+            telegram_send(tg, chat, format_top_telegram(reports))
         else:
             print("[warn] TELEGRAM env yok", file=sys.stderr)
 
@@ -985,30 +1194,42 @@ def save_repo_cache_safe(cache: dict[str, Any]) -> None:
     save_json(CACHE_PATH, {"updated_at": iso(now_utc()), "cache": cache})
 
 
-def print_console(reports: list[CoinReport], min_score: float) -> None:
-    print("\n=== Binance × GitHub Dev Anomaly ===")
-    print(f"{'#':<3} {'SYMBOL':<12} {'COMB':>5} {'GH':>5} {'MKT':>5} {'REPO':<32} SIGNALS")
-    for i, r in enumerate(reports[:30], 1):
-        mark = "*" if r.combined_score >= min_score else " "
-        repo = (r.repo or "—")[:32]
-        sig = ", ".join(r.signals[:3])
+def print_console(reports: list[CoinReport], min_score: float, mode: str) -> None:
+    print("\n=== Binance × GitHub (trade-safe filter) ===")
+    print(f"mode={mode} | ACTIONABLE dışında ALIM YOK")
+    print(f"{'#':<3} {'TIER':<11} {'SYMBOL':<12} {'COMB':>5} {'GH':>5} {'MKT':>5} {'REPO':<28} SIGNALS/VETO")
+    for i, r in enumerate(reports[:40], 1):
+        repo = (r.repo or "—")[:28]
+        if r.tier == "NOISE":
+            extra = "veto:" + ",".join(r.vetoes[:3])
+        else:
+            extra = ", ".join(r.signals[:3])
         print(
-            f"{i:<3}{mark}{r.symbol:<11} {r.combined_score:5.1f} {r.github_score:5.1f} "
-            f"{r.market_score:5.1f} {repo:<32} {sig}"
+            f"{i:<3} {r.tier:<11} {r.symbol:<12} {r.combined_score:5.1f} {r.github_score:5.1f} "
+            f"{r.market_score:5.1f} {repo:<28} {extra}"
         )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Binance USDT × GitHub dev anomaly scanner")
-    p.add_argument("--top", type=int, default=20, help="Hacme göre ilk N USDT çifti (default 20)")
-    p.add_argument("--symbols", type=str, default=None, help="Virgüllü liste: BTC,ETH,SOL")
-    p.add_argument("--min-score", type=float, default=45.0, help="Anomali eşiği")
-    p.add_argument("--detail-commits", type=int, default=20, help="Büyük diff için incelenen commit sayısı")
+    p = argparse.ArgumentParser(description="Binance USDT × GitHub dev anomaly scanner (trade-safe)")
+    p.add_argument("--top", type=int, default=40, help="Hacim sırasından N coin (mega hariç default)")
+    p.add_argument("--rank-from", type=int, default=1, help="Hacim sırası başlangıç (1=en yüksek, mega hariç)")
+    p.add_argument("--rank-to", type=int, default=None, help="Hacim sırası bitiş")
+    p.add_argument("--symbols", type=str, default=None, help="Virgüllü liste: SEI,TIA,INJ")
+    p.add_argument("--min-score", type=float, default=45.0, help="Research modunda skor eşiği")
+    p.add_argument("--detail-commits", type=int, default=12, help="Büyük diff için incelenen commit")
+    p.add_argument(
+        "--mode",
+        choices=["trade", "watch", "research"],
+        default="trade",
+        help="trade=sadece ACTIONABLE | watch=ACTIONABLE+WATCH | research=hepsi",
+    )
+    p.add_argument("--include-mega", action="store_true", help="BTC/ETH/SOL vb. mega-cap'leri dahil et")
     p.add_argument("--refresh-map", action="store_true", help="Repo cache yenile")
     p.add_argument("--skip-coingecko", action="store_true", help="Sadece manual/cache/search")
     p.add_argument("--output", type=str, default=None, help="Rapor JSON yolu")
-    p.add_argument("--telegram", action="store_true", help="Top anomalileri Telegram'a gönder")
-    p.add_argument("--dry-run", action="store_true", help="Alias — Telegram kapalı (varsayılan)")
+    p.add_argument("--telegram", action="store_true", help="Sonuçları Telegram'a gönder")
+    p.add_argument("--dry-run", action="store_true", help="Alias — Telegram kapalı")
     return p
 
 

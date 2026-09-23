@@ -2,15 +2,14 @@
 
 ## 1) Binance USDT × GitHub Dev Anomaly (asıl amaç)
 
-Binance USDT coin → resmi GitHub repo → 7/30/90 aktivite anomalisi → hacim/CVD/order-book birleşik skor.
-
-Detay: [`BINANCE_GITHUB_DEV.md`](BINANCE_GITHUB_DEV.md)
+Trade-safe tier’lı tarayıcı. **Sadece ACTIONABLE** aday düşün; detay [`WHY_LOSS.md`](WHY_LOSS.md).
 
 ```bash
-python3 binance_github_dev_scanner.py --symbols BTC,ETH,SOL
-python3 binance_github_dev_scanner.py --top 30 --min-score 50
+python3 binance_github_dev_scanner.py --mode trade --top 50 --skip-coingecko
+python3 binance_github_dev_scanner.py --mode research --include-mega --symbols BTC,ETH,SOL
 ```
 
+Detay: [`BINANCE_GITHUB_DEV.md`](BINANCE_GITHUB_DEV.md)
 ## 2) GitHub CEX org scanner (exchange repo sinyalleri)
 
 Major CEX GitHub org'larını tarar → listing / new asset sinyali → Telegram.

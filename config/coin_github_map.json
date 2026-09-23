@@ -229,8 +229,8 @@
       "confidence": 0.85
     },
     "INJ": {
-      "repo": "InjectiveLabs/injective-core",
-      "confidence": 0.95
+      "repo": "InjectiveLabs/sdk-go",
+      "confidence": 0.9
     },
     "IO": {
       "repo": "ionet-official/io-token",
