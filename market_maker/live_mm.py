@@ -2,14 +2,17 @@
 """
 Binance Spot Market Maker — SADECE USDT · BAN-SAFE
 
-Sadece */USDT. Az paralel slot + yavaş REST (IP ban önlemi).
-Giriş: -20 dip+yeşil+hacim↑ | yüksek hacim+yükselen | recover.
-Aynı coine 1dk AL yok. Geniş fee+edge.
+IP BAN koruması (sıkı):
+- Aynı anda 1 REST (sıralı)
+- İstek arası ≥0.6s
+- Max 5 coin, book 60s, tarama 5dk
+- SAPI currencies kapalı
+- 5m mum en fazla 8 aday
 
 1) API KEY yaz
 2) pip install "ccxt[pro]"
-3) python live_mm.py
-   Ban yediysen 3 saat bekle; stats silip yavaş profille aç.
+3) Ban bitmeden AÇMA
+4) python live_mm.py
 """
 
 from __future__ import annotations
@@ -43,31 +46,38 @@ BINANCE_API_KEY = "BURAYA_API_KEY"
 BINANCE_API_SECRET = "BURAYA_SECRET_KEY"
 # =============================================================================
 
-QUOTE = "USDT"                  # SADECE USDT
+QUOTE = "USDT"
 SCAN_ALL = True
 FORCE_MIN_OPEN = True
-MAX_OPEN = 8                    # BAN koruması: 15–20 paralel REST = IP ban
-MIN_OPEN = 8
-CANDIDATE_POOL = 80
-SCAN_SEC = 240.0                # 4 dk tarama (daha seyrek)
-REPLACE_SEC = 120.0             # emirleri sık bozma
-BALANCE_CACHE_SEC = 20.0
-FILL_POLL_SEC = 45.0
-BOOK_REST_SEC = 40.0            # book poll seyrek
-WORKER_STAGGER_SEC = 4.0        # slotlar peş peşe açılmasın
-HOLD_QUOTE_MULT = 12.0          # emir book'ta uzun kalsın
-LOOP_SLEEP_SEC = 3.0
+
+# --- BAN-SAFE PROFİL (değiştirme) ---
+MAX_OPEN = 5                    # paralel coin ↓
+MIN_OPEN = 5
+CANDIDATE_POOL = 40
+SCAN_SEC = 300.0                # 5 dk'da bir tarama
+REPLACE_SEC = 150.0
+BALANCE_CACHE_SEC = 30.0
+FILL_POLL_SEC = 60.0
+BOOK_REST_SEC = 60.0            # orderbook en fazla 1/dk/coin
+WORKER_STAGGER_SEC = 6.0
+HOLD_QUOTE_MULT = 15.0
+LOOP_SLEEP_SEC = 4.0
 USE_WS = False
-API_RATE_MS = 900               # ccxt rateLimit
-API_MIN_GAP_SEC = 0.35          # her REST arası min boşluk
-API_MAX_INFLIGHT = 2            # aynı anda max 2 istek
-ROTATE_COOLDOWN_SEC = 8 * 60
-KEEP_GRACE_SEC = 60.0
+SEQUENTIAL_SLOTS = True         # coinler sırayla — ban ana koruma
+SLOT_TURN_GAP_SEC = 1.2         # her coin turu arası
+API_RATE_MS = 1200
+API_MIN_GAP_SEC = 0.60          # her REST arası
+API_MAX_INFLIGHT = 1            # AYNİ ANDA TEK İSTEK
+API_COOLDOWN_SEC = 25.0         # yoğunlukta ek mola
+API_SOFT_LIMIT_PER_MIN = 40     # dakikada max REST; aşınca cooldown
+TICKER_CACHE_SEC = 90.0
+ROTATE_COOLDOWN_SEC = 10 * 60
+KEEP_GRACE_SEC = 90.0
 SAME_COIN_BUY_SEC = 60.0
 KLINE_TF = "5m"
-KLINE_LIMIT = 8
-KLINE_TOP_N = 12                # 80→12: tarama banı önle
-KLINE_SLEEP_SEC = 0.40
+KLINE_LIMIT = 6
+KLINE_TOP_N = 8
+KLINE_SLEEP_SEC = 0.70
 
 MIN_USDT_VOL = 400.0
 SOFT_USDT_VOL = 1_000.0
@@ -75,7 +85,7 @@ FLOOR_USDT_VOL = 400.0
 HIGH_USDT_VOL = 100_000.0
 MAX_BOOK_SPREAD_BPS = 140.0
 MIN_BOOK_SPREAD_BPS = 6.0
-QUOTE_MOVE_BPS = 70.0           # gereksiz iptal ↓
+QUOTE_MOVE_BPS = 80.0
 JOIN_TOUCH = False
 MIN_VOL_RISE_PCT = 0.02
 MIN_VOL_RISE_USDT = 800.0
@@ -93,13 +103,13 @@ BEHIND_TICKS = 2.0
 MAX_HALF_SPREAD_BPS = 150.0
 MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
-MIN_QUOTE_FREE = 8.0
-RESERVE_USDT = 2.0
-USE_QUOTE_FRAC = 0.999
-MIN_USDT_PER_SLOT = 8.0
+MIN_QUOTE_FREE = 10.0
+RESERVE_USDT = 3.0
+USE_QUOTE_FRAC = 0.995
+MIN_USDT_PER_SLOT = 10.0
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
-MAX_PAIR_HOLD_SEC = 20 * 60
+MAX_PAIR_HOLD_SEC = 25 * 60
 MAX_BUY_LEAD = 8
 MIN_WR_TO_BUY = 0.25
 MIN_TRADES_FOR_WR = 20
@@ -111,20 +121,19 @@ VOL_WIDEN_MULT = 2.4
 SKEW_STRENGTH = 0.85
 BUY_GATES_OFF = True
 
-# Tüm giriş metodları (skor ağırlıkları)
-W_VOL_RISE = 5.0                # hacim yükseliyor
+W_VOL_RISE = 5.0
 W_VOL_RISE_PCT = 3.5
 W_VOLUME = 0.60
-W_HIGH_VOL_RISE = 3.0           # yüksek hacim + yükselmeye devam
-W_DIP_REBOUND = 4.5             # -20 dip rebound
-W_GREEN_5M = 4.0                # 5m yeşile dönüş
+W_HIGH_VOL_RISE = 3.0
+W_DIP_REBOUND = 4.5
+W_GREEN_5M = 4.0
 W_VOL_5M = 3.0
-W_VOL_RECOVER = 3.2             # hacim -lerde ama yükselmeye başlamış
+W_VOL_RECOVER = 3.2
 W_VOLATILITY = 0.9
 W_RANGE = 0.60
 W_SPREAD_FIT = 1.20
 W_MOMENTUM = 0.35
-MIN_METHODS_PASS = 0            # metodlar skorlar; elemez — pad ≥15
+MIN_METHODS_PASS = 0
 FALLBACK_METHODS_PASS = 0
 
 SKIP_BASES = {
@@ -161,6 +170,9 @@ _ban_lock: Optional[asyncio.Lock] = None
 _api_sem: Optional[asyncio.Semaphore] = None
 _api_lock: Optional[asyncio.Lock] = None
 _api_last_ts = 0.0
+_api_hits: Deque[float] = deque()
+_ticker_cache: Dict[str, dict] = {}
+_ticker_cache_ts = 0.0
 
 
 def _get_ban_lock() -> asyncio.Lock:
@@ -185,14 +197,25 @@ def _get_api_lock() -> asyncio.Lock:
 
 
 async def api_pace() -> None:
-    """Global REST temposu — paralel worker'lar ban yedirmesin."""
+    """Tek sıra REST + dakika limiti + soft cooldown."""
     global _api_last_ts
     async with _get_api_lock():
         now = time.time()
+        while _api_hits and now - _api_hits[0] > 60.0:
+            _api_hits.popleft()
+        if len(_api_hits) >= API_SOFT_LIMIT_PER_MIN:
+            log.warning(
+                "API soft-limit %d/dk — %.0fs mola (ban koruması)",
+                len(_api_hits), API_COOLDOWN_SEC,
+            )
+            await asyncio.sleep(API_COOLDOWN_SEC)
+            now = time.time()
+            _api_hits.clear()
         wait = API_MIN_GAP_SEC - (now - _api_last_ts)
         if wait > 0:
             await asyncio.sleep(wait)
         _api_last_ts = time.time()
+        _api_hits.append(_api_last_ts)
 
 
 def _c(color: str, text: str) -> str:
@@ -439,11 +462,11 @@ class Exchange:
             self.rest.has["fetchCurrencies"] = False
         except Exception:
             pass
-        # 20 paralel slot → connection pool dolmasın
+        # az bağlantı — pool şişmesin
         try:
             from requests.adapters import HTTPAdapter
 
-            adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50, max_retries=1)
+            adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4, max_retries=1)
             self.rest.session.mount("https://", adapter)
             self.rest.session.mount("http://", adapter)
         except Exception as e:
@@ -455,16 +478,16 @@ class Exchange:
                 self.ws.set_sandbox_mode(False)
             except Exception as e:
                 log.warning("WS yok: %s", e)
-        elif not USE_WS:
-            log.info("WS kapalı — REST (ban riski ↓)")
+        else:
+            log.info("BAN-SAFE | REST sıralı | max_open=%d gap=%.2fs", MAX_OPEN, API_MIN_GAP_SEC)
         self._bal: Optional[dict] = None
         self._bal_ts = 0.0
         self._bal_lock = asyncio.Lock()
         self._order_lock = asyncio.Lock()
         self._fee: Dict[str, float] = {}
-        self._buy_reserved: Dict[str, float] = {}  # symbol -> resting AL in USDT
+        self._buy_reserved: Dict[str, float] = {}
         self.n_pairs = 1
-        self._bnb_usd = 0.0  # sadece "Pay fees with BNB" → USDT çevirisi
+        self._bnb_usd = 0.0
         self.stats = DayStats.load()
         self.stats.unlock_stale_gates()
         self.stopped = False
@@ -527,7 +550,10 @@ class Exchange:
     async def init(self) -> None:
         while True:
             try:
-                await self.run(self.rest.load_markets)
+                await wait_if_banned()
+                await api_pace()
+                # reload=False, currencies yok — sadece public exchangeInfo
+                await self.run(self.rest.load_markets, False)
                 log.info(
                     "CANLI MM | BAN-SAFE markets=%d open=%d gap=%.2fs inflight≤%d book=%ds",
                     len(self.rest.markets),
@@ -538,8 +564,17 @@ class Exchange:
                 )
                 return
             except Exception as e:
-                if ban_until_ms(e):
+                msg = str(e)
+                if ban_until_ms(e) or "418" in msg or "banned" in msg.lower():
                     await sleep_ban(e)
+                    continue
+                if "NetworkError" in type(e).__name__ or "capital/config" in msg or "getall" in msg:
+                    log.error(
+                        "ağ/ban: markets yüklenemedi (%s). 3s sonra tekrar… "
+                        "Hâlâ banlıysan bekle, VPN/IP değiştirme.",
+                        e,
+                    )
+                    await asyncio.sleep(3.0)
                     continue
                 raise
 
@@ -567,13 +602,22 @@ class Exchange:
                 return self._bal
 
     async def tickers(self) -> Dict[str, dict]:
+        global _ticker_cache, _ticker_cache_ts
+        now = time.time()
+        if _ticker_cache and now - _ticker_cache_ts < TICKER_CACHE_SEC:
+            return _ticker_cache
         try:
             data = await self.run(self.rest.fetch_tickers)
-            return data if isinstance(data, dict) else {}
+            if isinstance(data, dict) and data:
+                _ticker_cache = data
+                _ticker_cache_ts = now
+                return data
+            return _ticker_cache or {}
         except Exception as e:
             if ban_until_ms(e):
                 await sleep_ban(e)
-            return {}
+            log.warning("tickers: %s (cache kullanılıyor)", e)
+            return _ticker_cache or {}
 
     async def watch_book(self, symbol: str):
         if not self.ws:
@@ -1534,10 +1578,10 @@ class Slot:
         if not self.needs_replace(bid, ask, bsz, asz):
             return
         await self.ex.cancel_all(self.symbol)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)  # ban: iptal sonrası acele etme
         if bsz > 0 and bid > 0:
             await self.ex.place(self.symbol, "buy", bsz, bid)
-            await asyncio.sleep(0.12)
+            await asyncio.sleep(0.45)
         if asz > 0 and ask > 0:
             await self.ex.place(self.symbol, "sell", asz, ask)
         self.last_quote = time.time()
@@ -1549,7 +1593,6 @@ class Slot:
         self.running = False
         await self.ex.cancel_all(self.symbol)
         await self.bal()
-        # Kill'de zararına market yok — sadece kârlı maker ask
         mid = self.book.mid
         tick = self.ex.tick(self.symbol)
         min_qty, min_cost = self.ex.limits(self.symbol)
@@ -1568,12 +1611,40 @@ class Slot:
                 await self.ex.place(self.symbol, "sell", amt, px)
         log.info("%s durdu eq=%.6f realized=%.6f", self.symbol, self.equity(), self.realized)
 
+    async def tick_once(self) -> bool:
+        """Tek tur (sıralı mod). False = slot bitsin."""
+        if not self.running or self.kill or self.ex.stopped:
+            return False
+        await wait_if_banned()
+        now = time.time()
+        if not getattr(self, "_primed", False):
+            await self.bal()
+            await self.prime_fills()
+            self._primed = True
+        last_book = float(getattr(self, "_last_book", 0.0))
+        if now - last_book >= BOOK_REST_SEC or self.book.mid <= 0:
+            ob = await self.ex.book_rest(self.symbol)
+            self._last_book = now
+            if ob:
+                self.on_book(ob)
+        if self.book.mid <= 0:
+            return True
+        self.seed_inventory()
+        await self.bal()
+        await self.fills()
+        if not self.risk_ok():
+            return False
+        q = self.quotes()
+        if q:
+            await self.sync_orders(*q)
+        return True
+
     async def loop(self) -> None:
         last_rest = 0.0
         last_print = 0.0
         try:
             await self.bal()
-            await self.prime_fills()  # eski fill'leri yok say
+            await self.prime_fills()
             while self.running and not self.kill and not self.ex.stopped:
                 await wait_if_banned()
                 ob = None
@@ -1589,7 +1660,7 @@ class Slot:
                 if ob:
                     self.on_book(ob)
                 if self.book.mid <= 0:
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(LOOP_SLEEP_SEC)
                     continue
                 self.seed_inventory()
                 await self.bal()
@@ -1599,7 +1670,7 @@ class Slot:
                 q = self.quotes()
                 if q:
                     await self.sync_orders(*q)
-                if now - last_print > 90:
+                if now - last_print > 120:
                     last_print = now
                     log.info(
                         "%s mid=%.8g inv=%.4fUSDT eq=%+.5f",
@@ -1723,18 +1794,48 @@ class Engine:
                 continue
             sl = Slot(ex=self.ex, symbol=sym, slot_quote=budget)
             self.slots[sym] = sl
-            self.tasks[sym] = asyncio.create_task(self._boot(sl, i * WORKER_STAGGER_SEC))
+            if not SEQUENTIAL_SLOTS:
+                self.tasks[sym] = asyncio.create_task(self._boot(sl, i * WORKER_STAGGER_SEC))
 
         live = ", ".join(s.replace("/USDT", "") for s in self.slots)
         log.info(
-            "ODAK %d/%d | taranan≈%d havuz=%d | USDT_slot=%d → %s",
+            "ODAK %d/%d | taranan≈%d havuz=%d | USDT_slot=%d seq=%s → %s",
             len(self.slots),
             MAX_OPEN,
             scanned,
             pool_n,
             self.ex.n_pairs,
+            SEQUENTIAL_SLOTS,
             live,
         )
+
+    async def run_sequential_once(self) -> None:
+        """Tüm coinleri TEK TEK gez — paralel REST yok."""
+        if not SEQUENTIAL_SLOTS:
+            return
+        dead: List[str] = []
+        for sym, sl in list(self.slots.items()):
+            if self.ex.stopped:
+                break
+            try:
+                ok = await sl.tick_once()
+                if not ok:
+                    dead.append(sym)
+            except Exception as e:
+                log.error("%s tick: %s", sym, e)
+                if ban_until_ms(e):
+                    await sleep_ban(e)
+            await asyncio.sleep(SLOT_TURN_GAP_SEC)
+        for sym in dead:
+            sl = self.slots.pop(sym, None)
+            if sl:
+                sl.running = False
+                try:
+                    await sl.flatten_and_stop()
+                except Exception:
+                    pass
+                if sl.kill:
+                    self.banned.add(sym)
 
     async def _boot(self, sl: Slot, delay: float) -> None:
         try:
@@ -1754,6 +1855,8 @@ class Engine:
             self.tasks.pop(sl.symbol, None)
 
     async def harvest(self) -> None:
+        if SEQUENTIAL_SLOTS:
+            return
         for s in [s for s, t in self.tasks.items() if t.done()]:
             self.tasks.pop(s, None)
             sl = self.slots.pop(s, None)
@@ -1770,7 +1873,7 @@ class Engine:
             await asyncio.gather(*self.tasks.values(), return_exceptions=True)
         for sl in list(self.slots.values()):
             try:
-                await sl.ex.cancel_all(sl.symbol)
+                await sl.flatten_and_stop()
             except Exception:
                 pass
         self.ex.stats.print_summary()
@@ -1800,17 +1903,29 @@ async def main() -> None:
 
     last_scan = last_stat = 0.0
     try:
+        log.info(
+            "BAN-SAFE AÇILDI | open≤%d | REST gap=%.2fs | inflight=%d | seq=%s | soft≤%d/dk",
+            MAX_OPEN, API_MIN_GAP_SEC, API_MAX_INFLIGHT, SEQUENTIAL_SLOTS, API_SOFT_LIMIT_PER_MIN,
+        )
         while not stop.is_set() and not ex.stopped:
             now = time.time()
             if now - last_scan >= SCAN_SEC or not eng.slots:
                 await eng.refresh_universe()
                 last_scan = now
-            await eng.harvest()
-            if now - last_stat >= 45:
+            if SEQUENTIAL_SLOTS:
+                await eng.run_sequential_once()
+            else:
+                await eng.harvest()
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=LOOP_SLEEP_SEC)
+                except asyncio.TimeoutError:
+                    pass
+                continue
+            if now - last_stat >= 60:
                 ex.stats.print_live()
                 last_stat = now
             try:
-                await asyncio.wait_for(stop.wait(), timeout=3.0)
+                await asyncio.wait_for(stop.wait(), timeout=1.0)
             except asyncio.TimeoutError:
                 pass
     finally:
