@@ -103,17 +103,33 @@ def rpc(method: str, params: list[Any]) -> Any:
 
 
 def load_keypair() -> Keypair:
-    raw = SOLANA_PRIVATE_KEY
+    raw = SOLANA_PRIVATE_KEY.strip().strip('"').strip("'")
     if not raw:
         raise SystemExit(
-            "SOLANA_PRIVATE_KEY yok.\n"
-            "python -c \"from solders.keypair import Keypair; k=Keypair(); "
+            "SOLANA_PRIVATE_KEY boş.\n"
+            "Şunu çalıştır:\n"
+            "  python -c \"from solders.keypair import Keypair; k=Keypair(); "
             "print('ADRES', k.pubkey()); print('KEY', k)\"\n"
-            "ADRES'e SOL yolla, KEY'i dosyaya yapıştır."
+            "Çıkan KEY satırını yapıştır (ADRES değil)."
         )
     if raw.startswith("["):
         return Keypair.from_bytes(bytes(json.loads(raw)))
-    return Keypair.from_base58_string(raw)
+    # Yaygın hata: ADRES (pubkey) yapıştırmak → TooShort
+    if len(raw) < 80:
+        raise SystemExit(
+            f"SOLANA_PRIVATE_KEY çok kısa ({len(raw)} karakter) — bu muhtemelen ADRES.\n"
+            "ADRES ile KEY farklıdır.\n"
+            "  ADRES → Binance'ten SOL yolladığın yer (ör. HNo1Xs...)\n"
+            "  KEY   → python komutunun yazdırdığı uzun satır (genelde 87+ karakter)\n"
+            "Dosyaya KEY'i yaz, ADRES'i değil."
+        )
+    try:
+        return Keypair.from_base58_string(raw)
+    except Exception as e:
+        raise SystemExit(
+            f"Private key okunamadı: {e}\n"
+            "KEY'i baştan kopyala; boşluk/tırnak olmasın. ADRES yapıştırma."
+        ) from e
 
 
 def sol_usd() -> float:
