@@ -18,10 +18,10 @@ Bot **Phantom’a bağlanmaz**. Ayrı cüzdanın private key’i ile Jupiter’d
 Helius / Jupiter API **zorunlu değil** (boş bırak).
 
 ```bash
-pip install requests solders base58
+pip install requests solders
 
 # 1) Bot cüzdanı üret (ADRES + KEY çıkar)
-python3 -c "from solders.keypair import Keypair; import base58; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', base58.b58encode(bytes(k)).decode())"
+python3 -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
 
 # 2) Phantom → Gönder → ADRES'e SOL yolla
 # 3) phantom_jupiter_bot.py içinde: SOLANA_PRIVATE_KEY = "KEY"

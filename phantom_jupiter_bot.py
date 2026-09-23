@@ -37,7 +37,7 @@ from solders.transaction import VersionedTransaction
 # KEY — sadece ADRES yetmez; AL/SAT için PRIVATE KEY şart
 # =============================================================================
 # 1) Bilgisayarda üret:
-#    python3 -c "from solders.keypair import Keypair; import base58; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', base58.b58encode(bytes(k)).decode())"
+#    python3 -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
 # 2) Phantom'dan o ADRES'e SOL gönder
 # 3) Aşağıya KEY'i yapıştır (ADRES değil!)
 SOLANA_PRIVATE_KEY = ""             # buraya private key (base58) — ADRES DEĞİL
@@ -136,14 +136,12 @@ def load_keypair() -> Keypair:
         raise SystemExit(
             "SOLANA_PRIVATE_KEY yok.\n"
             "Yeni key üret → Phantom'dan o ADRES'e SOL gönder:\n"
-            "  python3 -c \"from solders.keypair import Keypair; import base58; "
-            "k=Keypair(); print(k.pubkey()); print(base58.b58encode(bytes(k)).decode())\""
+            "  python3 -c \"from solders.keypair import Keypair; "
+            "k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)\""
         )
     if raw.startswith("["):
         return Keypair.from_bytes(bytes(json.loads(raw)))
-    import base58
-
-    return Keypair.from_bytes(base58.b58decode(raw))
+    return Keypair.from_base58_string(raw)
 
 
 def sol_balance(pubkey: str) -> float:
