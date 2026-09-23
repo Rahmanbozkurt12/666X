@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Yeni havuz botu — her açılan */SOL havuza ~$0.50 gir, ~$1 olunca sat.
+Yeni coin botu — her açılan */SOL havuza $0.50 gir, küçük kârda sat.
 
-  1) phantom_keys.example.json → kopyala → phantom_keys.json
-  2) privateKey + walletPublicKey doldur (apiKey boş kalabilir)
-  3) pip install requests solders
-  4) python phantom.py
+  1) Aynı klasöre phantom_keys.json koy (privateKey + walletPublicKey)
+  2) pip install requests solders
+  3) python phantom.py
+
+Private key'i bu .py dosyasına YAZMA.
 """
 
 from __future__ import annotations
@@ -26,29 +27,64 @@ from solders.message import to_bytes_versioned
 from solders.transaction import VersionedTransaction
 
 # =============================================================================
-# KEY — phantom_keys.json oku (Git'e koyma)
+# KEY — sadece phantom_keys.json (bu dosyaya key yapıştırma)
 # =============================================================================
-# phantom_keys.json örneği:
-# {
-#   "apiKey": "",
-#   "walletPublicKey": "Cztef...",
-#   "privateKey": "uzun_base58_KEY"
-# }
-# apiKey bu botta kullanılmaz (boş bırakılabilir).
-SOLANA_PRIVATE_KEY = ""             # dosya yoksa buraya KEY
+SOLANA_PRIVATE_KEY = ""
 HELIUS_API_KEY = ""
-JUPITER_API_KEY = ""
+EXPECTED_PUBKEY = ""
 KEYS_PATH = Path(__file__).resolve().parent / "phantom_keys.json"
 
-SOLANA_PRIVATE_KEY = (os.environ.get("SOLANA_PRIVATE_KEY") or SOLANA_PRIVATE_KEY).strip()
-HELIUS_API_KEY = (os.environ.get("HELIUS_API_KEY") or HELIUS_API_KEY).strip()
-JUPITER_API_KEY = (os.environ.get("JUPITER_API_KEY") or JUPITER_API_KEY).strip()
-EXPECTED_PUBKEY = ""                # opsiyonel kontrol
+_env_pk = (os.environ.get("SOLANA_PRIVATE_KEY") or "").strip()
+_env_helius = (os.environ.get("HELIUS_API_KEY") or "").strip()
+if _env_pk:
+    SOLANA_PRIVATE_KEY = _env_pk
+if _env_helius:
+    HELIUS_API_KEY = _env_helius
+
+# =============================================================================
+# STRATEJİ — $0.50 AL → küçük kârda SAT (hep küçük kâr)
+# =============================================================================
+DRY_RUN = True                      # Canlı için False yap
+BUY_USD = 0.50                      # her yeni havuza giriş
+SELL_USD = 0.65                     # ~%30 kâr → sat (küçük kâr, sık çık)
+STOP_LOSS_USD = 0.35                # ~%30 zarar → çık
+MAX_OPEN = 10
+MIN_SOL_RESERVE_USD = 1.0
+SLIPPAGE_BPS = 250
+PRIORITY_FEE = "auto"
+
+MIN_LIQ_USD = 400.0
+MAX_LIQ_USD = 300_000.0
+MAX_PAIR_AGE_MIN = 120              # son 2 saat
+MIN_PAIR_AGE_SEC = 15
+REQUIRE_JUPITER_SELL_ROUTE = True
+SKIP_IF_MINT_AUTHORITY = False
+SKIP_IF_FREEZE_AUTHORITY = True
+REQUIRE_SOL_QUOTE = True
+
+POLL_SEC = 10.0
+SCAN_SEC = 15.0
+MAX_HOLD_MIN = 60
+
+SOL_MINT = "So11111111111111111111111111111111111111112"
+JUP_BASE = "https://lite-api.jup.ag/swap/v1"
+GT_BASE = "https://api.geckoterminal.com/api/v2"
+DS_BASE = "https://api.dexscreener.com/latest/dex"
+
+ROOT = Path(__file__).resolve().parent
+STATE_PATH = ROOT / "output" / "phantom_050_state.json"
+HTTP = requests.Session()
+HTTP.headers.update({"User-Agent": "phantom-050-bot/2.0", "Accept": "application/json"})
+
+_sol_px_cache = {"ts": 0.0, "px": 0.0}
+
+
+def log(msg: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def load_keys_file() -> None:
-    """phantom_keys.json → privateKey / apiKey alanlarını yükle."""
-    global SOLANA_PRIVATE_KEY, HELIUS_API_KEY, JUPITER_API_KEY, EXPECTED_PUBKEY
+    global SOLANA_PRIVATE_KEY, HELIUS_API_KEY, EXPECTED_PUBKEY
     if not KEYS_PATH.exists():
         return
     try:
@@ -64,56 +100,7 @@ def load_keys_file() -> None:
     api = (data.get("apiKey") or data.get("api_key") or "").strip()
     if api and not HELIUS_API_KEY and len(api) < 80:
         HELIUS_API_KEY = api
-    print(f"[keys] yüklendi: {KEYS_PATH.name}", flush=True)
-
-
-# =============================================================================
-# STRATEJİ — $0.50 AL → $1.00 SAT
-# =============================================================================
-DRY_RUN = True
-BUY_USD = 0.50                      # her yeni havuza giriş
-SELL_USD = 1.00                     # bu değere gelince sat (≈2x)
-MAX_OPEN = 8                        # aynı anda max pozisyon
-MIN_SOL_RESERVE_USD = 1.0           # gas için ~$1 SOL bırak
-SLIPPAGE_BPS = 200                  # %2
-PRIORITY_FEE = "auto"
-
-# Yeni havuz filtreleri (aşırı çöpü ele)
-MIN_LIQ_USD = 500.0                 # çok boş havuza girme
-MAX_LIQ_USD = 250_000.0
-MAX_PAIR_AGE_MIN = 90               # son 90 dk içinde açılan
-MIN_PAIR_AGE_SEC = 20               # 20sn bekle (anlık rug)
-REQUIRE_JUPITER_SELL_ROUTE = True   # satılamayana girme
-SKIP_IF_MINT_AUTHORITY = False      # pump.fun çoğu mint auth'lu — kapalı
-SKIP_IF_FREEZE_AUTHORITY = True
-REQUIRE_SOL_QUOTE = True
-
-POLL_SEC = 12.0
-SCAN_SEC = 18.0
-STOP_LOSS_USD = 0.22                # ~$0.50 → $0.22 acil çık
-MAX_HOLD_MIN = 120
-
-SOL_MINT = "So11111111111111111111111111111111111111112"
-JUP_BASE = "https://lite-api.jup.ag/swap/v1"
-GT_BASE = "https://api.geckoterminal.com/api/v2"
-DS_BASE = "https://api.dexscreener.com/latest/dex"
-
-ROOT = Path(__file__).resolve().parent
-STATE_PATH = ROOT / "output" / "phantom_050_state.json"
-HTTP = requests.Session()
-HTTP.headers.update({"User-Agent": "phantom-050-bot/1.0", "Accept": "application/json"})
-
-
-def _apply_http_api_key() -> None:
-    if JUPITER_API_KEY:
-        HTTP.headers["x-api-key"] = JUPITER_API_KEY
-
-
-_sol_px_cache = {"ts": 0.0, "px": 0.0}
-
-
-def log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    log(f"keys yüklendi: {KEYS_PATH.name}")
 
 
 def rpc_url() -> str:
@@ -137,38 +124,30 @@ def rpc(method: str, params: list[Any]) -> Any:
 
 def load_keypair() -> Keypair:
     load_keys_file()
-    _apply_http_api_key()
     raw = SOLANA_PRIVATE_KEY.strip().strip('"').strip("'")
     if not raw:
         raise SystemExit(
             "Private key yok.\n"
-            "1) phantom_keys.json oluştur (örnek: phantom_keys.example.json)\n"
-            "2) privateKey alanına uzun KEY'i yaz\n"
-            "veya SOLANA_PRIVATE_KEY = 'KEY' yaz."
+            "Aynı klasöre phantom_keys.json koy:\n"
+            '  {"apiKey":"","walletPublicKey":"ADRES","privateKey":"UZUN_KEY"}\n'
+            "Key'i .py dosyasına yazma."
         )
     if raw.startswith("["):
         kp = Keypair.from_bytes(bytes(json.loads(raw)))
     elif len(raw) < 80:
         raise SystemExit(
-            f"privateKey çok kısa ({len(raw)} karakter) — bu muhtemelen ADRES.\n"
-            "walletPublicKey = ADRES (Solscan / Binance)\n"
-            "privateKey = uzun KEY (87+ karakter)\n"
-            "Dosyaya privateKey yaz."
+            f"privateKey çok kısa ({len(raw)} karakter) — ADRES yapıştırma, KEY yapıştır."
         )
     else:
         try:
             kp = Keypair.from_base58_string(raw)
         except Exception as e:
-            raise SystemExit(
-                f"Private key okunamadı: {e}\n"
-                "KEY'i baştan kopyala; boşluk/tırnak olmasın."
-            ) from e
+            raise SystemExit(f"Private key okunamadı: {e}") from e
     if EXPECTED_PUBKEY and str(kp.pubkey()) != EXPECTED_PUBKEY:
         raise SystemExit(
             f"KEY ile walletPublicKey uyuşmuyor!\n"
             f"  key→ {kp.pubkey()}\n"
-            f"  json→ {EXPECTED_PUBKEY}\n"
-            "Doğru privateKey / walletPublicKey çiftini kullan."
+            f"  json→ {EXPECTED_PUBKEY}"
         )
     return kp
 
@@ -179,8 +158,7 @@ def sol_usd() -> float:
         return _sol_px_cache["px"]
     try:
         r = HTTP.get(f"{DS_BASE}/tokens/{SOL_MINT}", timeout=20)
-        ps = (r.json() or {}).get("pairs") or []
-        for p in ps:
+        for p in (r.json() or {}).get("pairs") or []:
             if p.get("chainId") == "solana" and p.get("priceUsd"):
                 px = float(p["priceUsd"])
                 if px > 0:
@@ -188,15 +166,11 @@ def sol_usd() -> float:
                     return px
     except Exception as e:
         log(f"SOL fiyat: {e}")
-    if _sol_px_cache["px"] > 0:
-        return _sol_px_cache["px"]
-    return 150.0  # fallback
+    return _sol_px_cache["px"] if _sol_px_cache["px"] > 0 else 150.0
 
 
 def usd_to_lamports(usd: float) -> int:
-    px = sol_usd()
-    sol = usd / px
-    return max(1, int(sol * 1e9))
+    return max(1, int((usd / sol_usd()) * 1e9))
 
 
 def sol_balance(pubkey: str) -> float:
@@ -311,7 +285,6 @@ def discover_new_pools() -> list[dict[str, Any]]:
             continue
         name = (at.get("name") or "").upper()
         if REQUIRE_SOL_QUOTE and "/ SOL" not in name and not name.endswith("/SOL"):
-            # quote ilişkisi
             qid = (((item.get("relationships") or {}).get("quote_token") or {}).get("data") or {}).get("id") or ""
             if SOL_MINT not in qid:
                 continue
@@ -405,7 +378,7 @@ class Position:
 @dataclass
 class State:
     positions: dict[str, Position] = field(default_factory=dict)
-    seen_pools: dict[str, float] = field(default_factory=dict)  # pool -> ts
+    seen_pools: dict[str, float] = field(default_factory=dict)
     cooldown: dict[str, float] = field(default_factory=dict)
 
     def save(self) -> None:
@@ -439,7 +412,6 @@ class State:
 
 
 def position_value_usd(owner: str, pos: Position) -> tuple[float, int]:
-    """Token → SOL quote → USD."""
     raw = token_raw_balance(owner, pos.mint)
     if raw <= 0 and DRY_RUN:
         raw = pos.paper_raw
@@ -457,7 +429,6 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
     if mint in st.positions:
         return
     if pool in st.seen_pools and mint not in st.positions:
-        # bu havuza daha önce bakıldı / girildi
         return
     if time.time() < st.cooldown.get(mint, 0):
         return
@@ -505,7 +476,7 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
 
     log(
         f"AL ${BUY_USD:.2f} → {sym} | pool={pool[:10]}… liq=${e['liq_usd']:.0f} "
-        f"age={e.get('age_min')} SOL≈{sol_usd():.2f}"
+        f"age={e.get('age_min')} hedef_sat=${SELL_USD:.2f}"
     )
 
     if DRY_RUN:
@@ -531,7 +502,7 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
 def try_sell(kp: Keypair, st: State, pos: Position, reason: str, value_usd: float, raw: int) -> None:
     if raw <= 0:
         st.positions.pop(pos.mint, None)
-        st.cooldown[pos.mint] = time.time() + 15 * 60
+        st.cooldown[pos.mint] = time.time() + 10 * 60
         st.save()
         return
     try:
@@ -544,13 +515,13 @@ def try_sell(kp: Keypair, st: State, pos: Position, reason: str, value_usd: floa
     if DRY_RUN:
         log(f"{pos.symbol} DRY_RUN SAT")
         st.positions.pop(pos.mint, None)
-        st.cooldown[pos.mint] = time.time() + 15 * 60
+        st.cooldown[pos.mint] = time.time() + 10 * 60
         st.save()
         return
     sig = send_swap(kp, q)
     log(f"{pos.symbol} SAT OK https://solscan.io/tx/{sig}")
     st.positions.pop(pos.mint, None)
-    st.cooldown[pos.mint] = time.time() + 15 * 60
+    st.cooldown[pos.mint] = time.time() + 10 * 60
     st.save()
 
 
@@ -564,12 +535,12 @@ def manage_positions(kp: Keypair, st: State) -> None:
             continue
         held = (time.time() - pos.entry_ts) / 60.0
         log(
-            f"POS {pos.symbol} değer≈${value_usd:.2f} (hedef ${SELL_USD:.2f} / SL ${STOP_LOSS_USD:.2f}) "
+            f"POS {pos.symbol} ≈${value_usd:.2f} (AL ${BUY_USD:.2f} → SAT ${SELL_USD:.2f} / SL ${STOP_LOSS_USD:.2f}) "
             f"hold={held:.1f}m"
         )
         reason = None
         if value_usd >= SELL_USD:
-            reason = f"TP ${value_usd:.2f}>={SELL_USD}"
+            reason = f"KAR ${value_usd:.2f}"
         elif value_usd > 0 and value_usd <= STOP_LOSS_USD:
             reason = f"SL ${value_usd:.2f}"
         elif held >= MAX_HOLD_MIN:
@@ -580,8 +551,7 @@ def manage_positions(kp: Keypair, st: State) -> None:
 
 def scan_new(kp: Keypair, st: State) -> None:
     raw = discover_new_pools()
-    log(f"yeni havuz tarama={len(raw)} | SOL=${sol_usd():.2f} | buy=${BUY_USD} sell=${SELL_USD}")
-    # eski seen temizle
+    log(f"yeni coin tarama={len(raw)} | SOL=${sol_usd():.2f} | ${BUY_USD}→${SELL_USD}")
     cut = time.time() - 6 * 3600
     st.seen_pools = {k: v for k, v in st.seen_pools.items() if v >= cut}
 
@@ -603,7 +573,7 @@ def main() -> None:
     kp = load_keypair()
     st = State.load()
     log("=" * 56)
-    log(f"$0.50 AL → $1.00 SAT | yeni Solana havuzları | DRY_RUN={DRY_RUN}")
+    log(f"YENİ COİN | ${BUY_USD} AL → ${SELL_USD} SAT (küçük kâr) | DRY_RUN={DRY_RUN}")
     log(f"pubkey={kp.pubkey()} | SOL≈${sol_usd():.2f}")
     log("=" * 56)
     last_scan = 0.0
