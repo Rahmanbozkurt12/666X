@@ -34,11 +34,21 @@ from solders.message import to_bytes_versioned
 from solders.transaction import VersionedTransaction
 
 # =============================================================================
-# AYAR
+# KEY — sadece ADRES yetmez; AL/SAT için PRIVATE KEY şart
 # =============================================================================
-SOLANA_PRIVATE_KEY = os.environ.get("SOLANA_PRIVATE_KEY", "").strip()
-HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "").strip()
-JUPITER_API_KEY = os.environ.get("JUPITER_API_KEY", "").strip()
+# 1) Bilgisayarda üret:
+#    python3 -c "from solders.keypair import Keypair; import base58; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', base58.b58encode(bytes(k)).decode())"
+# 2) Phantom'dan o ADRES'e SOL gönder
+# 3) Aşağıya KEY'i yapıştır (ADRES değil!)
+SOLANA_PRIVATE_KEY = ""             # buraya private key (base58) — ADRES DEĞİL
+# Opsiyonel (boş bırakılabilir):
+HELIUS_API_KEY = ""                 # https://helius.dev — boşsa public RPC
+JUPITER_API_KEY = ""                # boş bırak — lite API çalışır
+
+# Env varsa dosyadakinin üstüne yazar
+SOLANA_PRIVATE_KEY = (os.environ.get("SOLANA_PRIVATE_KEY") or SOLANA_PRIVATE_KEY).strip()
+HELIUS_API_KEY = (os.environ.get("HELIUS_API_KEY") or HELIUS_API_KEY).strip()
+JUPITER_API_KEY = (os.environ.get("JUPITER_API_KEY") or JUPITER_API_KEY).strip()
 
 DRY_RUN = True                      # True = zincire gönderme
 POLL_SEC = 20.0

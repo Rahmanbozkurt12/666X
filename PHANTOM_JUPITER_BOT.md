@@ -12,24 +12,24 @@ Bot **Phantom’a bağlanmaz**. Ayrı cüzdanın private key’i ile Jupiter’d
 6. Havuz likiditesi zirveden düşünce **çıkar** (+ SL/TP/süre)  
 7. Round-trip **komisyon tamponu** (~%2.5) hesaba katılır  
 
-## Kurulum (Phantom’dan key çıkmasa da olur)
+## Kurulum
+
+**Sadece cüzdan ADRESİ yetmez.** Adres izler; AL/SAT için **private key** gerekir.  
+Helius / Jupiter API **zorunlu değil** (boş bırak).
 
 ```bash
 pip install requests solders base58
 
-# 1) Bot cüzdanı üret
+# 1) Bot cüzdanı üret (ADRES + KEY çıkar)
 python3 -c "from solders.keypair import Keypair; import base58; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', base58.b58encode(bytes(k)).decode())"
 
 # 2) Phantom → Gönder → ADRES'e SOL yolla
-
-# 3) Çalıştır
-export SOLANA_PRIVATE_KEY='KEY'
-# önerilir:
-export HELIUS_API_KEY='...'
+# 3) phantom_jupiter_bot.py içinde: SOLANA_PRIVATE_KEY = "KEY"
+# 4) Çalıştır
 python phantom_jupiter_bot.py
 ```
 
-Önce `DRY_RUN = True` bırak. Canlı için `False`.
+Önce `DRY_RUN = True`. Canlı: `False`.
 
 ## Ayarlar (dosya içi)
 
