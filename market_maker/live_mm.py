@@ -101,10 +101,10 @@ BEHIND_TICKS = 2.0
 MAX_HALF_SPREAD_BPS = 150.0
 MAX_INVENTORY_RATIO = 0.45
 TARGET_INVENTORY_RATIO = 0.15
-MIN_QUOTE_FREE = 10.0
-RESERVE_USDT = 3.0
-USE_QUOTE_FRAC = 0.995
-MIN_USDT_PER_SLOT = 10.0
+MIN_QUOTE_FREE = 6.5            # ~107 USDT → 15 slot sığsın
+RESERVE_USDT = 2.0
+USE_QUOTE_FRAC = 0.99
+MIN_USDT_PER_SLOT = 6.5         # 107/15≈7; Binance min notional ~5–10
 POST_ONLY = True
 MAX_DRAWDOWN_RATIO = 0.08
 MAX_PAIR_HOLD_SEC = 25 * 60
@@ -1726,21 +1726,27 @@ class Engine:
             elif age >= MAX_PAIR_HOLD_SEC and not sl.has_inventory():
                 force_out.add(sym)
 
-        # Kaç slot gerçekten emir koyabilir? (Binance min notional ≈ MIN_USDT_PER_SLOT)
+        # Kaç slot? 107 USDT → ~15×6.5; min notional ~5 altındaysa düşür
         fundable = max(0, int(spend_usdt / MIN_USDT_PER_SLOT))
+        per15 = spend_usdt / max(1, MIN_OPEN)
         if FORCE_MIN_OPEN:
-            if fundable < MIN_OPEN:
-                log.error(
-                    "USDT≈%.2f → fonlanabilir %d <15 — emir görünsün diye %d slot "
-                    "(≥15 için ≈%.0f USDT lazım)",
-                    spend_usdt, fundable, max(1, fundable), MIN_OPEN * MIN_USDT_PER_SLOT,
+            if per15 >= 5.0:
+                # 15 coin sığar (her biri ≥~5 USDT)
+                want_n = min(MAX_OPEN, MIN_OPEN)
+            elif fundable >= 1:
+                want_n = min(MAX_OPEN, max(fundable, 1))
+                log.warning(
+                    "USDT≈%.2f ile 15 sıkışır (≈%.2f/slot) — %d slot açılıyor",
+                    spend_usdt, per15, want_n,
                 )
-                want_n = max(1, fundable)
             else:
-                want_n = min(MAX_OPEN, max(MIN_OPEN, fundable))
+                want_n = 1
         else:
             want_n = min(MAX_OPEN, max(1, fundable))
-        log.info("bakiye USDT≈%.2f | hedef_slot=%d (fundable=%d)", spend_usdt, want_n, fundable)
+        log.info(
+            "bakiye USDT≈%.2f | hedef_slot=%d (≈%.2f USDT/slot) ban-safe sırayla",
+            spend_usdt, want_n, spend_usdt / max(1, want_n),
+        )
 
         picked, scanned, pool_n = await pick_open_pairs(
             self.ex, tickers, want_n, keep=keep, cooldown=self.cooldown
