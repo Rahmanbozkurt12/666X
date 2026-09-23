@@ -313,9 +313,27 @@ def send_swap(kp: Keypair, quote: dict) -> str:
 
 
 def discover_new_pools() -> list[dict[str, Any]]:
-    """Yeni + trending Solana havuzları (yüksek liq Raydium için trending şart)."""
+    """Trending/new GT + DexScreener boost (Raydium ≥$10k için)."""
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
+
+    def add_row(pool: str, name: str, base: str, created_at: Any, vol_m5: float, vol_h1: float, reserve: float, source: str) -> None:
+        if not pool or pool in seen:
+            return
+        rows.append(
+            {
+                "pool": pool,
+                "name": name or "?",
+                "base_mint": base,
+                "created_at": created_at,
+                "vol_m5": vol_m5,
+                "vol_h1": vol_h1,
+                "reserve_usd": reserve,
+                "source": source,
+            }
+        )
+        seen.add(pool)
+
     for path in (
         "/networks/solana/trending_pools?page=1",
         "/networks/solana/new_pools?page=1",
@@ -327,8 +345,6 @@ def discover_new_pools() -> list[dict[str, Any]]:
         for item in (r.json() or {}).get("data") or []:
             at = item.get("attributes") or {}
             pool = at.get("address") or ""
-            if not pool or pool in seen:
-                continue
             name = (at.get("name") or "").upper()
             if REQUIRE_SOL_QUOTE and "/ SOL" not in name and not name.endswith("/SOL"):
                 qid = (((item.get("relationships") or {}).get("quote_token") or {}).get("data") or {}).get("id") or ""
@@ -337,21 +353,55 @@ def discover_new_pools() -> list[dict[str, Any]]:
             base_id = (((item.get("relationships") or {}).get("base_token") or {}).get("data") or {}).get("id") or ""
             base = base_id.split("solana_", 1)[-1] if "solana_" in base_id else base_id
             vol = at.get("volume_usd") or {}
-            rows.append(
-                {
-                    "pool": pool,
-                    "name": at.get("name") or "?",
-                    "base_mint": base,
-                    "created_at": at.get("pool_created_at"),
-                    "vol_m5": float(vol.get("m5") or 0),
-                    "vol_h1": float(vol.get("h1") or 0),
-                    "reserve_usd": float(at.get("reserve_in_usd") or 0)
-                    if at.get("reserve_in_usd") not in (None, "")
-                    else 0.0,
-                    "source": path,
-                }
+            add_row(
+                pool,
+                at.get("name") or "?",
+                base,
+                at.get("pool_created_at"),
+                float(vol.get("m5") or 0),
+                float(vol.get("h1") or 0),
+                float(at.get("reserve_in_usd") or 0) if at.get("reserve_in_usd") not in (None, "") else 0.0,
+                path,
             )
-            seen.add(pool)
+
+    # DexScreener: son boost'lanan Solana token'ların pair'leri
+    try:
+        br = HTTP.get("https://api.dexscreener.com/token-boosts/latest/v1", timeout=25)
+        if br.status_code == 200:
+            for item in br.json() or []:
+                if str(item.get("chainId") or "").lower() != "solana":
+                    continue
+                mint = item.get("tokenAddress") or ""
+                if not mint:
+                    continue
+                pr = HTTP.get(f"{DS_BASE}/tokens/{mint}", timeout=20)
+                if pr.status_code != 200:
+                    continue
+                for p in (pr.json() or {}).get("pairs") or []:
+                    if p.get("chainId") != "solana":
+                        continue
+                    dex = str(p.get("dexId") or "").lower()
+                    if dex not in ALLOWED_DEX:
+                        continue
+                    quote = ((p.get("quoteToken") or {}).get("address") or "").strip()
+                    if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
+                        continue
+                    liq = float(((p.get("liquidity") or {}).get("usd")) or 0)
+                    if liq < MIN_LIQ_USD:
+                        continue
+                    add_row(
+                        p.get("pairAddress") or "",
+                        (p.get("baseToken") or {}).get("symbol") or "?",
+                        (p.get("baseToken") or {}).get("address") or mint,
+                        p.get("pairCreatedAt"),
+                        float(((p.get("volume") or {}).get("m5")) or 0),
+                        float(((p.get("volume") or {}).get("h1")) or 0),
+                        liq,
+                        "dexscreener-boost",
+                    )
+    except Exception as e:
+        log(f"dex boost: {e}")
+
     return rows
 
 
@@ -364,10 +414,10 @@ def dexscreener_pair(pool: str) -> Optional[dict]:
     return pair if isinstance(pair, dict) else None
 
 
-def enrich(row: dict) -> Optional[dict]:
+def enrich(row: dict) -> tuple[Optional[dict], str]:
+    """(aday, skip_nedeni)."""
     pool = row["pool"]
-    if not account_exists(pool):
-        return None
+    # Public RPC'yi her pool'da yorma — DexScreener yeterli
     ds = dexscreener_pair(pool)
     base_mint = row.get("base_mint") or ""
     symbol = (row.get("name") or "?").split("/")[0].strip()
@@ -376,28 +426,28 @@ def enrich(row: dict) -> Optional[dict]:
     created_ms = None
     vol_h1 = float(row.get("vol_h1") or 0)
     dex = ""
-    if ds:
-        liq = float(((ds.get("liquidity") or {}).get("usd")) or liq or 0)
-        base_mint = (ds.get("baseToken") or {}).get("address") or base_mint
-        symbol = (ds.get("baseToken") or {}).get("symbol") or symbol
-        price_usd = float(ds.get("priceUsd") or 0)
-        created_ms = ds.get("pairCreatedAt")
-        vol_h1 = float(((ds.get("volume") or {}).get("h1")) or vol_h1 or 0)
-        dex = str(ds.get("dexId") or "").lower()
-        quote = ((ds.get("quoteToken") or {}).get("address") or "").strip()
-        if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
-            return None
-        if ALLOWED_DEX and dex not in ALLOWED_DEX:
-            return None
-    else:
-        # DexScreener yoksa Raydium doğrulanamaz → atla
-        return None
+    if not ds:
+        return None, "dexscreener_yok"
+    liq = float(((ds.get("liquidity") or {}).get("usd")) or liq or 0)
+    base_mint = (ds.get("baseToken") or {}).get("address") or base_mint
+    symbol = (ds.get("baseToken") or {}).get("symbol") or symbol
+    price_usd = float(ds.get("priceUsd") or 0)
+    created_ms = ds.get("pairCreatedAt")
+    vol_h1 = float(((ds.get("volume") or {}).get("h1")) or vol_h1 or 0)
+    dex = str(ds.get("dexId") or "").lower()
+    quote = ((ds.get("quoteToken") or {}).get("address") or "").strip()
+    if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
+        return None, "quote_sol_degil"
+    if ALLOWED_DEX and dex not in ALLOWED_DEX:
+        return None, f"dex={dex}"
     if not base_mint or base_mint == SOL_MINT:
-        return None
-    if liq < MIN_LIQ_USD or liq > MAX_LIQ_USD:
-        return None
+        return None, "mint_yok"
+    if liq < MIN_LIQ_USD:
+        return None, f"liq=${liq:.0f}<{MIN_LIQ_USD:.0f}"
+    if liq > MAX_LIQ_USD:
+        return None, "liq_cok_buyuk"
     if vol_h1 < MIN_VOL_H1_USD:
-        return None
+        return None, f"vol1h=${vol_h1:.0f}<{MIN_VOL_H1_USD:.0f}"
 
     age_min = None
     if created_ms:
@@ -410,9 +460,9 @@ def enrich(row: dict) -> Optional[dict]:
             age_min = None
     if age_min is not None:
         if age_min * 60 < MIN_PAIR_AGE_SEC:
-            return None
+            return None, "cok_taze"
         if age_min > MAX_PAIR_AGE_MIN:
-            return None
+            return None, "cok_eski"
 
     return {
         **row,
@@ -423,7 +473,7 @@ def enrich(row: dict) -> Optional[dict]:
         "dex": dex,
         "price_usd": price_usd,
         "age_min": age_min,
-    }
+    }, "ok"
 
 
 @dataclass
@@ -656,13 +706,23 @@ def scan_new(kp: Keypair, st: State) -> None:
     cut = time.time() - 6 * 3600
     st.seen_pools = {k: v for k, v in st.seen_pools.items() if v >= cut}
 
+    skip_counts: dict[str, int] = {}
+    passed = 0
     for row in raw:
-        if row["pool"] in st.seen_pools:
+        pool = row["pool"]
+        if pool in st.seen_pools:
+            # daha önce AL denendi / kalıcı skip
+            skip_counts["zaten_goruldu"] = skip_counts.get("zaten_goruldu", 0) + 1
             continue
-        e = enrich(row)
+        e, why = enrich(row)
         if not e:
-            st.seen_pools[row["pool"]] = time.time()
+            skip_counts[why] = skip_counts.get(why, 0) + 1
+            # liq/vol düşük olanları kalıcı işaretleme — büyüyünce tekrar bak
+            if why.startswith("liq=") or why.startswith("vol1h=") or why in ("cok_taze", "dexscreener_yok"):
+                continue
+            st.seen_pools[pool] = time.time()
             continue
+        passed += 1
         log(
             f"aday {e['symbol']} {e.get('dex')} liq=${e['liq_usd']:.0f} "
             f"vol1h=${e.get('vol_h1', 0):.0f} age={e.get('age_min')}"
@@ -670,10 +730,17 @@ def scan_new(kp: Keypair, st: State) -> None:
         try_buy(kp, st, e)
         if len(st.positions) >= MAX_OPEN:
             break
+    if passed == 0:
+        top = sorted(skip_counts.items(), key=lambda x: -x[1])[:6]
+        tip = ", ".join(f"{k}={v}" for k, v in top) or "-"
+        log(f"aday yok — filtre: {tip}", _YELLOW)
     st.save()
 
 
 def main() -> None:
+    # Windows'ta ANSI renkleri aç
+    if sys.platform == "win32":
+        os.system("")
     kp = load_keypair()
     if RESET_STATE_ON_START and STATE_PATH.exists():
         STATE_PATH.unlink()
