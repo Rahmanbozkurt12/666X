@@ -3,3 +3,4 @@ output/alert_state.json
 output/marscoin_binance_flows.json
 *.pyc
 __pycache__/
+phantom_keys.json

@@ -1,17 +1,31 @@
-# phantom.py — $0.50 AL → $1 SAT (yeni havuz)
+# phantom.py — $0.50 AL → $1 SAT
 
-Her açılan Solana `*/SOL` havuza yaklaşık **$0.50** girer, pozisyon **~$1** olunca satar.
+## Key dosyası (zorunlu)
 
-## Kurulum
+Aynı klasöre `phantom_keys.json` koy:
+
+```json
+{
+  "apiKey": "",
+  "walletPublicKey": "Cztef...adresin",
+  "privateKey": "uzun_private_key"
+}
+```
+
+- `privateKey` → bot bununla imzalar  
+- `walletPublicKey` → kontrol + Solscan  
+- `apiKey` → bu botta gerekmez (boş bırak)
+
+Örnek: `phantom_keys.example.json` → kopyala → `phantom_keys.json` adını ver → doldur.
+
+**Git’e / chat’e privateKey koyma.**
+
+## Çalıştır
 
 ```bash
 pip install requests solders
-python -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
+python phantom.py
 ```
 
-1. `ADRES`'e Binance/Phantom'dan SOL yolla  
-2. `phantom.py` → `SOLANA_PRIVATE_KEY = "KEY"`  
-3. Önce `DRY_RUN = True` → `python phantom.py`  
-4. Canlı: `DRY_RUN = False`
-
-Helius/Jupiter API **gerekmez**.
+Önce `DRY_RUN = True`. Canlı: `False`.
+Adrese SOL yolla (`walletPublicKey`).

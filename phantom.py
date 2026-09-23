@@ -2,11 +2,10 @@
 """
 Yeni havuz botu — her açılan */SOL havuza ~$0.50 gir, ~$1 olunca sat.
 
-Phantom API yok. Private key ile Jupiter swap.
-
-  pip install requests solders
-  # SOLANA_PRIVATE_KEY doldur →
-  python phantom.py
+  1) phantom_keys.example.json → kopyala → phantom_keys.json
+  2) privateKey + walletPublicKey doldur (apiKey boş kalabilir)
+  3) pip install requests solders
+  4) python phantom.py
 """
 
 from __future__ import annotations
@@ -27,16 +26,46 @@ from solders.message import to_bytes_versioned
 from solders.transaction import VersionedTransaction
 
 # =============================================================================
-# KEY
+# KEY — phantom_keys.json oku (Git'e koyma)
 # =============================================================================
-# python -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
-SOLANA_PRIVATE_KEY = ""             # KEY yapıştır (ADRES değil)
-HELIUS_API_KEY = ""                 # opsiyonel
-JUPITER_API_KEY = ""                # opsiyonel
+# phantom_keys.json örneği:
+# {
+#   "apiKey": "",
+#   "walletPublicKey": "Cztef...",
+#   "privateKey": "uzun_base58_KEY"
+# }
+# apiKey bu botta kullanılmaz (boş bırakılabilir).
+SOLANA_PRIVATE_KEY = ""             # dosya yoksa buraya KEY
+HELIUS_API_KEY = ""
+JUPITER_API_KEY = ""
+KEYS_PATH = Path(__file__).resolve().parent / "phantom_keys.json"
 
 SOLANA_PRIVATE_KEY = (os.environ.get("SOLANA_PRIVATE_KEY") or SOLANA_PRIVATE_KEY).strip()
 HELIUS_API_KEY = (os.environ.get("HELIUS_API_KEY") or HELIUS_API_KEY).strip()
 JUPITER_API_KEY = (os.environ.get("JUPITER_API_KEY") or JUPITER_API_KEY).strip()
+EXPECTED_PUBKEY = ""                # opsiyonel kontrol
+
+
+def load_keys_file() -> None:
+    """phantom_keys.json → privateKey / apiKey alanlarını yükle."""
+    global SOLANA_PRIVATE_KEY, HELIUS_API_KEY, JUPITER_API_KEY, EXPECTED_PUBKEY
+    if not KEYS_PATH.exists():
+        return
+    try:
+        data = json.loads(KEYS_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"phantom_keys.json okunamadı: {e}") from e
+    pk = (data.get("privateKey") or data.get("private_key") or data.get("secretKey") or "").strip()
+    if pk:
+        SOLANA_PRIVATE_KEY = pk
+    pub = (data.get("walletPublicKey") or data.get("publicKey") or data.get("address") or "").strip()
+    if pub:
+        EXPECTED_PUBKEY = pub
+    api = (data.get("apiKey") or data.get("api_key") or "").strip()
+    if api and not HELIUS_API_KEY and len(api) < 80:
+        HELIUS_API_KEY = api
+    print(f"[keys] yüklendi: {KEYS_PATH.name}", flush=True)
+
 
 # =============================================================================
 # STRATEJİ — $0.50 AL → $1.00 SAT
@@ -73,8 +102,12 @@ ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / "output" / "phantom_050_state.json"
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "phantom-050-bot/1.0", "Accept": "application/json"})
-if JUPITER_API_KEY:
-    HTTP.headers["x-api-key"] = JUPITER_API_KEY
+
+
+def _apply_http_api_key() -> None:
+    if JUPITER_API_KEY:
+        HTTP.headers["x-api-key"] = JUPITER_API_KEY
+
 
 _sol_px_cache = {"ts": 0.0, "px": 0.0}
 
@@ -103,33 +136,41 @@ def rpc(method: str, params: list[Any]) -> Any:
 
 
 def load_keypair() -> Keypair:
+    load_keys_file()
+    _apply_http_api_key()
     raw = SOLANA_PRIVATE_KEY.strip().strip('"').strip("'")
     if not raw:
         raise SystemExit(
-            "SOLANA_PRIVATE_KEY boş.\n"
-            "Şunu çalıştır:\n"
-            "  python -c \"from solders.keypair import Keypair; k=Keypair(); "
-            "print('ADRES', k.pubkey()); print('KEY', k)\"\n"
-            "Çıkan KEY satırını yapıştır (ADRES değil)."
+            "Private key yok.\n"
+            "1) phantom_keys.json oluştur (örnek: phantom_keys.example.json)\n"
+            "2) privateKey alanına uzun KEY'i yaz\n"
+            "veya SOLANA_PRIVATE_KEY = 'KEY' yaz."
         )
     if raw.startswith("["):
-        return Keypair.from_bytes(bytes(json.loads(raw)))
-    # Yaygın hata: ADRES (pubkey) yapıştırmak → TooShort
-    if len(raw) < 80:
+        kp = Keypair.from_bytes(bytes(json.loads(raw)))
+    elif len(raw) < 80:
         raise SystemExit(
-            f"SOLANA_PRIVATE_KEY çok kısa ({len(raw)} karakter) — bu muhtemelen ADRES.\n"
-            "ADRES ile KEY farklıdır.\n"
-            "  ADRES → Binance'ten SOL yolladığın yer (ör. HNo1Xs...)\n"
-            "  KEY   → python komutunun yazdırdığı uzun satır (genelde 87+ karakter)\n"
-            "Dosyaya KEY'i yaz, ADRES'i değil."
+            f"privateKey çok kısa ({len(raw)} karakter) — bu muhtemelen ADRES.\n"
+            "walletPublicKey = ADRES (Solscan / Binance)\n"
+            "privateKey = uzun KEY (87+ karakter)\n"
+            "Dosyaya privateKey yaz."
         )
-    try:
-        return Keypair.from_base58_string(raw)
-    except Exception as e:
+    else:
+        try:
+            kp = Keypair.from_base58_string(raw)
+        except Exception as e:
+            raise SystemExit(
+                f"Private key okunamadı: {e}\n"
+                "KEY'i baştan kopyala; boşluk/tırnak olmasın."
+            ) from e
+    if EXPECTED_PUBKEY and str(kp.pubkey()) != EXPECTED_PUBKEY:
         raise SystemExit(
-            f"Private key okunamadı: {e}\n"
-            "KEY'i baştan kopyala; boşluk/tırnak olmasın. ADRES yapıştırma."
-        ) from e
+            f"KEY ile walletPublicKey uyuşmuyor!\n"
+            f"  key→ {kp.pubkey()}\n"
+            f"  json→ {EXPECTED_PUBKEY}\n"
+            "Doğru privateKey / walletPublicKey çiftini kullan."
+        )
+    return kp
 
 
 def sol_usd() -> float:
