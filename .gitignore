@@ -1,5 +1,9 @@
 .env
 output/alert_state.json
+output/github_cex_state.json
+output/github_cex_alerts.jsonl
+output/coin_github_map_cache.json
+output/binance_github_dev_report.json
 output/marscoin_binance_flows.json
 *.pyc
 __pycache__/

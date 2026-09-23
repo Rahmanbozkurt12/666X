@@ -1,0 +1,561 @@
+{
+  "manual": {
+    "1000SATS": {
+      "repo": "ordinals/ord",
+      "confidence": 0.6
+    },
+    "1INCH": {
+      "repo": "1inch/1inch-token",
+      "confidence": 0.7
+    },
+    "AAVE": {
+      "repo": "aave/aave-v3-core",
+      "confidence": 0.95
+    },
+    "ACE": {
+      "repo": "FusionistOfficial/ACE",
+      "confidence": 0.4
+    },
+    "ACT": {
+      "repo": "act/act",
+      "confidence": 0.2
+    },
+    "ADA": {
+      "repo": "IntersectMBO/cardano-node",
+      "confidence": 0.95
+    },
+    "AI": {
+      "repo": "sleeplessai/ai",
+      "confidence": 0.3
+    },
+    "ALGO": {
+      "repo": "algorand/go-algorand",
+      "confidence": 1.0
+    },
+    "ALT": {
+      "repo": "altlayer/alt-docs",
+      "confidence": 0.5
+    },
+    "ANKR": {
+      "repo": "Ankr-network/ankr.js",
+      "confidence": 0.6
+    },
+    "APE": {
+      "repo": "ApeCoinDAO/ape-token",
+      "confidence": 0.6
+    },
+    "APT": {
+      "repo": "aptos-labs/aptos-core",
+      "confidence": 1.0
+    },
+    "ARB": {
+      "repo": "OffchainLabs/nitro",
+      "confidence": 0.95
+    },
+    "ARKM": {
+      "repo": "arkhamintelligence/arkham",
+      "confidence": 0.4
+    },
+    "ATOM": {
+      "repo": "cosmos/cosmos-sdk",
+      "confidence": 0.95
+    },
+    "AVAX": {
+      "repo": "ava-labs/avalanchego",
+      "confidence": 1.0
+    },
+    "AXS": {
+      "repo": "axieinfinity/ronin",
+      "confidence": 0.85
+    },
+    "BANANA": {
+      "repo": "BananaGunBot/banana",
+      "confidence": 0.3
+    },
+    "BAT": {
+      "repo": "brave-intl/bat-native-ledger",
+      "confidence": 0.7
+    },
+    "BB": {
+      "repo": "babylonlabs-io/babylon",
+      "confidence": 0.85
+    },
+    "BCH": {
+      "repo": "bitcoin-cash-node/bitcoin-cash-node",
+      "confidence": 0.9
+    },
+    "BLUR": {
+      "repo": "blur-io/blur",
+      "confidence": 0.5
+    },
+    "BNB": {
+      "repo": "bnb-chain/bsc",
+      "confidence": 0.95
+    },
+    "BOME": {
+      "repo": "bookofmeme/bome",
+      "confidence": 0.3
+    },
+    "BONK": {
+      "repo": "BonkInu/bonk",
+      "confidence": 0.4
+    },
+    "BTC": {
+      "repo": "bitcoin/bitcoin",
+      "confidence": 1.0
+    },
+    "CAKE": {
+      "repo": "pancakeswap/pancake-frontend",
+      "confidence": 0.85
+    },
+    "CATI": {
+      "repo": "catizen/catizen",
+      "confidence": 0.3
+    },
+    "CELO": {
+      "repo": "celo-org/celo-blockchain",
+      "confidence": 0.95
+    },
+    "CFX": {
+      "repo": "Conflux-Chain/conflux-rust",
+      "confidence": 0.95
+    },
+    "CHZ": {
+      "repo": "chiliz-chain/chiliz-chain",
+      "confidence": 0.7
+    },
+    "COMP": {
+      "repo": "compound-finance/compound-protocol",
+      "confidence": 0.95
+    },
+    "CRV": {
+      "repo": "curvefi/curve-contract",
+      "confidence": 0.9
+    },
+    "DASH": {
+      "repo": "dashpay/dash",
+      "confidence": 1.0
+    },
+    "DOGE": {
+      "repo": "dogecoin/dogecoin",
+      "confidence": 1.0
+    },
+    "DOT": {
+      "repo": "paritytech/polkadot-sdk",
+      "confidence": 0.95
+    },
+    "DYDX": {
+      "repo": "dydxprotocol/v4-chain",
+      "confidence": 0.95
+    },
+    "EGLD": {
+      "repo": "multiversx/mx-chain-go",
+      "confidence": 0.95
+    },
+    "EIGEN": {
+      "repo": "Layr-Labs/eigenlayer-contracts",
+      "confidence": 0.95
+    },
+    "ENA": {
+      "repo": "ethena-labs/ethena-minting-contracts",
+      "confidence": 0.85
+    },
+    "ENS": {
+      "repo": "ensdomains/ens-contracts",
+      "confidence": 0.95
+    },
+    "EOS": {
+      "repo": "EOSIO/eos",
+      "confidence": 0.8
+    },
+    "ETC": {
+      "repo": "etclabscore/core-geth",
+      "confidence": 0.85
+    },
+    "ETH": {
+      "repo": "ethereum/go-ethereum",
+      "confidence": 1.0
+    },
+    "FET": {
+      "repo": "fetchai/fetchd",
+      "confidence": 0.9
+    },
+    "FIL": {
+      "repo": "filecoin-project/lotus",
+      "confidence": 0.95
+    },
+    "FLOKI": {
+      "repo": "FlokiCommunity/floki",
+      "confidence": 0.5
+    },
+    "FLOW": {
+      "repo": "onflow/flow-go",
+      "confidence": 0.95
+    },
+    "FTM": {
+      "repo": "Fantom-foundation/go-opera",
+      "confidence": 0.9
+    },
+    "G": {
+      "repo": "gravity-technologies/gravity",
+      "confidence": 0.4
+    },
+    "GALA": {
+      "repo": "gala-games/gala",
+      "confidence": 0.5
+    },
+    "GMT": {
+      "repo": "step-finance/step-staking",
+      "confidence": 0.4
+    },
+    "GMX": {
+      "repo": "gmx-io/gmx-contracts",
+      "confidence": 0.9
+    },
+    "GRT": {
+      "repo": "graphprotocol/graph-node",
+      "confidence": 0.95
+    },
+    "HBAR": {
+      "repo": "hashgraph/hedera-services",
+      "confidence": 0.95
+    },
+    "ICP": {
+      "repo": "dfinity/ic",
+      "confidence": 0.95
+    },
+    "IMX": {
+      "repo": "immutable/imx-contracts",
+      "confidence": 0.85
+    },
+    "INJ": {
+      "repo": "InjectiveLabs/sdk-go",
+      "confidence": 0.9
+    },
+    "IO": {
+      "repo": "ionet-official/io-token",
+      "confidence": 0.5
+    },
+    "IOTA": {
+      "repo": "iotaledger/iota",
+      "confidence": 0.9
+    },
+    "JTO": {
+      "repo": "jito-foundation/jito-solana",
+      "confidence": 0.9
+    },
+    "JUP": {
+      "repo": "jup-ag/jupiter-core",
+      "confidence": 0.7
+    },
+    "KAS": {
+      "repo": "kaspanet/kaspad",
+      "confidence": 0.95
+    },
+    "KAVA": {
+      "repo": "Kava-Labs/kava",
+      "confidence": 0.95
+    },
+    "LDO": {
+      "repo": "lidofinance/lido-dao",
+      "confidence": 0.95
+    },
+    "LINK": {
+      "repo": "smartcontractkit/chainlink",
+      "confidence": 1.0
+    },
+    "LISTA": {
+      "repo": "lista-dao/lista-dao",
+      "confidence": 0.6
+    },
+    "LRC": {
+      "repo": "Loopring/protocols",
+      "confidence": 0.9
+    },
+    "LTC": {
+      "repo": "litecoin-project/litecoin",
+      "confidence": 1.0
+    },
+    "LUNA": {
+      "repo": "terra-money/core",
+      "confidence": 0.85
+    },
+    "LUNC": {
+      "repo": "terra-money/core",
+      "confidence": 0.85
+    },
+    "MANA": {
+      "repo": "decentraland/marketplace",
+      "confidence": 0.8
+    },
+    "MANTA": {
+      "repo": "Manta-Network/Manta",
+      "confidence": 0.85
+    },
+    "MATIC": {
+      "repo": "maticnetwork/bor",
+      "confidence": 0.9
+    },
+    "ME": {
+      "repo": "magiceden-oss/runestone",
+      "confidence": 0.4
+    },
+    "MEME": {
+      "repo": "memecoin/memecoin",
+      "confidence": 0.4
+    },
+    "MINA": {
+      "repo": "MinaProtocol/mina",
+      "confidence": 0.95
+    },
+    "MKR": {
+      "repo": "makerdao/dss",
+      "confidence": 0.9
+    },
+    "MOVE": {
+      "repo": "movementlabsxyz/movement",
+      "confidence": 0.7
+    },
+    "NEAR": {
+      "repo": "near/nearcore",
+      "confidence": 1.0
+    },
+    "NEIRO": {
+      "repo": "neiro/neiro",
+      "confidence": 0.3
+    },
+    "NEO": {
+      "repo": "neo-project/neo",
+      "confidence": 1.0
+    },
+    "NFP": {
+      "repo": "nfprotocol/nfp",
+      "confidence": 0.3
+    },
+    "NOT": {
+      "repo": "OpenBuilders/notcoin",
+      "confidence": 0.5
+    },
+    "OM": {
+      "repo": "mantra-dao/mantra",
+      "confidence": 0.5
+    },
+    "OMNI": {
+      "repo": "omni-network/omni",
+      "confidence": 0.9
+    },
+    "ONE": {
+      "repo": "harmony-one/harmony",
+      "confidence": 0.95
+    },
+    "OP": {
+      "repo": "ethereum-optimism/optimism",
+      "confidence": 1.0
+    },
+    "ORDI": {
+      "repo": "ordinals/ord",
+      "confidence": 0.85
+    },
+    "PENDLE": {
+      "repo": "pendle-finance/pendle-core-v2-public",
+      "confidence": 0.9
+    },
+    "PEOPLE": {
+      "repo": "ConstitutionDAO/constitutiondao",
+      "confidence": 0.7
+    },
+    "PEPE": {
+      "repo": "pepemountdev/pepe-contract",
+      "confidence": 0.4
+    },
+    "PIXEL": {
+      "repo": "pixels-online/pixels",
+      "confidence": 0.4
+    },
+    "PNUT": {
+      "repo": "pnutfun/pnut",
+      "confidence": 0.2
+    },
+    "POL": {
+      "repo": "maticnetwork/bor",
+      "confidence": 0.9
+    },
+    "PORTAL": {
+      "repo": "PortalHQ/portal",
+      "confidence": 0.4
+    },
+    "PYTH": {
+      "repo": "pyth-network/pyth-client",
+      "confidence": 0.9
+    },
+    "QTUM": {
+      "repo": "qtumproject/qtum",
+      "confidence": 1.0
+    },
+    "RATS": {
+      "repo": "ordinals/ord",
+      "confidence": 0.4
+    },
+    "RENDER": {
+      "repo": "rendernetwork/render-token",
+      "confidence": 0.7
+    },
+    "REZ": {
+      "repo": "RenzoProtocol/contracts-public",
+      "confidence": 0.8
+    },
+    "ROSE": {
+      "repo": "oasisprotocol/oasis-core",
+      "confidence": 0.95
+    },
+    "RUNE": {
+      "repo": "thorchain/thornode",
+      "confidence": 0.95
+    },
+    "S": {
+      "repo": "sonicthehedgehog/sonic",
+      "confidence": 0.3
+    },
+    "SAGA": {
+      "repo": "sagaxyz/ssc-web",
+      "confidence": 0.6
+    },
+    "SAND": {
+      "repo": "thesandboxgame/sandbox-smart-contracts",
+      "confidence": 0.85
+    },
+    "SCR": {
+      "repo": "scroll-tech/scroll",
+      "confidence": 0.95
+    },
+    "SEI": {
+      "repo": "sei-protocol/sei-chain",
+      "confidence": 0.95
+    },
+    "SHIB": {
+      "repo": "shytoshikusama/busy-busy",
+      "confidence": 0.3
+    },
+    "SKL": {
+      "repo": "skalenetwork/skale-manager",
+      "confidence": 0.9
+    },
+    "SNX": {
+      "repo": "Synthetixio/synthetix",
+      "confidence": 0.95
+    },
+    "SOL": {
+      "repo": "anza-xyz/agave",
+      "confidence": 1.0
+    },
+    "STRK": {
+      "repo": "starkware-libs/cairo",
+      "confidence": 0.85
+    },
+    "STX": {
+      "repo": "stacks-network/stacks-core",
+      "confidence": 0.95
+    },
+    "SUI": {
+      "repo": "MystenLabs/sui",
+      "confidence": 1.0
+    },
+    "SUSHI": {
+      "repo": "sushiswap/sushiswap",
+      "confidence": 0.9
+    },
+    "TAO": {
+      "repo": "opentensor/bittensor",
+      "confidence": 0.95
+    },
+    "TIA": {
+      "repo": "celestiaorg/celestia-app",
+      "confidence": 0.95
+    },
+    "TNSR": {
+      "repo": "TensorCoreLabs/tensor",
+      "confidence": 0.5
+    },
+    "TON": {
+      "repo": "ton-blockchain/ton",
+      "confidence": 0.95
+    },
+    "TRX": {
+      "repo": "tronprotocol/java-tron",
+      "confidence": 0.95
+    },
+    "TURBO": {
+      "repo": "turbo-engine/turbo",
+      "confidence": 0.3
+    },
+    "UNI": {
+      "repo": "Uniswap/v3-core",
+      "confidence": 0.9
+    },
+    "USTC": {
+      "repo": "terra-money/classic-core",
+      "confidence": 0.8
+    },
+    "VET": {
+      "repo": "vechain/thor",
+      "confidence": 0.95
+    },
+    "W": {
+      "repo": "wormhole-foundation/wormhole",
+      "confidence": 0.9
+    },
+    "WIF": {
+      "repo": "dogwifcoin/dogwifhat",
+      "confidence": 0.4
+    },
+    "WLD": {
+      "repo": "worldcoin/world-id-contracts",
+      "confidence": 0.85
+    },
+    "XAI": {
+      "repo": "OffchainLabs/nitro",
+      "confidence": 0.5
+    },
+    "XLM": {
+      "repo": "stellar/stellar-core",
+      "confidence": 1.0
+    },
+    "XMR": {
+      "repo": "monero-project/monero",
+      "confidence": 1.0
+    },
+    "XRP": {
+      "repo": "XRPLF/rippled",
+      "confidence": 1.0
+    },
+    "XTZ": {
+      "repo": "tezos/tezos",
+      "confidence": 1.0
+    },
+    "YFI": {
+      "repo": "yearn/yearn-vaults",
+      "confidence": 0.9
+    },
+    "ZEC": {
+      "repo": "zcash/zcash",
+      "confidence": 1.0
+    },
+    "ZIL": {
+      "repo": "Zilliqa/Zilliqa",
+      "confidence": 0.95
+    },
+    "ZK": {
+      "repo": "matter-labs/zksync-era",
+      "confidence": 0.95
+    },
+    "ZRO": {
+      "repo": "LayerZero-Labs/LayerZero-v2",
+      "confidence": 0.9
+    },
+    "ZRX": {
+      "repo": "0xProject/protocol",
+      "confidence": 0.9
+    }
+  },
+  "notes": "manual map: Binance base asset → official/primary GitHub repo. confidence 0-1. Low confidence meme maps are placeholders; prefer CoinGecko when available."
+}

@@ -1,0 +1,357 @@
+{
+  "settings": {
+    "poll_seconds": 60,
+    "events_per_org": 30,
+    "commits_per_repo": 15,
+    "max_alerts_per_poll": 25,
+    "bootstrap_silent": true,
+    "min_score": 50
+  },
+  "keywords": {
+    "high": [
+      "will list",
+      "will be listed",
+      "new listing",
+      "spot listing",
+      "futures listing",
+      "perpetual listing",
+      "innovation zone",
+      "seed tag",
+      "listing announcement",
+      "opens trading",
+      "open trading",
+      "trading pair",
+      "deposit open",
+      "deposits open",
+      "withdrawal open",
+      "support for",
+      "added support",
+      "add support",
+      "asset added",
+      "token added",
+      "coin added",
+      "new asset",
+      "new token",
+      "new coin",
+      "list ",
+      "listing",
+      "listed",
+      "delist",
+      "delisting",
+      "suspend trading",
+      "resume trading"
+    ],
+    "medium": [
+      "usdt",
+      "usdc",
+      "btc",
+      "eth",
+      "spot",
+      "futures",
+      "perp",
+      "perpetual",
+      "margin",
+      "symbol",
+      "ticker",
+      "pair",
+      "market",
+      "deposit",
+      "withdraw",
+      "wallet",
+      "contract address",
+      "contract_address",
+      "tokenomics",
+      "airdrop"
+    ],
+    "file_hints": [
+      "token",
+      "asset",
+      "listing",
+      "symbol",
+      "currency",
+      "announce",
+      "product"
+    ]
+  },
+  "orgs": [
+    {
+      "name": "binance",
+      "venue": "Binance",
+      "priority": "high"
+    },
+    {
+      "name": "binance-exchange",
+      "venue": "Binance",
+      "priority": "high"
+    },
+    {
+      "name": "bnb-chain",
+      "venue": "BNB Chain / Binance",
+      "priority": "medium"
+    },
+    {
+      "name": "okx",
+      "venue": "OKX",
+      "priority": "high"
+    },
+    {
+      "name": "okcoin",
+      "venue": "OKX",
+      "priority": "medium"
+    },
+    {
+      "name": "bybit-exchange",
+      "venue": "Bybit",
+      "priority": "high"
+    },
+    {
+      "name": "coinbase",
+      "venue": "Coinbase",
+      "priority": "high"
+    },
+    {
+      "name": "coinbase-samples",
+      "venue": "Coinbase",
+      "priority": "low"
+    },
+    {
+      "name": "krakenfx",
+      "venue": "Kraken",
+      "priority": "high"
+    },
+    {
+      "name": "kucoin",
+      "venue": "KuCoin",
+      "priority": "high"
+    },
+    {
+      "name": "gateio",
+      "venue": "Gate.io",
+      "priority": "high"
+    },
+    {
+      "name": "bitgetlimited",
+      "venue": "Bitget",
+      "priority": "high"
+    },
+    {
+      "name": "mexcdevelop",
+      "venue": "MEXC",
+      "priority": "high"
+    },
+    {
+      "name": "htx-com",
+      "venue": "HTX",
+      "priority": "high"
+    },
+    {
+      "name": "huobiapi",
+      "venue": "HTX / Huobi",
+      "priority": "medium"
+    },
+    {
+      "name": "crypto-com",
+      "venue": "Crypto.com",
+      "priority": "high"
+    },
+    {
+      "name": "bitfinex",
+      "venue": "Bitfinex",
+      "priority": "medium"
+    },
+    {
+      "name": "gemini",
+      "venue": "Gemini",
+      "priority": "medium"
+    },
+    {
+      "name": "bitstamp",
+      "venue": "Bitstamp",
+      "priority": "medium"
+    },
+    {
+      "name": "poloniex",
+      "venue": "Poloniex",
+      "priority": "medium"
+    },
+    {
+      "name": "whitebit-exchange",
+      "venue": "WhiteBIT",
+      "priority": "medium"
+    },
+    {
+      "name": "bingx",
+      "venue": "BingX",
+      "priority": "medium"
+    },
+    {
+      "name": "bitmart-exchange",
+      "venue": "BitMart",
+      "priority": "medium"
+    },
+    {
+      "name": "ascendex",
+      "venue": "AscendEX",
+      "priority": "low"
+    },
+    {
+      "name": "phemex",
+      "venue": "Phemex",
+      "priority": "low"
+    },
+    {
+      "name": "deribit",
+      "venue": "Deribit",
+      "priority": "low"
+    },
+    {
+      "name": "bitmex",
+      "venue": "BitMEX",
+      "priority": "low"
+    },
+    {
+      "name": "lbank-exchange",
+      "venue": "LBank",
+      "priority": "low"
+    },
+    {
+      "name": "xtcomapi",
+      "venue": "XT.com",
+      "priority": "low"
+    },
+    {
+      "name": "digifinex",
+      "venue": "DigiFinex",
+      "priority": "low"
+    },
+    {
+      "name": "btcturk",
+      "venue": "BtcTurk",
+      "priority": "high"
+    },
+    {
+      "name": "paribu",
+      "venue": "Paribu",
+      "priority": "high"
+    }
+  ],
+  "watch_repos": [
+    {
+      "repo": "binance/binance-spot-api-docs",
+      "venue": "Binance",
+      "why": "Spot API / symbol docs"
+    },
+    {
+      "repo": "binance/binance-futures-operator",
+      "venue": "Binance",
+      "why": "Futures ops signals"
+    },
+    {
+      "repo": "binance/binance-public-data",
+      "venue": "Binance",
+      "why": "Public market data additions"
+    },
+    {
+      "repo": "okx/okx-official-docs",
+      "venue": "OKX",
+      "why": "Official docs / instruments"
+    },
+    {
+      "repo": "bybit-exchange/bybit-official-api-docs",
+      "venue": "Bybit",
+      "why": "Official API docs"
+    },
+    {
+      "repo": "bybit-exchange/api-connectors",
+      "venue": "Bybit",
+      "why": "Connector / symbol updates"
+    },
+    {
+      "repo": "coinbase/coinbase-advanced-py",
+      "venue": "Coinbase",
+      "why": "Advanced Trade SDK"
+    },
+    {
+      "repo": "krakenfx/kraken-wsclient-py",
+      "venue": "Kraken",
+      "why": "WS client / pair hints"
+    },
+    {
+      "repo": "kucoin/kucoin-api-docs",
+      "venue": "KuCoin",
+      "why": "API docs"
+    },
+    {
+      "repo": "gateio/gateapi-python",
+      "venue": "Gate.io",
+      "why": "API / currency updates"
+    },
+    {
+      "repo": "bitgetlimited/v3-bitget-api-sdk",
+      "venue": "Bitget",
+      "why": "API SDK"
+    },
+    {
+      "repo": "mexcdevelop/mexc-api-sdk",
+      "venue": "MEXC",
+      "why": "API SDK"
+    },
+    {
+      "repo": "htx-com/htx-official-docs",
+      "venue": "HTX",
+      "why": "Official docs"
+    },
+    {
+      "repo": "huobiapi/API_Docs_en",
+      "venue": "HTX / Huobi",
+      "why": "Legacy Huobi docs"
+    },
+    {
+      "repo": "crypto-com/exchange-docs",
+      "venue": "Crypto.com",
+      "why": "Exchange docs"
+    }
+  ],
+  "code_searches": [
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" OR \"opens trading\" org:binance",
+      "venue": "Binance"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" OR \"opens trading\" org:okx",
+      "venue": "OKX"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:bybit-exchange",
+      "venue": "Bybit"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new asset\" OR \"support for\" org:coinbase",
+      "venue": "Coinbase"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:kucoin",
+      "venue": "KuCoin"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:gateio",
+      "venue": "Gate.io"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:bitgetlimited",
+      "venue": "Bitget"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:mexcdevelop",
+      "venue": "MEXC"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:krakenfx",
+      "venue": "Kraken"
+    },
+    {
+      "query": "listing OR \"will list\" OR \"new listing\" org:htx-com OR org:huobiapi",
+      "venue": "HTX"
+    }
+  ]
+}

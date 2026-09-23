@@ -1,4 +1,27 @@
-# CEX Wallet Telegram Alerts
+# CEX Alerts
+
+## 1) Binance USDT × GitHub Dev Anomaly (asıl amaç)
+
+Trade-safe tier’lı tarayıcı. **Sadece ACTIONABLE** aday düşün; detay [`WHY_LOSS.md`](WHY_LOSS.md).
+
+```bash
+python3 binance_github_dev_scanner.py --mode trade --top 50 --skip-coingecko
+python3 binance_github_dev_scanner.py --mode research --include-mega --symbols BTC,ETH,SOL
+```
+
+Detay: [`BINANCE_GITHUB_DEV.md`](BINANCE_GITHUB_DEV.md)
+## 2) GitHub CEX org scanner (exchange repo sinyalleri)
+
+Major CEX GitHub org'larını tarar → listing / new asset sinyali → Telegram.
+
+Detay: [`GITHUB_CEX_SCANNER.md`](GITHUB_CEX_SCANNER.md)
+
+```bash
+python github_cex_scanner.py --once --dry-run --priority high --skip-code-search
+python github_cex_scanner.py --priority high
+```
+
+## 3) CEX Wallet Telegram Alerts
 
 Public labeled CEX/DEX wallets (Binance, BtcTurk, Coinbase, OKX, Paribu, PancakeSwap, Binance Alpha, pump.fun) are polled for token transfers; Telegram gets IN/OUT alerts.
 
