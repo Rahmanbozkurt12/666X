@@ -145,6 +145,8 @@ _OUT = Path(__file__).resolve().parent.parent / "output"
 STATS_PATH = _OUT / "live_mm_day_stats.json"
 STATE_PATH = _OUT / "live_mm_state.json"
 VOL_SNAP_PATH = _OUT / "live_mm_vol_snap.json"
+BAN_FLAG_PATH = _OUT / "binance_ip_ban_until.txt"
+EXIT_ON_BAN = True  # ban görünce çık — saatlerce bekleyip tekrar istek atma
 
 # =============================================================================
 
