@@ -229,15 +229,54 @@ def sol_balance(pubkey: str) -> float:
     return int(rpc("getBalance", [pubkey])["value"]) / 1e9
 
 
+POSITION_GRACE_SEC = 90.0           # AL sonrası token görünene kadar silme
+
+
 def token_raw_balance(owner: str, mint: str) -> int:
-    res = rpc(
-        "getTokenAccountsByOwner",
-        [owner, {"mint": mint}, {"encoding": "jsonParsed"}],
-    )
     total = 0
-    for acc in res.get("value") or []:
-        total += int(acc["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
+    for program_id in (
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  # Token-2022
+    ):
+        try:
+            res = rpc(
+                "getTokenAccountsByOwner",
+                [
+                    owner,
+                    {"mint": mint},
+                    {"encoding": "jsonParsed", "programId": program_id},
+                ],
+            )
+            for acc in res.get("value") or []:
+                total += int(acc["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
+        except Exception:
+            # eski RPC programId istemeyebilir — fallback
+            try:
+                res = rpc(
+                    "getTokenAccountsByOwner",
+                    [owner, {"mint": mint}, {"encoding": "jsonParsed"}],
+                )
+                for acc in res.get("value") or []:
+                    total += int(acc["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
+                break
+            except Exception:
+                pass
     return total
+
+
+def wait_token_balance(owner: str, mint: str, expect_raw: int = 0, timeout: float = 25.0) -> int:
+    """Tx sonrası token hesabı gelsin diye bekle (RPC/index lag)."""
+    deadline = time.time() + timeout
+    last = 0
+    while time.time() < deadline:
+        last = token_raw_balance(owner, mint)
+        if last > 0:
+            if expect_raw <= 0 or last >= max(1, int(expect_raw * 0.5)):
+                return last
+            # kısmi görünür — yine de kabul
+            return last
+        time.sleep(1.2)
+    return last
 
 
 def account_exists(addr: str) -> bool:
@@ -346,8 +385,8 @@ def discover_new_pools() -> list[dict[str, Any]]:
         seen.add(pool)
 
     for path in (
-        "/networks/solana/trending_pools?page=1",
         "/networks/solana/new_pools?page=1",
+        "/networks/solana/trending_pools?page=1",
     ):
         r = HTTP.get(f"{GT_BASE}{path}", timeout=30)
         if r.status_code != 200:
@@ -574,7 +613,9 @@ class State:
 
 def position_value_usd(owner: str, pos: Position) -> tuple[float, int]:
     raw = token_raw_balance(owner, pos.mint)
-    if raw <= 0 and DRY_RUN:
+    age = time.time() - pos.entry_ts
+    # DRY_RUN veya AL sonrası grace: zincir lag'inde quote miktarını kullan
+    if raw <= 0 and pos.paper_raw > 0 and (DRY_RUN or age < POSITION_GRACE_SEC):
         raw = pos.paper_raw
     if raw <= 0:
         return 0.0, 0
@@ -666,10 +707,19 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
 
     sig = send_swap(kp, buy_q)
     log_buy(f"🟢 {sym} AL OK https://solscan.io/tx/{sig}")
-    time.sleep(2.0)
-    raw = token_raw_balance(pub, mint)
+    # Tx confirmed olsa bile token hesabı RPC'de gecikebilir — bekle + quote fallback
+    raw = wait_token_balance(pub, mint, expect_raw=out_raw, timeout=25.0)
+    paper = max(raw, out_raw)
+    if raw <= 0:
+        log(
+            f"{sym} token henüz görünmedi — paper_raw={out_raw} ile poz tutuluyor "
+            f"(grace {POSITION_GRACE_SEC:.0f}s)",
+            _YELLOW,
+        )
+    else:
+        log(f"{sym} bakiye OK raw={raw}")
     st.positions[mint] = Position(
-        mint=mint, pool=pool, symbol=sym, cost_usd=BUY_USD, entry_ts=time.time(), paper_raw=raw
+        mint=mint, pool=pool, symbol=sym, cost_usd=BUY_USD, entry_ts=time.time(), paper_raw=paper
     )
     st.seen_pools[pool] = time.time()
     st.save()
@@ -704,19 +754,35 @@ def try_sell(kp: Keypair, st: State, pos: Position, reason: str, value_usd: floa
 def manage_positions(kp: Keypair, st: State) -> None:
     pub = str(kp.pubkey())
     for mint, pos in list(st.positions.items()):
+        held_sec = time.time() - pos.entry_ts
         try:
+            chain_raw = token_raw_balance(pub, pos.mint)
+            if chain_raw > 0 and chain_raw != pos.paper_raw:
+                pos.paper_raw = chain_raw
+                st.save()
             value_usd, raw = position_value_usd(pub, pos)
         except Exception as e:
             log(f"{pos.symbol} değer okunamadı: {e}")
             continue
-        # Canlıda bakiyesi 0 sahte/eski pozisyonları sil
+        # Canlıda bakiyesi 0 — ama AL yeni ise silme (RPC lag / Token-2022)
         if not DRY_RUN and raw <= 0 and value_usd <= 0:
-            log(f"{pos.symbol} hayalet poz silindi (zincirde token yok)")
+            if held_sec < POSITION_GRACE_SEC:
+                waited = wait_token_balance(pub, mint, expect_raw=pos.paper_raw, timeout=8.0)
+                if waited > 0:
+                    pos.paper_raw = waited
+                    st.save()
+                    log(f"{pos.symbol} bakiye geç geldi raw={waited}")
+                    continue
+                log(
+                    f"{pos.symbol} token yok — grace {held_sec:.0f}/{POSITION_GRACE_SEC:.0f}s "
+                    f"(paper_raw={pos.paper_raw})"
+                )
+                continue
+            log(f"{pos.symbol} hayalet poz silindi (zincirde token yok, grace bitti)")
             st.positions.pop(mint, None)
             st.save()
             continue
-        held = (time.time() - pos.entry_ts) / 60.0
-        held_sec = time.time() - pos.entry_ts
+        held = held_sec / 60.0
         log(
             f"POS {pos.symbol} ≈${value_usd:.2f} (AL ${BUY_USD:.2f} → SAT ${SELL_USD:.2f} / SL ${STOP_LOSS_USD:.2f}) "
             f"hold={held_sec:.0f}s"
@@ -731,16 +797,27 @@ def manage_positions(kp: Keypair, st: State) -> None:
         elif held >= MAX_HOLD_MIN:
             reason = "MAX_HOLD"
         if reason:
-            try_sell(kp, st, pos, reason, value_usd, raw)
+            # SAT yalnız gerçek zincir bakiyesiyle — paper_raw quote için, swap için değil
+            live = token_raw_balance(pub, mint)
+            if live <= 0:
+                if held_sec < POSITION_GRACE_SEC:
+                    log(f"{pos.symbol} SAT bekliyor ({reason}) — token henüz zincirde yok")
+                    continue
+                log(f"{pos.symbol} SAT iptal — bakiyе 0")
+                continue
+            try_sell(kp, st, pos, reason, value_usd, live)
 
 
 def purge_ghosts(kp: Keypair, st: State) -> None:
-    """DRY_RUN'dan kalan / boş pozisyonları temizle."""
+    """DRY_RUN'dan kalan / boş pozisyonları temizle (yeni AL'lara dokunma)."""
     if DRY_RUN:
         return
     pub = str(kp.pubkey())
     removed = 0
     for mint, pos in list(st.positions.items()):
+        age = time.time() - pos.entry_ts
+        if age < POSITION_GRACE_SEC:
+            continue
         try:
             raw = token_raw_balance(pub, pos.mint)
         except Exception:

@@ -1,26 +1,18 @@
-# phantom.py — $0.50 AL → $1 SAT
+# phantom.py — her yeni coin $0.50 → küçük kârda sat ($0.65)
 
-## Key dosyası (zorunlu)
-
-Aynı klasöre `phantom_keys.json` koy:
+## 1) `phantom_keys.json` (aynı klasör)
 
 ```json
 {
   "apiKey": "",
-  "walletPublicKey": "Cztef...adresin",
-  "privateKey": "uzun_private_key"
+  "walletPublicKey": "ADRESIN",
+  "privateKey": "UZUN_PRIVATE_KEY"
 }
 ```
 
-- `privateKey` → bot bununla imzalar  
-- `walletPublicKey` → kontrol + Solscan  
-- `apiKey` → bu botta gerekmez (boş bırak)
+Key’i `.py` içine yazma.
 
-Örnek: `phantom_keys.example.json` → kopyala → `phantom_keys.json` adını ver → doldur.
-
-**Git’e / chat’e privateKey koyma.**
-
-## Çalıştır
+## 2) Çalıştır
 
 ```bash
 pip install requests solders
@@ -28,4 +20,11 @@ python phantom.py
 ```
 
 Önce `DRY_RUN = True`. Canlı: `False`.
-Adrese SOL yolla (`walletPublicKey`).
+
+## Strateji
+
+| | |
+|--|--|
+| Giriş | Her yeni `*/SOL` havuz ≈ **$0.50** |
+| Satış | ≈ **$0.65** (küçük kâr) |
+| Stop | ≈ **$0.35** |
