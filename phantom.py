@@ -45,6 +45,7 @@ if _env_helius:
 # STRATEJİ — $0.50 AL → küçük kârda SAT (hep küçük kâr)
 # =============================================================================
 DRY_RUN = True                      # Canlı için False yap
+RESET_STATE_ON_START = True         # True = eski hayalet pozisyonları sil, temiz başla
 BUY_USD = 0.50                      # her yeni havuza giriş
 SELL_USD = 0.65                     # ~%30 kâr → sat (küçük kâr, sık çık)
 STOP_LOSS_USD = 0.35                # ~%30 zarar → çık
