@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """
-Solana likidite avcısı — Jupiter AL/SAT
+Yeni havuz botu — her açılan */SOL havuza ~$0.50 gir, ~$1 olunca sat.
 
-Ne yapar:
-  • Yeni / hacmi↑ / havuz likiditesi↑ coinleri tarar (GeckoTerminal + DexScreener)
-  • Pool adresini doğrular (RPC + Jupiter route var mı)
-  • Giriş: likidite + hacim artıyorsa
-  • Çıkış: havuzdaki para (likidite) zirveden düşmeye başlayınca
-  • Komisyon: round-trip fee + slippage tamponu; Jupiter quote fail → girme
+Phantom API yok. Private key ile Jupiter swap.
 
-Phantom API yok. SOLANA_PRIVATE_KEY (ayrı trading cüzdanı) ile imzalar.
-
-  export SOLANA_PRIVATE_KEY='...'
-  # önerilir: export HELIUS_API_KEY='...'
-  python phantom_jupiter_bot.py
+  pip install requests solders
+  # SOLANA_PRIVATE_KEY doldur →
+  python phantom.py
 """
 
 from __future__ import annotations
@@ -34,77 +27,56 @@ from solders.message import to_bytes_versioned
 from solders.transaction import VersionedTransaction
 
 # =============================================================================
-# KEY — sadece ADRES yetmez; AL/SAT için PRIVATE KEY şart
+# KEY
 # =============================================================================
-# 1) Bilgisayarda üret:
-#    python3 -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
-# 2) Phantom'dan o ADRES'e SOL gönder
-# 3) Aşağıya KEY'i yapıştır (ADRES değil!)
-SOLANA_PRIVATE_KEY = ""             # buraya private key (base58) — ADRES DEĞİL
-# Opsiyonel (boş bırakılabilir):
-HELIUS_API_KEY = ""                 # https://helius.dev — boşsa public RPC
-JUPITER_API_KEY = ""                # boş bırak — lite API çalışır
+# python -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
+SOLANA_PRIVATE_KEY = ""             # KEY yapıştır (ADRES değil)
+HELIUS_API_KEY = ""                 # opsiyonel
+JUPITER_API_KEY = ""                # opsiyonel
 
-# Env varsa dosyadakinin üstüne yazar
 SOLANA_PRIVATE_KEY = (os.environ.get("SOLANA_PRIVATE_KEY") or SOLANA_PRIVATE_KEY).strip()
 HELIUS_API_KEY = (os.environ.get("HELIUS_API_KEY") or HELIUS_API_KEY).strip()
 JUPITER_API_KEY = (os.environ.get("JUPITER_API_KEY") or JUPITER_API_KEY).strip()
 
-DRY_RUN = True                      # True = zincire gönderme
-POLL_SEC = 20.0
-SCAN_SEC = 35.0
-
-BUY_SOL = 0.05                      # her AL (SOL)
-MIN_SOL_RESERVE = 0.03              # gas + fee için bırak
-MAX_OPEN = 3                        # aynı anda max pozisyon
-SLIPPAGE_BPS = 150                  # %1.5 (meme için)
+# =============================================================================
+# STRATEJİ — $0.50 AL → $1.00 SAT
+# =============================================================================
+DRY_RUN = True
+BUY_USD = 0.50                      # her yeni havuza giriş
+SELL_USD = 1.00                     # bu değere gelince sat (≈2x)
+MAX_OPEN = 8                        # aynı anda max pozisyon
+MIN_SOL_RESERVE_USD = 1.0           # gas için ~$1 SOL bırak
+SLIPPAGE_BPS = 200                  # %2
 PRIORITY_FEE = "auto"
 
-# Komisyon / tampon (yaklaşık)
-# Jupiter/DEX ~%0.25–1 + slippage + network → round-trip güvenlik
-ROUNDTRIP_FEE_PCT = 2.5             # %2.5 maliyet varsay
-MIN_EDGE_OVER_FEE_PCT = 1.0         # TP en az fee+%1 (bilgi; asıl çıkış likidite)
-
-# Giriş filtreleri
-MIN_LIQ_USD = 8_000.0               # bundan düşük havuza girme (sıkışır)
-MAX_LIQ_USD = 800_000.0             # çok büyük pool = geç kalmış
-MIN_VOL_H1_USD = 3_000.0
-MIN_LIQ_RISE_PCT = 8.0              # izlenen süre içinde liq ↑
-MIN_VOL_RISE_PCT = 15.0             # vol h1 vs önceki örnek ↑
-MAX_PAIR_AGE_MIN = 180              # "çıkan coin" ≈ 3 saat
-MIN_PAIR_AGE_SEC = 45               # çok taze rug riski — 45sn bekle
-REQUIRE_SOL_QUOTE = True            # sadece */SOL havuz
-
-# Çıkış: havuz parası eksilince
-LIQ_DROP_FROM_PEAK_PCT = 12.0       # zirveden -%12 → SAT
-LIQ_DROP_ABS_PCT = 8.0              # son ölçüme göre -%8 → SAT
-STOP_LOSS_PCT = -25.0               # fiyat acil stop
-TAKE_PROFIT_PCT = 45.0              # opsiyonel TP
-MAX_HOLD_MIN = 90                   # süre dolunca çık
-
-# Güvenlik
-SKIP_IF_MINT_AUTHORITY = True       # mint authority varsa atla (rug)
+# Yeni havuz filtreleri (aşırı çöpü ele)
+MIN_LIQ_USD = 500.0                 # çok boş havuza girme
+MAX_LIQ_USD = 250_000.0
+MAX_PAIR_AGE_MIN = 90               # son 90 dk içinde açılan
+MIN_PAIR_AGE_SEC = 20               # 20sn bekle (anlık rug)
+REQUIRE_JUPITER_SELL_ROUTE = True   # satılamayana girme
+SKIP_IF_MINT_AUTHORITY = False      # pump.fun çoğu mint auth'lu — kapalı
 SKIP_IF_FREEZE_AUTHORITY = True
-REQUIRE_JUPITER_SELL_ROUTE = True   # satılamayan tokena girme
-BLACKLIST_DEX = {"unknown"}         # gerekirse genişlet
+REQUIRE_SOL_QUOTE = True
+
+POLL_SEC = 12.0
+SCAN_SEC = 18.0
+STOP_LOSS_USD = 0.22                # ~$0.50 → $0.22 acil çık
+MAX_HOLD_MIN = 120
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
-USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 JUP_BASE = "https://lite-api.jup.ag/swap/v1"
 GT_BASE = "https://api.geckoterminal.com/api/v2"
 DS_BASE = "https://api.dexscreener.com/latest/dex"
 
 ROOT = Path(__file__).resolve().parent
-STATE_PATH = ROOT / "output" / "phantom_liq_state.json"
+STATE_PATH = ROOT / "output" / "phantom_050_state.json"
 HTTP = requests.Session()
-HTTP.headers.update(
-    {
-        "User-Agent": "phantom-liq-bot/1.1",
-        "Accept": "application/json",
-    }
-)
+HTTP.headers.update({"User-Agent": "phantom-050-bot/1.0", "Accept": "application/json"})
 if JUPITER_API_KEY:
     HTTP.headers["x-api-key"] = JUPITER_API_KEY
+
+_sol_px_cache = {"ts": 0.0, "px": 0.0}
 
 
 def log(msg: str) -> None:
@@ -131,17 +103,43 @@ def rpc(method: str, params: list[Any]) -> Any:
 
 
 def load_keypair() -> Keypair:
-    raw = SOLANA_PRIVATE_KEY or os.environ.get("SOLANA_PRIVATE_KEY", "").strip()
-    if not raw or raw.startswith("BURAYA"):
+    raw = SOLANA_PRIVATE_KEY
+    if not raw:
         raise SystemExit(
             "SOLANA_PRIVATE_KEY yok.\n"
-            "Yeni key üret → Phantom'dan o ADRES'e SOL gönder:\n"
-            "  python3 -c \"from solders.keypair import Keypair; "
-            "k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)\""
+            "python -c \"from solders.keypair import Keypair; k=Keypair(); "
+            "print('ADRES', k.pubkey()); print('KEY', k)\"\n"
+            "ADRES'e SOL yolla, KEY'i dosyaya yapıştır."
         )
     if raw.startswith("["):
         return Keypair.from_bytes(bytes(json.loads(raw)))
     return Keypair.from_base58_string(raw)
+
+
+def sol_usd() -> float:
+    now = time.time()
+    if now - _sol_px_cache["ts"] < 60 and _sol_px_cache["px"] > 0:
+        return _sol_px_cache["px"]
+    try:
+        r = HTTP.get(f"{DS_BASE}/tokens/{SOL_MINT}", timeout=20)
+        ps = (r.json() or {}).get("pairs") or []
+        for p in ps:
+            if p.get("chainId") == "solana" and p.get("priceUsd"):
+                px = float(p["priceUsd"])
+                if px > 0:
+                    _sol_px_cache.update(ts=now, px=px)
+                    return px
+    except Exception as e:
+        log(f"SOL fiyat: {e}")
+    if _sol_px_cache["px"] > 0:
+        return _sol_px_cache["px"]
+    return 150.0  # fallback
+
+
+def usd_to_lamports(usd: float) -> int:
+    px = sol_usd()
+    sol = usd / px
+    return max(1, int(sol * 1e9))
 
 
 def sol_balance(pubkey: str) -> float:
@@ -155,8 +153,7 @@ def token_raw_balance(owner: str, mint: str) -> int:
     )
     total = 0
     for acc in res.get("value") or []:
-        info = acc["account"]["data"]["parsed"]["info"]["tokenAmount"]
-        total += int(info["amount"])
+        total += int(acc["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
     return total
 
 
@@ -169,39 +166,34 @@ def account_exists(addr: str) -> bool:
 
 
 def mint_risk_flags(mint: str) -> dict[str, bool]:
-    """mint/freeze authority varsa True (risk)."""
     out = {"mint_auth": False, "freeze_auth": False, "ok": False}
     try:
         info = rpc("getAccountInfo", [mint, {"encoding": "jsonParsed"}])
         val = (info or {}).get("value")
-        if not val:
+        if not val or not isinstance(val.get("data"), dict):
             return out
-        parsed = (((val.get("data") or {}) if isinstance(val.get("data"), dict) else {}) or {})
-        # jsonParsed: data is [...,] or dict with parsed
-        if isinstance(val.get("data"), dict):
-            p = val["data"].get("parsed") or {}
-            info2 = p.get("info") or {}
-            out["mint_auth"] = info2.get("mintAuthority") is not None
-            out["freeze_auth"] = info2.get("freezeAuthority") is not None
-            out["ok"] = True
-    except Exception as e:
-        log(f"mint parse uyarı {mint[:6]}…: {e}")
+        info2 = ((val["data"].get("parsed") or {}).get("info") or {})
+        out["mint_auth"] = info2.get("mintAuthority") is not None
+        out["freeze_auth"] = info2.get("freezeAuthority") is not None
+        out["ok"] = True
+    except Exception:
+        pass
     return out
 
 
-def jup_quote(input_mint: str, output_mint: str, amount: int, slippage_bps: int) -> dict:
+def jup_quote(input_mint: str, output_mint: str, amount: int) -> dict:
     r = HTTP.get(
         f"{JUP_BASE}/quote",
         params={
             "inputMint": input_mint,
             "outputMint": output_mint,
             "amount": str(amount),
-            "slippageBps": str(slippage_bps),
+            "slippageBps": str(SLIPPAGE_BPS),
         },
         timeout=30,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"quote HTTP {r.status_code}: {r.text[:180]}")
+        raise RuntimeError(f"quote HTTP {r.status_code}: {r.text[:160]}")
     data = r.json()
     if "outAmount" not in data:
         raise RuntimeError(f"quote yok: {data}")
@@ -223,7 +215,7 @@ def jup_swap_b64(user: str, quote: dict) -> str:
     r.raise_for_status()
     tx = r.json().get("swapTransaction")
     if not tx:
-        raise RuntimeError(f"swap tx yok: {r.text[:200]}")
+        raise RuntimeError(f"swap tx yok: {r.text[:180]}")
     return tx
 
 
@@ -248,61 +240,40 @@ def send_swap(kp: Keypair, quote: dict) -> str:
     )
 
 
-# ---- keşif ----
-def _gt_get(path: str) -> list[dict]:
-    r = HTTP.get(f"{GT_BASE}{path}", timeout=30)
-    if r.status_code != 200:
-        log(f"GT {path} HTTP {r.status_code}")
-        return []
-    return list((r.json() or {}).get("data") or [])
-
-
-def discover_pools() -> list[dict[str, Any]]:
-    """Yeni + trending Solana havuzları."""
+def discover_new_pools() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for path in (
-        "/networks/solana/new_pools?page=1",
-        "/networks/solana/trending_pools?page=1",
-    ):
-        for item in _gt_get(path):
-            at = item.get("attributes") or {}
-            pool = at.get("address") or ""
-            if not pool or pool in seen:
+    r = HTTP.get(f"{GT_BASE}/networks/solana/new_pools?page=1", timeout=30)
+    if r.status_code != 200:
+        log(f"new_pools HTTP {r.status_code}")
+        return []
+    for item in (r.json() or {}).get("data") or []:
+        at = item.get("attributes") or {}
+        pool = at.get("address") or ""
+        if not pool or pool in seen:
+            continue
+        name = (at.get("name") or "").upper()
+        if REQUIRE_SOL_QUOTE and "/ SOL" not in name and not name.endswith("/SOL"):
+            # quote ilişkisi
+            qid = (((item.get("relationships") or {}).get("quote_token") or {}).get("data") or {}).get("id") or ""
+            if SOL_MINT not in qid:
                 continue
-            rel = item.get("relationships") or {}
-            base_id = ((rel.get("base_token") or {}).get("data") or {}).get("id") or ""
-            quote_id = ((rel.get("quote_token") or {}).get("data") or {}).get("id") or ""
-            # id: solana_<mint>
-            def mint_of(x: str) -> str:
-                return x.split("solana_", 1)[-1] if "solana_" in x else x
-
-            base = mint_of(base_id)
-            quote = mint_of(quote_id)
-            if REQUIRE_SOL_QUOTE and quote not in (SOL_MINT, "solana", ""):
-                # quote mint SOL değilse atla (bazen id kısa)
-                if quote != SOL_MINT and "So11111111111111111111111111111111111111112" not in quote_id:
-                    # hâlâ isimde / SOL var mı
-                    name = (at.get("name") or "").upper()
-                    if "/ SOL" not in name and not name.endswith("SOL"):
-                        continue
-            vol = at.get("volume_usd") or {}
-            rows.append(
-                {
-                    "pool": pool,
-                    "name": at.get("name") or "?",
-                    "base_mint": base,
-                    "quote_mint": quote if quote else SOL_MINT,
-                    "created_at": at.get("pool_created_at"),
-                    "vol_h1": float(vol.get("h1") or 0),
-                    "vol_m5": float(vol.get("m5") or 0),
-                    "reserve_usd": float(at.get("reserve_in_usd") or 0)
-                    if at.get("reserve_in_usd") not in (None, "")
-                    else 0.0,
-                    "source": path.split("/")[-1].split("?")[0],
-                }
-            )
-            seen.add(pool)
+        base_id = (((item.get("relationships") or {}).get("base_token") or {}).get("data") or {}).get("id") or ""
+        base = base_id.split("solana_", 1)[-1] if "solana_" in base_id else base_id
+        vol = at.get("volume_usd") or {}
+        rows.append(
+            {
+                "pool": pool,
+                "name": at.get("name") or "?",
+                "base_mint": base,
+                "created_at": at.get("pool_created_at"),
+                "vol_m5": float(vol.get("m5") or 0),
+                "reserve_usd": float(at.get("reserve_in_usd") or 0)
+                if at.get("reserve_in_usd") not in (None, "")
+                else 0.0,
+            }
+        )
+        seen.add(pool)
     return rows
 
 
@@ -316,42 +287,27 @@ def dexscreener_pair(pool: str) -> Optional[dict]:
 
 
 def enrich(row: dict) -> Optional[dict]:
-    """Pool doğrula + DexScreener likidite/hacim."""
     pool = row["pool"]
     if not account_exists(pool):
-        log(f"SKIP pool yok on-chain: {pool[:8]}…")
         return None
     ds = dexscreener_pair(pool)
-    liq = 0.0
-    vol_h1 = row.get("vol_h1") or 0.0
-    vol_m5 = row.get("vol_m5") or 0.0
-    symbol = row.get("name") or "?"
+    base_mint = row.get("base_mint") or ""
+    symbol = (row.get("name") or "?").split("/")[0].strip()
+    liq = float(row.get("reserve_usd") or 0)
     price_usd = 0.0
     created_ms = None
-    base_mint = row.get("base_mint") or ""
     if ds:
-        liq = float(((ds.get("liquidity") or {}).get("usd")) or 0)
-        vol = ds.get("volume") or {}
-        vol_h1 = float(vol.get("h1") or vol_h1 or 0)
-        vol_m5 = float(vol.get("m5") or vol_m5 or 0)
+        liq = float(((ds.get("liquidity") or {}).get("usd")) or liq or 0)
         base_mint = (ds.get("baseToken") or {}).get("address") or base_mint
         symbol = (ds.get("baseToken") or {}).get("symbol") or symbol
         price_usd = float(ds.get("priceUsd") or 0)
         created_ms = ds.get("pairCreatedAt")
-        dex = (ds.get("dexId") or "").lower()
-        if dex in BLACKLIST_DEX:
-            return None
         quote = ((ds.get("quoteToken") or {}).get("address") or "").strip()
         if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
             return None
-    else:
-        liq = float(row.get("reserve_usd") or 0)
-
     if not base_mint or base_mint == SOL_MINT:
         return None
     if liq < MIN_LIQ_USD or liq > MAX_LIQ_USD:
-        return None
-    if vol_h1 < MIN_VOL_H1_USD and vol_m5 * 12 < MIN_VOL_H1_USD:
         return None
 
     age_min = None
@@ -372,45 +328,11 @@ def enrich(row: dict) -> Optional[dict]:
     return {
         **row,
         "base_mint": base_mint,
-        "symbol": symbol.split("/")[0].strip(),
+        "symbol": symbol,
         "liq_usd": liq,
-        "vol_h1": vol_h1,
-        "vol_m5": vol_m5,
         "price_usd": price_usd,
         "age_min": age_min,
     }
-
-
-@dataclass
-class PoolWatch:
-    pool: str
-    mint: str
-    symbol: str
-    liq_hist: list[tuple[float, float]] = field(default_factory=list)  # ts, liq
-    vol_hist: list[tuple[float, float]] = field(default_factory=list)
-
-    def push(self, liq: float, vol: float) -> None:
-        now = time.time()
-        self.liq_hist.append((now, liq))
-        self.vol_hist.append((now, vol))
-        self.liq_hist = self.liq_hist[-40:]
-        self.vol_hist = self.vol_hist[-40:]
-
-    def liq_rise_pct(self) -> Optional[float]:
-        if len(self.liq_hist) < 2:
-            return None
-        a, b = self.liq_hist[0][1], self.liq_hist[-1][1]
-        if a <= 0:
-            return None
-        return (b / a - 1.0) * 100.0
-
-    def vol_rise_pct(self) -> Optional[float]:
-        if len(self.vol_hist) < 2:
-            return None
-        a, b = self.vol_hist[0][1], self.vol_hist[-1][1]
-        if a <= 0:
-            return None
-        return (b / a - 1.0) * 100.0
 
 
 @dataclass
@@ -418,50 +340,30 @@ class Position:
     mint: str
     pool: str
     symbol: str
-    cost_sol: float
-    entry_liq: float
-    peak_liq: float
+    cost_usd: float
     entry_ts: float
-    entry_price_usd: float = 0.0
     paper_raw: int = 0
 
 
 @dataclass
 class State:
-    watches: dict[str, PoolWatch] = field(default_factory=dict)
     positions: dict[str, Position] = field(default_factory=dict)
+    seen_pools: dict[str, float] = field(default_factory=dict)  # pool -> ts
     cooldown: dict[str, float] = field(default_factory=dict)
 
     def save(self) -> None:
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "positions": {
-                k: {
-                    "mint": p.mint,
-                    "pool": p.pool,
-                    "symbol": p.symbol,
-                    "cost_sol": p.cost_sol,
-                    "entry_liq": p.entry_liq,
-                    "peak_liq": p.peak_liq,
-                    "entry_ts": p.entry_ts,
-                    "entry_price_usd": p.entry_price_usd,
-                    "paper_raw": p.paper_raw,
-                }
-                for k, p in self.positions.items()
-            },
-            "cooldown": self.cooldown,
-            "watches": {
-                k: {
-                    "pool": w.pool,
-                    "mint": w.mint,
-                    "symbol": w.symbol,
-                    "liq_hist": w.liq_hist[-20:],
-                    "vol_hist": w.vol_hist[-20:],
-                }
-                for k, w in self.watches.items()
-            },
-        }
-        STATE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        STATE_PATH.write_text(
+            json.dumps(
+                {
+                    "positions": {k: v.__dict__ for k, v in self.positions.items()},
+                    "seen_pools": self.seen_pools,
+                    "cooldown": self.cooldown,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     @classmethod
     def load(cls) -> "State":
@@ -472,43 +374,23 @@ class State:
             raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
             for k, v in (raw.get("positions") or {}).items():
                 st.positions[k] = Position(**v)
+            st.seen_pools = {k: float(v) for k, v in (raw.get("seen_pools") or {}).items()}
             st.cooldown = {k: float(v) for k, v in (raw.get("cooldown") or {}).items()}
-            for k, v in (raw.get("watches") or {}).items():
-                w = PoolWatch(pool=v["pool"], mint=v["mint"], symbol=v.get("symbol") or "?")
-                w.liq_hist = [tuple(x) for x in (v.get("liq_hist") or [])]  # type: ignore
-                w.vol_hist = [tuple(x) for x in (v.get("vol_hist") or [])]  # type: ignore
-                st.watches[k] = w
         except Exception as e:
-            log(f"state load: {e}")
+            log(f"state: {e}")
         return st
 
 
-def fee_ok_for_entry(buy_sol: float) -> bool:
-    """Round-trip fee sonrası anlamlı boyut kalsın."""
-    cost = buy_sol * (ROUNDTRIP_FEE_PCT / 100.0)
-    return buy_sol - cost >= buy_sol * 0.5 and buy_sol >= 0.01
-
-
-def can_sell_via_jupiter(mint: str, raw_amount: int) -> bool:
-    if raw_amount <= 0:
-        # tahmini küçük miktar ile route dene
-        raw_amount = 100000
-    try:
-        q = jup_quote(mint, SOL_MINT, raw_amount, SLIPPAGE_BPS)
-        return int(q.get("outAmount") or 0) > 0
-    except Exception as e:
-        log(f"Jupiter SAT route yok {mint[:6]}…: {e}")
-        return False
-
-
-def score_candidate(e: dict, w: PoolWatch) -> float:
-    lr = w.liq_rise_pct() or 0.0
-    vr = w.vol_rise_pct() or 0.0
-    age = e.get("age_min") or 99.0
-    # yeni + liq↑ + vol↑
-    s = lr * 1.2 + vr * 1.0 + min(e.get("vol_m5") or 0, 5000) / 500.0
-    s += max(0.0, 60.0 - age) * 0.15
-    return s
+def position_value_usd(owner: str, pos: Position) -> tuple[float, int]:
+    """Token → SOL quote → USD."""
+    raw = token_raw_balance(owner, pos.mint)
+    if raw <= 0 and DRY_RUN:
+        raw = pos.paper_raw
+    if raw <= 0:
+        return 0.0, 0
+    q = jup_quote(pos.mint, SOL_MINT, raw)
+    out_sol = int(q["outAmount"]) / 1e9
+    return out_sol * sol_usd(), raw
 
 
 def try_buy(kp: Keypair, st: State, e: dict) -> None:
@@ -517,211 +399,143 @@ def try_buy(kp: Keypair, st: State, e: dict) -> None:
     sym = e["symbol"]
     if mint in st.positions:
         return
+    if pool in st.seen_pools and mint not in st.positions:
+        # bu havuza daha önce bakıldı / girildi
+        return
     if time.time() < st.cooldown.get(mint, 0):
         return
     if len(st.positions) >= MAX_OPEN:
-        return
-    if not fee_ok_for_entry(BUY_SOL):
         return
 
     flags = mint_risk_flags(mint)
     if flags.get("ok"):
         if SKIP_IF_MINT_AUTHORITY and flags.get("mint_auth"):
-            log(f"{sym} SKIP mintAuthority var (rug risk) pool={pool[:8]}…")
+            log(f"{sym} SKIP mintAuth")
+            st.seen_pools[pool] = time.time()
             return
         if SKIP_IF_FREEZE_AUTHORITY and flags.get("freeze_auth"):
-            log(f"{sym} SKIP freezeAuthority var pool={pool[:8]}…")
+            log(f"{sym} SKIP freezeAuth")
+            st.seen_pools[pool] = time.time()
             return
 
     pub = str(kp.pubkey())
-    sol = sol_balance(pub)
-    if sol < BUY_SOL + MIN_SOL_RESERVE:
-        log(f"SOL yetersiz {sol:.4f} (gerek≈{BUY_SOL + MIN_SOL_RESERVE:.4f})")
+    need_sol = BUY_USD / sol_usd()
+    reserve = MIN_SOL_RESERVE_USD / sol_usd()
+    bal = sol_balance(pub)
+    if bal < need_sol + reserve:
+        log(f"SOL yetersiz {bal:.4f} (gerek≈{need_sol + reserve:.4f})")
         return
 
-    # Önce AL quote
-    lamports = int(BUY_SOL * 1e9)
+    lamports = usd_to_lamports(BUY_USD)
     try:
-        buy_q = jup_quote(SOL_MINT, mint, lamports, SLIPPAGE_BPS)
+        buy_q = jup_quote(SOL_MINT, mint, lamports)
     except Exception as ex:
-        log(f"{sym} SKIP Jupiter AL route yok: {ex}")
+        log(f"{sym} SKIP AL route: {ex}")
+        st.seen_pools[pool] = time.time()
         return
     out_raw = int(buy_q["outAmount"])
     if out_raw <= 0:
+        st.seen_pools[pool] = time.time()
         return
 
-    # Satış rotası zorunlu — paramız içeride kalmasın
-    if REQUIRE_JUPITER_SELL_ROUTE and not can_sell_via_jupiter(mint, max(out_raw // 10, 1)):
-        log(f"{sym} SKIP — SAT route yok (sıkışırdı) pool={pool}")
-        return
+    if REQUIRE_JUPITER_SELL_ROUTE:
+        try:
+            jup_quote(mint, SOL_MINT, max(out_raw // 10, 1))
+        except Exception as ex:
+            log(f"{sym} SKIP SAT route yok: {ex}")
+            st.seen_pools[pool] = time.time()
+            return
 
-    impact = float(buy_q.get("priceImpactPct") or 0)
     log(
-        f"AL aday {sym} pool={pool} liq=${e['liq_usd']:.0f} vol1h=${e['vol_h1']:.0f} "
-        f"age={e.get('age_min')} impact={impact}% fee_buf≈{ROUNDTRIP_FEE_PCT}%"
+        f"AL ${BUY_USD:.2f} → {sym} | pool={pool[:10]}… liq=${e['liq_usd']:.0f} "
+        f"age={e.get('age_min')} SOL≈{sol_usd():.2f}"
     )
 
     if DRY_RUN:
-        log(f"{sym} DRY_RUN AL {BUY_SOL} SOL (gönderilmedi)")
+        log(f"{sym} DRY_RUN AL (gönderilmedi)")
         st.positions[mint] = Position(
-            mint=mint,
-            pool=pool,
-            symbol=sym,
-            cost_sol=BUY_SOL,
-            entry_liq=float(e["liq_usd"]),
-            peak_liq=float(e["liq_usd"]),
-            entry_ts=time.time(),
-            entry_price_usd=float(e.get("price_usd") or 0),
-            paper_raw=out_raw,
+            mint=mint, pool=pool, symbol=sym, cost_usd=BUY_USD, entry_ts=time.time(), paper_raw=out_raw
         )
+        st.seen_pools[pool] = time.time()
         st.save()
         return
 
     sig = send_swap(kp, buy_q)
     log(f"{sym} AL OK https://solscan.io/tx/{sig}")
-    # kısa bekle + bakiye
-    time.sleep(2.5)
+    time.sleep(2.0)
     raw = token_raw_balance(pub, mint)
     st.positions[mint] = Position(
-        mint=mint,
-        pool=pool,
-        symbol=sym,
-        cost_sol=BUY_SOL,
-        entry_liq=float(e["liq_usd"]),
-        peak_liq=float(e["liq_usd"]),
-        entry_ts=time.time(),
-        entry_price_usd=float(e.get("price_usd") or 0),
-        paper_raw=raw,
+        mint=mint, pool=pool, symbol=sym, cost_usd=BUY_USD, entry_ts=time.time(), paper_raw=raw
     )
+    st.seen_pools[pool] = time.time()
     st.save()
 
 
-def try_sell(kp: Keypair, st: State, pos: Position, reason: str, liq_now: float) -> None:
-    pub = str(kp.pubkey())
-    raw = token_raw_balance(pub, pos.mint)
-    if raw <= 0 and DRY_RUN:
-        raw = pos.paper_raw
+def try_sell(kp: Keypair, st: State, pos: Position, reason: str, value_usd: float, raw: int) -> None:
     if raw <= 0:
-        log(f"{pos.symbol} SAT bakiye 0 — poz silindi")
         st.positions.pop(pos.mint, None)
-        st.cooldown[pos.mint] = time.time() + 20 * 60
+        st.cooldown[pos.mint] = time.time() + 15 * 60
         st.save()
         return
     try:
-        q = jup_quote(pos.mint, SOL_MINT, raw, SLIPPAGE_BPS)
+        q = jup_quote(pos.mint, SOL_MINT, raw)
     except Exception as e:
-        log(f"{pos.symbol} SAT quote fail (bekleniyor): {e}")
+        log(f"{pos.symbol} SAT quote fail: {e}")
         return
     out_sol = int(q["outAmount"]) / 1e9
-    fee_est = pos.cost_sol * (ROUNDTRIP_FEE_PCT / 100.0)
-    net = out_sol - (pos.cost_sol)  # kaba
-    log(
-        f"SAT {pos.symbol} ({reason}) liq=${liq_now:.0f} peak=${pos.peak_liq:.0f} "
-        f"→ {out_sol:.4f} SOL | kaba_net≈{net:+.4f} fee≈{fee_est:.4f}"
-    )
+    log(f"SAT {pos.symbol} ({reason}) değer≈${value_usd:.2f} → {out_sol:.5f} SOL")
     if DRY_RUN:
         log(f"{pos.symbol} DRY_RUN SAT")
         st.positions.pop(pos.mint, None)
-        st.cooldown[pos.mint] = time.time() + 20 * 60
+        st.cooldown[pos.mint] = time.time() + 15 * 60
         st.save()
         return
     sig = send_swap(kp, q)
     log(f"{pos.symbol} SAT OK https://solscan.io/tx/{sig}")
     st.positions.pop(pos.mint, None)
-    st.cooldown[pos.mint] = time.time() + 20 * 60
+    st.cooldown[pos.mint] = time.time() + 15 * 60
     st.save()
 
 
 def manage_positions(kp: Keypair, st: State) -> None:
+    pub = str(kp.pubkey())
     for mint, pos in list(st.positions.items()):
-        ds = dexscreener_pair(pos.pool)
-        liq = float(((ds or {}).get("liquidity") or {}).get("usd") or 0) if ds else 0.0
-        if liq <= 0:
-            # pool kayboldu / rug — çıkmayı dene
-            log(f"{pos.symbol} pool likidite okunamadı → acil SAT denenecek")
-            try_sell(kp, st, pos, "POOL_GONE", 0)
+        try:
+            value_usd, raw = position_value_usd(pub, pos)
+        except Exception as e:
+            log(f"{pos.symbol} değer okunamadı: {e}")
             continue
-        pos.peak_liq = max(pos.peak_liq, liq)
-        price = float((ds or {}).get("priceUsd") or 0)
-        pnl_px = None
-        if pos.entry_price_usd > 0 and price > 0:
-            pnl_px = (price / pos.entry_price_usd - 1.0) * 100.0
-        drop_peak = (liq / pos.peak_liq - 1.0) * 100.0 if pos.peak_liq > 0 else 0.0
-        drop_entry = (liq / pos.entry_liq - 1.0) * 100.0 if pos.entry_liq > 0 else 0.0
-        held_min = (time.time() - pos.entry_ts) / 60.0
+        held = (time.time() - pos.entry_ts) / 60.0
         log(
-            f"POS {pos.symbol} liq=${liq:.0f} peak={pos.peak_liq:.0f} "
-            f"dPeak={drop_peak:.1f}% dEntry={drop_entry:.1f}% pnl≈{pnl_px} hold={held_min:.1f}m"
+            f"POS {pos.symbol} değer≈${value_usd:.2f} (hedef ${SELL_USD:.2f} / SL ${STOP_LOSS_USD:.2f}) "
+            f"hold={held:.1f}m"
         )
-
         reason = None
-        if drop_peak <= -LIQ_DROP_FROM_PEAK_PCT:
-            reason = f"LIQ_DROP_PEAK {drop_peak:.1f}%"
-        elif drop_entry <= -LIQ_DROP_ABS_PCT:
-            reason = f"LIQ_DROP_ENTRY {drop_entry:.1f}%"
-        elif pnl_px is not None and pnl_px <= STOP_LOSS_PCT:
-            reason = f"SL {pnl_px:.1f}%"
-        elif pnl_px is not None and pnl_px >= TAKE_PROFIT_PCT:
-            # TP sadece fee üstü
-            if pnl_px >= ROUNDTRIP_FEE_PCT + MIN_EDGE_OVER_FEE_PCT:
-                reason = f"TP {pnl_px:.1f}%"
-        elif held_min >= MAX_HOLD_MIN:
+        if value_usd >= SELL_USD:
+            reason = f"TP ${value_usd:.2f}>={SELL_USD}"
+        elif value_usd > 0 and value_usd <= STOP_LOSS_USD:
+            reason = f"SL ${value_usd:.2f}"
+        elif held >= MAX_HOLD_MIN:
             reason = "MAX_HOLD"
-
         if reason:
-            try_sell(kp, st, pos, reason, liq)
-        else:
-            st.positions[mint] = pos
-    st.save()
+            try_sell(kp, st, pos, reason, value_usd, raw)
 
 
-def scan_and_enter(kp: Keypair, st: State) -> None:
-    raw = discover_pools()
-    log(f"tarama aday={len(raw)} (new+trending)")
-    scored: list[tuple[float, dict, PoolWatch]] = []
+def scan_new(kp: Keypair, st: State) -> None:
+    raw = discover_new_pools()
+    log(f"yeni havuz tarama={len(raw)} | SOL=${sol_usd():.2f} | buy=${BUY_USD} sell=${SELL_USD}")
+    # eski seen temizle
+    cut = time.time() - 6 * 3600
+    st.seen_pools = {k: v for k, v in st.seen_pools.items() if v >= cut}
+
     for row in raw:
+        if row["pool"] in st.seen_pools:
+            continue
         e = enrich(row)
         if not e:
+            st.seen_pools[row["pool"]] = time.time()
             continue
-        w = st.watches.get(e["pool"]) or PoolWatch(
-            pool=e["pool"], mint=e["base_mint"], symbol=e["symbol"]
-        )
-        w.mint = e["base_mint"]
-        w.symbol = e["symbol"]
-        w.push(float(e["liq_usd"]), float(e["vol_h1"] or e["vol_m5"]))
-        st.watches[e["pool"]] = w
-        lr = w.liq_rise_pct()
-        vr = w.vol_rise_pct()
-        # ilk örnekte geçmiş yok — bir sonraki taramada gir
-        if lr is None or vr is None:
-            continue
-        if lr < MIN_LIQ_RISE_PCT and vr < MIN_VOL_RISE_PCT:
-            continue
-        # en az biri güçlü olsun
-        if lr < MIN_LIQ_RISE_PCT * 0.5 and vr < MIN_VOL_RISE_PCT:
-            continue
-        scored.append((score_candidate(e, w), e, w))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    # watch list şişmesin
-    if len(st.watches) > 80:
-        ranked = sorted(
-            st.watches.items(),
-            key=lambda kv: (kv[1].liq_hist[-1][0] if kv[1].liq_hist else 0),
-            reverse=True,
-        )
-        keep_pools = {p.pool for p in st.positions.values()}
-        fresh: dict[str, PoolWatch] = {}
-        for k, v in ranked:
-            if k in keep_pools or len(fresh) < 60:
-                fresh[k] = v
-        st.watches = fresh
-
-    for sc, e, w in scored[:8]:
-        log(
-            f"sinyal {e['symbol']} score={sc:.1f} liq=${e['liq_usd']:.0f} "
-            f"liqΔ={w.liq_rise_pct():.1f}% volΔ={w.vol_rise_pct():.1f}% pool={e['pool'][:10]}…"
-        )
+        log(f"aday {e['symbol']} liq=${e['liq_usd']:.0f} age={e.get('age_min')} pool={e['pool'][:10]}…")
         try_buy(kp, st, e)
         if len(st.positions) >= MAX_OPEN:
             break
@@ -731,22 +545,17 @@ def scan_and_enter(kp: Keypair, st: State) -> None:
 def main() -> None:
     kp = load_keypair()
     st = State.load()
-    log("=" * 60)
-    log("Likidite avcısı | Jupiter AL/SAT | pool kontrol + fee tampon")
-    log(f"pubkey={kp.pubkey()}")
-    log(f"DRY_RUN={DRY_RUN} buy={BUY_SOL}SOL max_open={MAX_OPEN}")
-    log(
-        f"giriş: liq↑≥{MIN_LIQ_RISE_PCT}% vol↑≥{MIN_VOL_RISE_PCT}% | "
-        f"çıkış: peak liq↓{LIQ_DROP_FROM_PEAK_PCT}% fee≈{ROUNDTRIP_FEE_PCT}%"
-    )
-    log("=" * 60)
+    log("=" * 56)
+    log(f"$0.50 AL → $1.00 SAT | yeni Solana havuzları | DRY_RUN={DRY_RUN}")
+    log(f"pubkey={kp.pubkey()} | SOL≈${sol_usd():.2f}")
+    log("=" * 56)
     last_scan = 0.0
     while True:
         try:
             manage_positions(kp, st)
             now = time.time()
             if now - last_scan >= SCAN_SEC:
-                scan_and_enter(kp, st)
+                scan_new(kp, st)
                 last_scan = now
         except KeyboardInterrupt:
             log("çıkış")

@@ -1,44 +1,17 @@
-# Phantom key → Jupiter likidite avcısı
+# phantom.py — $0.50 AL → $1 SAT (yeni havuz)
 
-Bot **Phantom’a bağlanmaz**. Ayrı cüzdanın private key’i ile Jupiter’da AL/SAT yapar.
-
-## Ne yapar
-
-1. Solana’da **yeni + trending** havuzları tarar  
-2. **Pool adresini** on-chain kontrol eder  
-3. Likidite↑ + hacim↑ ise **girer** (Jupiter AL)  
-4. Satış rotası yoksa **girmez** (içeride kalmasın)  
-5. Mint/freeze authority varsa **atlar**  
-6. Havuz likiditesi zirveden düşünce **çıkar** (+ SL/TP/süre)  
-7. Round-trip **komisyon tamponu** (~%2.5) hesaba katılır  
+Her açılan Solana `*/SOL` havuza yaklaşık **$0.50** girer, pozisyon **~$1** olunca satar.
 
 ## Kurulum
 
-**Sadece cüzdan ADRESİ yetmez.** Adres izler; AL/SAT için **private key** gerekir.  
-Helius / Jupiter API **zorunlu değil** (boş bırak).
-
 ```bash
 pip install requests solders
-
-# 1) Bot cüzdanı üret (ADRES + KEY çıkar)
-python3 -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
-
-# 2) Phantom → Gönder → ADRES'e SOL yolla
-# 3) phantom_jupiter_bot.py içinde: SOLANA_PRIVATE_KEY = "KEY"
-# 4) Çalıştır
-python phantom_jupiter_bot.py
+python -c "from solders.keypair import Keypair; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', k)"
 ```
 
-Önce `DRY_RUN = True`. Canlı: `False`.
+1. `ADRES`'e Binance/Phantom'dan SOL yolla  
+2. `phantom.py` → `SOLANA_PRIVATE_KEY = "KEY"`  
+3. Önce `DRY_RUN = True` → `python phantom.py`  
+4. Canlı: `DRY_RUN = False`
 
-## Ayarlar (dosya içi)
-
-| Ayar | Anlam |
-|------|--------|
-| `BUY_SOL` | Her AL miktarı |
-| `MIN_LIQ_USD` | Min havuz likiditesi |
-| `LIQ_DROP_FROM_PEAK_PCT` | Zirveden düşünce SAT |
-| `ROUNDTRIP_FEE_PCT` | Komisyon tamponu |
-| `MAX_OPEN` | Aynı anda max coin |
-
-KEY’i Git’e / chat’e koyma.
+Helius/Jupiter API **gerekmez**.
