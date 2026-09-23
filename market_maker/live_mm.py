@@ -282,9 +282,59 @@ def ban_until_ms(err: Exception | str) -> Optional[int]:
     return None
 
 
+def save_ban_flag(until_ms: int) -> None:
+    try:
+        BAN_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BAN_FLAG_PATH.write_text(str(int(until_ms)), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def clear_ban_flag() -> None:
+    try:
+        if BAN_FLAG_PATH.exists():
+            BAN_FLAG_PATH.unlink()
+    except Exception:
+        pass
+
+
+def refuse_if_saved_ban() -> None:
+    try:
+        if not BAN_FLAG_PATH.exists():
+            return
+        until = int(BAN_FLAG_PATH.read_text(encoding="utf-8").strip())
+    except Exception:
+        return
+    now = int(time.time() * 1000)
+    if until <= now:
+        clear_ban_flag()
+        return
+    wait_s = (until - now) / 1000.0
+    human = datetime.fromtimestamp(until / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    raise SystemExit(
+        f"IP BAN hâlâ aktif → {human} (≈{wait_s/3600:.1f} saat kaldı). "
+        "Botu KAPALI tut. Bitmeden açma (ban uzar)."
+    )
+
+
+def abort_ban(err: Exception | str) -> None:
+    until = ban_until_ms(err) or (int(time.time() * 1000) + 60 * 60 * 1000)
+    save_ban_flag(until)
+    wait_s = max(0.0, (until - int(time.time() * 1000)) / 1000.0)
+    human = datetime.fromtimestamp(until / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    raise SystemExit(
+        f"\n*** BINANCE IP BAN (muhtemelen ESKİ ban hâlâ aktif) ***\n"
+        f"Bitiş: {human} (≈{wait_s/3600:.1f} saat)\n"
+        f"Bot KAPANDI. Bitene kadar tekrar AÇMA. VPN değiştirme.\n"
+    )
+
+
 async def sleep_ban(err: Exception | str) -> None:
+    if EXIT_ON_BAN:
+        abort_ban(err)
     global _ban_until_ms_shared, _ban_log_ts
     until = ban_until_ms(err) or (int(time.time() * 1000) + 60_000)
+    save_ban_flag(until)
     async with _get_ban_lock():
         _ban_until_ms_shared = max(_ban_until_ms_shared, until)
         target = _ban_until_ms_shared
@@ -300,6 +350,7 @@ async def sleep_ban(err: Exception | str) -> None:
             log.info("ban… %.0fs", end - time.time())
             _ban_log_ts = time.time()
         await asyncio.sleep(min(60.0, max(1.0, end - time.time())))
+    clear_ban_flag()
 
 
 async def wait_if_banned() -> None:
@@ -548,35 +599,34 @@ class Exchange:
             return await loop.run_in_executor(None, lambda: fn(*a, **kw))
 
     async def init(self) -> None:
-        while True:
-            try:
-                await wait_if_banned()
-                await api_pace()
-                # reload=False, currencies yok — sadece public exchangeInfo
-                await self.run(self.rest.load_markets, False)
-                log.info(
-                    "CANLI MM | BAN-SAFE markets=%d open=%d gap=%.2fs inflight≤%d book=%ds",
-                    len(self.rest.markets),
-                    MAX_OPEN,
-                    API_MIN_GAP_SEC,
-                    API_MAX_INFLIGHT,
-                    int(BOOK_REST_SEC),
+        refuse_if_saved_ban()
+        try:
+            await wait_if_banned()
+            await api_pace()
+            await self.run(self.rest.load_markets, False)
+            clear_ban_flag()
+            log.info(
+                "CANLI MM | BAN-SAFE markets=%d open=%d gap=%.2fs inflight≤%d book=%ds",
+                len(self.rest.markets),
+                MAX_OPEN,
+                API_MIN_GAP_SEC,
+                API_MAX_INFLIGHT,
+                int(BOOK_REST_SEC),
+            )
+            return
+        except SystemExit:
+            raise
+        except Exception as e:
+            msg = str(e)
+            if ban_until_ms(e) or "418" in msg or "banned" in msg.lower():
+                abort_ban(e)
+            if "NetworkError" in type(e).__name__ or "capital/config" in msg or "getall" in msg:
+                log.error("ağ hatası (ban olabilir): %s", e)
+                raise SystemExit(
+                    "Markets yüklenemedi — ban bitmemiş olabilir. "
+                    "Bekle, VPN değiştirme, tekrar deneme."
                 )
-                return
-            except Exception as e:
-                msg = str(e)
-                if ban_until_ms(e) or "418" in msg or "banned" in msg.lower():
-                    await sleep_ban(e)
-                    continue
-                if "NetworkError" in type(e).__name__ or "capital/config" in msg or "getall" in msg:
-                    log.error(
-                        "ağ/ban: markets yüklenemedi (%s). 3s sonra tekrar… "
-                        "Hâlâ banlıysan bekle, VPN/IP değiştirme.",
-                        e,
-                    )
-                    await asyncio.sleep(3.0)
-                    continue
-                raise
+            raise
 
     async def close(self) -> None:
         try:
@@ -1896,6 +1946,7 @@ class Engine:
 
 
 async def main() -> None:
+    refuse_if_saved_ban()
     key, secret = resolve_keys()
     ex = Exchange(key, secret)
     await ex.init()
@@ -1952,3 +2003,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         sys.exit(0)
+    except SystemExit as e:
+        if e.code not in (0, None):
+            print(e, flush=True)
+        raise
