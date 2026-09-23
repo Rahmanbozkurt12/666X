@@ -46,21 +46,20 @@ if _env_helius:
 # =============================================================================
 DRY_RUN = True                      # Canlı için False yap
 RESET_STATE_ON_START = True         # True = eski hayalet pozisyonları sil, temiz başla
-BUY_USD = 0.50                      # her yeni havuza giriş
-SELL_USD = 0.70                     # komisyon sonrası küçük kâr (~%40 brüt)
-STOP_LOSS_USD = 0.35
-MAX_OPEN = 5
-MIN_SOL_RESERVE_USD = 0.15
-SLIPPAGE_BPS = 150                  # daha sıkı slippage (büyük havuz)
+BUY_USD = 0.50                      # her giriş
+SELL_USD = 0.62                     # hızlı küçük kâr (~%24) — daha hareketli
+STOP_LOSS_USD = 0.38                # hızlı kes
+MAX_OPEN = 8                        # aynı anda daha fazla coin
+MIN_SOL_RESERVE_USD = 0.12
+SLIPPAGE_BPS = 200
 PRIORITY_FEE = "auto"
-ROUNDTRIP_FEE_USD = 0.08            # ~komisyon+slippage tamponu ($0.50 işlemde)
-MAX_PRICE_IMPACT_PCT = 1.5          # tek başına market hareket ettirme
+ROUNDTRIP_FEE_USD = 0.05            # fee tamponu (daha az eleme)
+MAX_PRICE_IMPACT_PCT = 2.5
 
-# Havuz kalitesi — yüksek likidite (yalnız alıcı olma)
-MIN_LIQ_USD = 10_000.0              # en az $10k havuz
+# Havuz kalitesi — yüksek likidite ama daha çok aday
+MIN_LIQ_USD = 8_000.0               # ≥$8k (hareketli)
 MAX_LIQ_USD = 5_000_000.0
-MIN_VOL_H1_USD = 3_000.0            # başkaları da işlem yapsın
-# Raydium + likit alternatifler (çoğu yeni coin pumpswap/meteora)
+MIN_VOL_H1_USD = 1_500.0            # daha düşük hacim eşiği
 ALLOWED_DEX = {
     "raydium",
     "raydium-clmm",
@@ -70,17 +69,17 @@ ALLOWED_DEX = {
     "meteora",
     "orca",
 }
-MAX_PAIR_AGE_MIN = 7 * 24 * 60      # 7 gün
-MIN_PAIR_AGE_SEC = 45
+MAX_PAIR_AGE_MIN = 3 * 24 * 60      # 3 gün (taze/hareketli)
+MIN_PAIR_AGE_SEC = 20
 REQUIRE_JUPITER_SELL_ROUTE = True
 SKIP_IF_MINT_AUTHORITY = False
 SKIP_IF_FREEZE_AUTHORITY = True
 REQUIRE_SOL_QUOTE = True
 
-POLL_SEC = 15.0
-SCAN_SEC = 25.0
-MAX_HOLD_MIN = 90
-RPC_MIN_GAP_SEC = 0.35
+POLL_SEC = 8.0                      # pozisyon kontrolü sık
+SCAN_SEC = 12.0                     # tarama sık
+MAX_HOLD_MIN = 45                   # uzun tutma yok
+RPC_MIN_GAP_SEC = 0.25
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 JUP_BASE = "https://lite-api.jup.ag/swap/v1"
@@ -385,7 +384,7 @@ def discover_new_pools() -> list[dict[str, Any]]:
                 if mint:
                     tokens.append(mint)
         # arama ile ekstra aday
-        for q in ("pump", "bonk", "meme"):
+        for q in ("pump", "bonk", "meme", "sol", "ai", "cat"):
             sr = HTTP.get(f"{DS_BASE}/search", params={"q": q}, timeout=25)
             if sr.status_code != 200:
                 continue
@@ -412,7 +411,7 @@ def discover_new_pools() -> list[dict[str, Any]]:
                     f"ds-search:{q}",
                 )
 
-        for mint in tokens[:25]:
+        for mint in tokens[:40]:
             pr = HTTP.get(f"{DS_BASE}/tokens/{mint}", timeout=20)
             if pr.status_code != 200:
                 continue
