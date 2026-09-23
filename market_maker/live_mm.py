@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
-Binance Spot Market Maker — SADECE USDT · BAN-SAFE
+Binance Spot Market Maker — SADECE USDT · BAN-SAFE · 15 COİN
 
-IP BAN koruması (sıkı):
-- Aynı anda 1 REST (sıralı)
-- İstek arası ≥0.6s
-- Max 5 coin, book 60s, tarama 5dk
-- SAPI currencies kapalı
-- 5m mum en fazla 8 aday
+- Tarama: TÜM Binance */USDT (hepsi skorlanır)
+- Odak: 15 farklı coin (aynı 5'e yapışmaz)
+- API: sırayla, aynı anda 1 istek (IP ban koruması)
 
 1) API KEY yaz
 2) pip install "ccxt[pro]"
@@ -50,34 +47,35 @@ QUOTE = "USDT"
 SCAN_ALL = True
 FORCE_MIN_OPEN = True
 
-# --- BAN-SAFE PROFİL (değiştirme) ---
-MAX_OPEN = 5                    # paralel coin ↓
-MIN_OPEN = 5
-CANDIDATE_POOL = 40
-SCAN_SEC = 300.0                # 5 dk'da bir tarama
+# --- BAN-SAFE PROFİL ---
+# Tarama: TÜM */USDT. Odak: 15 coin. API: sırayla tek istek (ban yok).
+MAX_OPEN = 15
+MIN_OPEN = 15
+CANDIDATE_POOL = 120            # aynı 5 coine yapışmasın
+SCAN_SEC = 300.0                # 5 dk'da bir tam tarama
 REPLACE_SEC = 150.0
 BALANCE_CACHE_SEC = 30.0
 FILL_POLL_SEC = 60.0
-BOOK_REST_SEC = 60.0            # orderbook en fazla 1/dk/coin
+BOOK_REST_SEC = 60.0
 WORKER_STAGGER_SEC = 6.0
 HOLD_QUOTE_MULT = 15.0
 LOOP_SLEEP_SEC = 4.0
 USE_WS = False
-SEQUENTIAL_SLOTS = True         # coinler sırayla — ban ana koruma
-SLOT_TURN_GAP_SEC = 1.2         # her coin turu arası
+SEQUENTIAL_SLOTS = True         # 15 coin de sırayla — paralel REST YOK
+SLOT_TURN_GAP_SEC = 0.9         # coin turu arası
 API_RATE_MS = 1200
-API_MIN_GAP_SEC = 0.60          # her REST arası
-API_MAX_INFLIGHT = 1            # AYNİ ANDA TEK İSTEK
-API_COOLDOWN_SEC = 25.0         # yoğunlukta ek mola
-API_SOFT_LIMIT_PER_MIN = 40     # dakikada max REST; aşınca cooldown
+API_MIN_GAP_SEC = 0.55
+API_MAX_INFLIGHT = 1            # aynı anda 1 API
+API_COOLDOWN_SEC = 30.0
+API_SOFT_LIMIT_PER_MIN = 55     # 15 slot için biraz daha pay
 TICKER_CACHE_SEC = 90.0
-ROTATE_COOLDOWN_SEC = 10 * 60
-KEEP_GRACE_SEC = 90.0
+ROTATE_COOLDOWN_SEC = 12 * 60   # çıkan coin 12dk soğuk — çeşitlilik
+KEEP_GRACE_SEC = 60.0
 SAME_COIN_BUY_SEC = 60.0
 KLINE_TF = "5m"
 KLINE_LIMIT = 6
-KLINE_TOP_N = 8
-KLINE_SLEEP_SEC = 0.70
+KLINE_TOP_N = 15                # üst 15'e 5m bak (sırayla)
+KLINE_SLEEP_SEC = 0.55
 
 MIN_USDT_VOL = 400.0
 SOFT_USDT_VOL = 1_000.0
@@ -1130,6 +1128,13 @@ async def pick_open_pairs(
     now = time.time()
     cold = {s for s, ts in cooldown.items() if now - ts < ROTATE_COOLDOWN_SEC}
 
+    # Çeşitlilik: eski keep'in en fazla yarısını tut → yeni coin girsin
+    keep_list = [s for s in keep if s.endswith("/USDT")]
+    if len(keep_list) > max(3, MIN_OPEN // 2):
+        random.shuffle(keep_list)
+        keep_list = keep_list[: max(3, MIN_OPEN // 2)]
+    keep = set(keep_list)
+
     ranked, scanned, spot_n = scan_all_binance(
         ex, tickers, MIN_USDT_VOL, MIN_METHODS_PASS, MAX_BOOK_SPREAD_BPS, require_rise=False
     )
@@ -1156,7 +1161,6 @@ async def pick_open_pairs(
         loose, sc2, _ = scan_all_binance(
             ex, tickers, SOFT_USDT_VOL, FALLBACK_METHODS_PASS, MAX_BOOK_SPREAD_BPS * 1.6, require_rise=False
         )
-        # 2. kez 5m OHLCV yağmuru YOK — ban riski
         scanned = max(scanned, sc2)
         for _sc, _b, trade_sym, _v in loose:
             if trade_sym:
@@ -1180,10 +1184,12 @@ async def pick_open_pairs(
         if s.endswith("/USDT") and s not in out:
             out.append(s)
     rest = [s for s in pool if s not in out]
-    top = rest[: max(n * 2, 40)]
+    # skor + shuffle: hep aynı coinler olmasın
+    top = rest[: max(n * 3, 60)]
     mid = rest[len(top) :]
-    head, tail = top[: max(n, 10)], top[max(n, 10) :]
+    head, tail = top[: max(n // 2, 5)], top[max(n // 2, 5) :]
     random.shuffle(tail)
+    random.shuffle(mid)
     for s in head + tail + mid:
         if len(out) >= n:
             break
@@ -1198,7 +1204,7 @@ async def pick_open_pairs(
 
     names = ", ".join(s.replace("/USDT", "") for s in out)
     log.info(
-        "TARAMA | spot=%d taranan=%d pad=%d havuz=%d odak=%d (≥%d) USDT → %s",
+        "TARAMA | tüm_USDT spot=%d taranan=%d pad=%d havuz=%d odak=%d (≥%d) → %s",
         spot_n,
         scanned,
         len(pad),
