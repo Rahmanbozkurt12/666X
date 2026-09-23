@@ -48,8 +48,8 @@ DRY_RUN = True                      # Canlı için False yap
 BUY_USD = 0.50                      # her yeni havuza giriş
 SELL_USD = 0.65                     # ~%30 kâr → sat (küçük kâr, sık çık)
 STOP_LOSS_USD = 0.35                # ~%30 zarar → çık
-MAX_OPEN = 10
-MIN_SOL_RESERVE_USD = 1.0
+MAX_OPEN = 5
+MIN_SOL_RESERVE_USD = 0.15          # gas için az SOL yeter (~$0.15)
 SLIPPAGE_BPS = 250
 PRIORITY_FEE = "auto"
 
@@ -62,9 +62,10 @@ SKIP_IF_MINT_AUTHORITY = False
 SKIP_IF_FREEZE_AUTHORITY = True
 REQUIRE_SOL_QUOTE = True
 
-POLL_SEC = 10.0
-SCAN_SEC = 15.0
+POLL_SEC = 15.0
+SCAN_SEC = 25.0
 MAX_HOLD_MIN = 60
+RPC_MIN_GAP_SEC = 0.35              # public RPC ban olmasın
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 JUP_BASE = "https://lite-api.jup.ag/swap/v1"
@@ -77,6 +78,7 @@ HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "phantom-050-bot/2.0", "Accept": "application/json"})
 
 _sol_px_cache = {"ts": 0.0, "px": 0.0}
+_rpc_last_ts = 0.0
 
 
 def log(msg: str) -> None:
@@ -110,17 +112,32 @@ def rpc_url() -> str:
 
 
 def rpc(method: str, params: list[Any]) -> Any:
-    r = HTTP.post(
-        rpc_url(),
-        json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-        timeout=45,
-    )
-    r.raise_for_status()
-    body = r.json()
-    if body.get("error"):
-        raise RuntimeError(body["error"])
-    return body.get("result")
-
+    global _rpc_last_ts
+    last_err: Exception | None = None
+    for attempt in range(5):
+        wait = RPC_MIN_GAP_SEC - (time.time() - _rpc_last_ts)
+        if wait > 0:
+            time.sleep(wait)
+        _rpc_last_ts = time.time()
+        try:
+            r = HTTP.post(
+                rpc_url(),
+                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                timeout=45,
+            )
+            if r.status_code == 429:
+                time.sleep(1.5 * (attempt + 1))
+                last_err = RuntimeError("RPC 429 Too Many Requests")
+                continue
+            r.raise_for_status()
+            body = r.json()
+            if body.get("error"):
+                raise RuntimeError(body["error"])
+            return body.get("result")
+        except Exception as e:
+            last_err = e
+            time.sleep(0.8 * (attempt + 1))
+    raise RuntimeError(last_err)
 
 def load_keypair() -> Keypair:
     load_keys_file()
@@ -533,6 +550,12 @@ def manage_positions(kp: Keypair, st: State) -> None:
         except Exception as e:
             log(f"{pos.symbol} değer okunamadı: {e}")
             continue
+        # Canlıda bakiyesi 0 sahte/eski pozisyonları sil
+        if not DRY_RUN and raw <= 0 and value_usd <= 0:
+            log(f"{pos.symbol} hayalet poz silindi (zincirde token yok)")
+            st.positions.pop(mint, None)
+            st.save()
+            continue
         held = (time.time() - pos.entry_ts) / 60.0
         log(
             f"POS {pos.symbol} ≈${value_usd:.2f} (AL ${BUY_USD:.2f} → SAT ${SELL_USD:.2f} / SL ${STOP_LOSS_USD:.2f}) "
@@ -547,6 +570,25 @@ def manage_positions(kp: Keypair, st: State) -> None:
             reason = "MAX_HOLD"
         if reason:
             try_sell(kp, st, pos, reason, value_usd, raw)
+
+
+def purge_ghosts(kp: Keypair, st: State) -> None:
+    """DRY_RUN'dan kalan / boş pozisyonları temizle."""
+    if DRY_RUN:
+        return
+    pub = str(kp.pubkey())
+    removed = 0
+    for mint, pos in list(st.positions.items()):
+        try:
+            raw = token_raw_balance(pub, pos.mint)
+        except Exception:
+            continue
+        if raw <= 0:
+            st.positions.pop(mint, None)
+            removed += 1
+    if removed:
+        log(f"hayalet poz temizlendi: {removed}")
+        st.save()
 
 
 def scan_new(kp: Keypair, st: State) -> None:
@@ -572,9 +614,17 @@ def scan_new(kp: Keypair, st: State) -> None:
 def main() -> None:
     kp = load_keypair()
     st = State.load()
+    purge_ghosts(kp, st)
+    bal = sol_balance(str(kp.pubkey()))
+    need = BUY_USD / sol_usd() + MIN_SOL_RESERVE_USD / sol_usd()
     log("=" * 56)
     log(f"YENİ COİN | ${BUY_USD} AL → ${SELL_USD} SAT (küçük kâr) | DRY_RUN={DRY_RUN}")
     log(f"pubkey={kp.pubkey()} | SOL≈${sol_usd():.2f}")
+    log(f"bakiye={bal:.4f} SOL | 1 işlem için min≈{need:.4f} SOL")
+    if bal < need:
+        log("UYARI: SOL yetersiz — bu pubkey'e SOL yolla, sonra tekrar aç.")
+    if not HELIUS_API_KEY:
+        log("UYARI: HELIUS_API_KEY yok — public RPC 429 verebilir (helius.dev ücretsiz key al).")
     log("=" * 56)
     last_scan = 0.0
     while True:
