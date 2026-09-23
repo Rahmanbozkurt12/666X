@@ -45,21 +45,23 @@ if _env_helius:
 # STRATEJİ — $0.50 AL → küçük kârda SAT (hep küçük kâr)
 # =============================================================================
 DRY_RUN = True                      # Canlı için False yap
-RESET_STATE_ON_START = True         # True = eski hayalet pozisyonları sil, temiz başla
+RESET_STATE_ON_START = False        # True yaparsan her açılışta poz siler
 BUY_USD = 0.50                      # her giriş
-SELL_USD = 0.62                     # hızlı küçük kâr (~%24) — daha hareketli
-STOP_LOSS_USD = 0.38                # hızlı kes
-MAX_OPEN = 8                        # aynı anda daha fazla coin
-MIN_SOL_RESERVE_USD = 0.12
+SELL_USD = 0.56                     # ~%12 kâr → SAT (komisyon sonrası küçük net)
+STOP_LOSS_USD = 0.40                # ~%20 zarar → çık
+QUICK_TAKE_MIN = 3.0                # 3 dk sonra ufak yeşil varsa sat
+QUICK_TAKE_USD = 0.52               # 3 dk+ ve ≥$0.52 → sat (hareketli)
+MAX_OPEN = 5
+MIN_SOL_RESERVE_USD = 0.05          # küçük cüzdan için
 SLIPPAGE_BPS = 200
 PRIORITY_FEE = "auto"
-ROUNDTRIP_FEE_USD = 0.05            # fee tamponu (daha az eleme)
+ROUNDTRIP_FEE_USD = 0.04
 MAX_PRICE_IMPACT_PCT = 2.5
 
-# Havuz kalitesi — yüksek likidite ama daha çok aday
-MIN_LIQ_USD = 8_000.0               # ≥$8k (hareketli)
+# Havuz kalitesi
+MIN_LIQ_USD = 8_000.0
 MAX_LIQ_USD = 5_000_000.0
-MIN_VOL_H1_USD = 1_500.0            # daha düşük hacim eşiği
+MIN_VOL_H1_USD = 1_500.0
 ALLOWED_DEX = {
     "raydium",
     "raydium-clmm",
@@ -69,16 +71,16 @@ ALLOWED_DEX = {
     "meteora",
     "orca",
 }
-MAX_PAIR_AGE_MIN = 3 * 24 * 60      # 3 gün (taze/hareketli)
+MAX_PAIR_AGE_MIN = 3 * 24 * 60
 MIN_PAIR_AGE_SEC = 20
 REQUIRE_JUPITER_SELL_ROUTE = True
 SKIP_IF_MINT_AUTHORITY = False
 SKIP_IF_FREEZE_AUTHORITY = True
 REQUIRE_SOL_QUOTE = True
 
-POLL_SEC = 8.0                      # pozisyon kontrolü sık
-SCAN_SEC = 12.0                     # tarama sık
-MAX_HOLD_MIN = 45                   # uzun tutma yok
+POLL_SEC = 6.0                      # satış kontrolü sık
+SCAN_SEC = 12.0
+MAX_HOLD_MIN = 25                   # 25 dk'da mutlaka gözden geçir/çık
 RPC_MIN_GAP_SEC = 0.25
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
