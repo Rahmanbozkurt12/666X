@@ -118,6 +118,8 @@ POST_FILL_COOLDOWN_SEC = SAME_COIN_BUY_SEC
 VOL_WIDEN_MULT = 2.4
 SKEW_STRENGTH = 0.85
 BUY_GATES_OFF = True
+SKIP_PRIME_FILLS = True         # ban-safe: açılışta myTrades yağmuru yok
+SLOT_BAL_MIN_SEC = 45.0         # slot balance poll seyrek
 
 W_VOL_RISE = 5.0
 W_VOL_RISE_PCT = 3.5
@@ -483,7 +485,23 @@ class DayStats:
         try:
             if STATS_PATH.exists():
                 raw = json.loads(STATS_PATH.read_text(encoding="utf-8"))
-                st = cls(**{k: raw[k] for k in cls.__dataclass_fields__ if k in raw})
+                kwargs = {}
+                for k, f in cls.__dataclass_fields__.items():
+                    if k not in raw:
+                        continue
+                    v = raw[k]
+                    try:
+                        if f.type in ("int", int) or getattr(f.type, "__name__", "") == "int":
+                            kwargs[k] = int(v)
+                        elif f.type in ("float", float) or getattr(f.type, "__name__", "") == "float":
+                            kwargs[k] = float(v)
+                        elif f.type in ("str", str) or getattr(f.type, "__name__", "") == "str":
+                            kwargs[k] = str(v)
+                        else:
+                            kwargs[k] = v
+                    except Exception:
+                        continue
+                st = cls(**kwargs)
                 st.ensure_today()
                 return st
         except Exception:
@@ -502,35 +520,25 @@ class Exchange:
             "options": {
                 "defaultType": "spot",
                 "adjustForTimeDifference": True,
-                "fetchCurrencies": False,  # sapi capital/config → ban/network kırılmasın
+                "fetchCurrencies": False,
                 "warnOnFetchOpenOrdersWithoutSymbol": False,
             },
         }
         self.rest = ccxt.binance(opts)
         self.rest.set_sandbox_mode(False)
-        # public market bilgisi yeterli; signed sapi currencies lazım değil
         try:
             self.rest.has["fetchCurrencies"] = False
         except Exception:
             pass
-        # az bağlantı — pool şişmesin
         try:
             from requests.adapters import HTTPAdapter
 
-            adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4, max_retries=1)
+            adapter = HTTPAdapter(pool_connections=2, pool_maxsize=2, max_retries=0)
             self.rest.session.mount("https://", adapter)
             self.rest.session.mount("http://", adapter)
         except Exception as e:
             log.warning("session pool ayarlanamadı: %s", e)
         self.ws = None
-        if USE_WS and ccxtpro is not None:
-            try:
-                self.ws = ccxtpro.binance(opts)
-                self.ws.set_sandbox_mode(False)
-            except Exception as e:
-                log.warning("WS yok: %s", e)
-        else:
-            log.info("BAN-SAFE | REST sıralı | max_open=%d gap=%.2fs", MAX_OPEN, API_MIN_GAP_SEC)
         self._bal: Optional[dict] = None
         self._bal_ts = 0.0
         self._bal_lock = asyncio.Lock()
@@ -540,9 +548,16 @@ class Exchange:
         self.n_pairs = 1
         self._bnb_usd = 0.0
         self.stats = DayStats.load()
-        self.stats.unlock_stale_gates()
         self.stopped = False
         self._quote_skip_log: Dict[str, float] = {}
+        self._stats_unlocked = False
+
+    def unlock_stats_once(self) -> None:
+        if self._stats_unlocked:
+            return
+        self.stats.unlock_stale_gates()
+        self._stats_unlocked = True
+        log.info("BAN-SAFE | REST sıralı | max_open=%d gap=%.2fs", MAX_OPEN, API_MIN_GAP_SEC)
 
     def quote_of(self, symbol: str) -> str:
         return symbol.split("/")[1].upper() if "/" in symbol else QUOTE
@@ -605,6 +620,7 @@ class Exchange:
             await api_pace()
             await self.run(self.rest.load_markets, False)
             clear_ban_flag()
+            self.unlock_stats_once()
             log.info(
                 "CANLI MM | BAN-SAFE markets=%d open=%d gap=%.2fs inflight≤%d book=%ds",
                 len(self.rest.markets),
@@ -1407,7 +1423,7 @@ class Slot:
 
     async def bal(self) -> None:
         now = time.time()
-        if now - self.last_bal_poll < 5.0:
+        if now - self.last_bal_poll < SLOT_BAL_MIN_SEC:
             return
         self.last_bal_poll = now
         b = await self.ex.balance()
@@ -1419,6 +1435,11 @@ class Slot:
 
     async def prime_fills(self) -> None:
         """Eski trade'leri saymadan işaretle — açılışta sahte AL/SAT + WR çökmesi olmasın."""
+        if SKIP_PRIME_FILLS:
+            # Açılışta 15× myTrades yağmuru yok; ilk fills turunda sadece işaretle
+            self._need_fill_prime = True
+            self.last_fill_poll = 0.0
+            return
         for t in await self.ex.trades(self.symbol, 20):
             tid = str(t.get("id") or "")
             if not tid:
@@ -1426,13 +1447,15 @@ class Slot:
             self.seen.add(tid)
             self.last_tid = tid
         self.last_fill_poll = time.time()
+        self._need_fill_prime = False
 
     async def fills(self) -> None:
         now = time.time()
         if now - self.last_fill_poll < FILL_POLL_SEC:
             return
         self.last_fill_poll = now
-        for t in await self.ex.trades(self.symbol, 12):
+        need_prime = bool(getattr(self, "_need_fill_prime", False))
+        for t in await self.ex.trades(self.symbol, 20 if need_prime else 12):
             tid = str(t.get("id") or "")
             if not tid or tid in self.seen:
                 continue
@@ -1440,6 +1463,8 @@ class Slot:
                 continue
             self.seen.add(tid)
             self.last_tid = tid
+            if need_prime:
+                continue
             side = t.get("side")
             amt = float(t.get("amount") or 0)
             px = float(t.get("price") or 0)
@@ -1493,6 +1518,8 @@ class Slot:
             await self.ex.balance(force=False)
             self.last_bal_poll = 0.0
             await self.bal()
+        if need_prime:
+            self._need_fill_prime = False
 
     def risk_ok(self) -> bool:
         eq = self.equity()
