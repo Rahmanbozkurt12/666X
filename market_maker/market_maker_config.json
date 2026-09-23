@@ -1,0 +1,44 @@
+{
+    "exchange": {
+        "api_key": "",
+        "api_secret": "",
+        "testnet": false,
+        "quote_asset": "USDT",
+        "symbols": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "DOGE/USDT",
+            "ADA/USDT",
+            "AVAX/USDT"
+        ]
+    },
+    "trading": {
+        "total_capital": 0.0,
+        "balance_slots": 8,
+        "split_live_balance": true,
+        "max_inventory_ratio": 0.9,
+        "max_drawdown_ratio": 0.05,
+        "base_spread_ticks": 4.0,
+        "volatility_multiplier": 4.0,
+        "inventory_skew_strength": 2.0,
+        "imbalance_skew_strength": 1.0,
+        "min_order_lifetime": 8.0,
+        "max_order_replace_freq": 12.0,
+        "min_quote_balance": 5.0
+    },
+    "risk": {
+        "use_avellaneda": true,
+        "risk_aversion": 0.05,
+        "time_horizon": 0.5
+    },
+    "fees": {
+        "maker_fee_rate": 0.001,
+        "taker_fee_rate": 0.001,
+        "fee_safety_mult": 1.5,
+        "min_edge_bps": 8.0,
+        "post_only": true
+    }
+}
