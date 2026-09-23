@@ -28,26 +28,31 @@ from solders.transaction import VersionedTransaction
 # =============================================================================
 # KEY — phantom_keys.json oku (Git'e koyma)
 # =============================================================================
-# phantom_keys.json örneği:
+# Aynı klasöre phantom_keys.json koy:
 # {
 #   "apiKey": "",
-#   "walletPublicKey": "Cztef...",
-#   "privateKey": "uzun_base58_KEY"
+#   "walletPublicKey": "ADRES",
+#   "privateKey": "UZUN_KEY"
 # }
-# apiKey bu botta kullanılmaz (boş bırakılabilir).
-SOLANA_PRIVATE_KEY = ""             # dosya yoksa buraya KEY
+SOLANA_PRIVATE_KEY = ""
 HELIUS_API_KEY = ""
 JUPITER_API_KEY = ""
+EXPECTED_PUBKEY = ""
 KEYS_PATH = Path(__file__).resolve().parent / "phantom_keys.json"
 
-SOLANA_PRIVATE_KEY = (os.environ.get("SOLANA_PRIVATE_KEY") or SOLANA_PRIVATE_KEY).strip()
-HELIUS_API_KEY = (os.environ.get("HELIUS_API_KEY") or HELIUS_API_KEY).strip()
-JUPITER_API_KEY = (os.environ.get("JUPITER_API_KEY") or JUPITER_API_KEY).strip()
-EXPECTED_PUBKEY = ""                # opsiyonel kontrol
+_env_pk = (os.environ.get("SOLANA_PRIVATE_KEY") or "").strip()
+_env_helius = (os.environ.get("HELIUS_API_KEY") or "").strip()
+_env_jup = (os.environ.get("JUPITER_API_KEY") or "").strip()
+if _env_pk:
+    SOLANA_PRIVATE_KEY = _env_pk
+if _env_helius:
+    HELIUS_API_KEY = _env_helius
+if _env_jup:
+    JUPITER_API_KEY = _env_jup
 
 
 def load_keys_file() -> None:
-    """phantom_keys.json → privateKey / apiKey alanlarını yükle."""
+    """phantom_keys.json → privateKey alanını yükle."""
     global SOLANA_PRIVATE_KEY, HELIUS_API_KEY, JUPITER_API_KEY, EXPECTED_PUBKEY
     if not KEYS_PATH.exists():
         return
