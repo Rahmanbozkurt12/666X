@@ -1,48 +1,44 @@
-# Phantom key → Jupiter AL/SAT bot
+# Phantom key → Jupiter likidite avcısı
 
-Phantom’da bot API key **yok**. Bot, Phantom’dan export ettiğin **private key** ile Jupiter swap imzalar. Sen sadece scripti açık bırakırsın.
+Bot **Phantom’a bağlanmaz**. Ayrı cüzdanın private key’i ile Jupiter’da AL/SAT yapar.
 
-## 1) Ayrı trading cüzdanı (zorunlu)
+## Ne yapar
 
-1. Phantom’da **yeni hesap** oluştur (ana seed’i bota verme).
-2. O hesaba biraz **SOL** at (gas + alım).
-3. **Settings → Security & Privacy → Export Private Key** → base58 kopyala.
+1. Solana’da **yeni + trending** havuzları tarar  
+2. **Pool adresini** on-chain kontrol eder  
+3. Likidite↑ + hacim↑ ise **girer** (Jupiter AL)  
+4. Satış rotası yoksa **girmez** (içeride kalmasın)  
+5. Mint/freeze authority varsa **atlar**  
+6. Havuz likiditesi zirveden düşünce **çıkar** (+ SL/TP/süre)  
+7. Round-trip **komisyon tamponu** (~%2.5) hesaba katılır  
 
-## 2) Kurulum
+## Kurulum (Phantom’dan key çıkmasa da olur)
 
 ```bash
 pip install requests solders base58
-export SOLANA_PRIVATE_KEY='phantom_export_base58'
-# önerilir (RPC ban azalsın):
+
+# 1) Bot cüzdanı üret
+python3 -c "from solders.keypair import Keypair; import base58; k=Keypair(); print('ADRES', k.pubkey()); print('KEY', base58.b58encode(bytes(k)).decode())"
+
+# 2) Phantom → Gönder → ADRES'e SOL yolla
+
+# 3) Çalıştır
+export SOLANA_PRIVATE_KEY='KEY'
+# önerilir:
 export HELIUS_API_KEY='...'
-```
-
-`phantom_jupiter_bot.py` içinde:
-
-- `DRY_RUN = True` → önce sadece quote/log (zincire gitmez)
-- `TOKENS` listesine mint ekle, `"enabled": True` yap
-- `buy_sol`, `take_profit_pct`, `stop_loss_pct` ayarla
-
-## 3) Çalıştır
-
-```bash
 python phantom_jupiter_bot.py
 ```
 
-Bot döngüde:
+Önce `DRY_RUN = True` bırak. Canlı için `False`.
 
-1. Jupiter’dan yol (route) alır  
-2. AL: SOL → token  
-3. Fiyat `take_profit` / `stop_loss`’a gelince SAT: token → SOL  
+## Ayarlar (dosya içi)
 
-## 4) Canlı
+| Ayar | Anlam |
+|------|--------|
+| `BUY_SOL` | Her AL miktarı |
+| `MIN_LIQ_USD` | Min havuz likiditesi |
+| `LIQ_DROP_FROM_PEAK_PCT` | Zirveden düşünce SAT |
+| `ROUNDTRIP_FEE_PCT` | Komisyon tamponu |
+| `MAX_OPEN` | Aynı anda max coin |
 
-1. `DRY_RUN = False`
-2. Küçük `buy_sol` ile dene
-3. Terminali açık bırak (veya `tmux` / `screen`)
-
-## Güvenlik
-
-- Ana Phantom seed’ini asla scripte koyma
-- Key’i Git’e commit etme
-- Sadece o trading cüzdanına koyduğun SOL risk altında
+KEY’i Git’e / chat’e koyma.
