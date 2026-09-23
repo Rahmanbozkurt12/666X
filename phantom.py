@@ -45,23 +45,23 @@ if _env_helius:
 # STRATEJİ — $0.50 AL → küçük kârda SAT (hep küçük kâr)
 # =============================================================================
 DRY_RUN = True                      # Canlı için False yap
-RESET_STATE_ON_START = False        # True yaparsan her açılışta poz siler
-BUY_USD = 0.50                      # her giriş
-SELL_USD = 0.56                     # ~%12 kâr → SAT (komisyon sonrası küçük net)
-STOP_LOSS_USD = 0.40                # ~%20 zarar → çık
-QUICK_TAKE_MIN = 3.0                # 3 dk sonra ufak yeşil varsa sat
-QUICK_TAKE_USD = 0.52               # 3 dk+ ve ≥$0.52 → sat (hareketli)
-MAX_OPEN = 5
-MIN_SOL_RESERVE_USD = 0.05          # küçük cüzdan için
-SLIPPAGE_BPS = 200
+RESET_STATE_ON_START = False
+BUY_USD = 0.10                      # yeni havuza giriş
+SELL_USD = 0.20                     # +$0.10 kâr hedefi
+STOP_LOSS_USD = 0.07                # hızlı kes (~-%30)
+QUICK_TAKE_SEC = 10.0               # 10 sn sonra ufak yeşil varsa sat
+QUICK_TAKE_USD = 0.11               # 10 sn+ ve ≥$0.11 → sat (komisyon üstü min)
+MAX_OPEN = 15
+MIN_SOL_RESERVE_USD = 0.05
+SLIPPAGE_BPS = 300                  # yeni havuz kaygan
 PRIORITY_FEE = "auto"
-ROUNDTRIP_FEE_USD = 0.04
-MAX_PRICE_IMPACT_PCT = 2.5
+ROUNDTRIP_FEE_USD = 0.02            # $0.10 işlem için ince tampon
+MAX_PRICE_IMPACT_PCT = 8.0          # yeni havuz — impact gevşek
 
-# Havuz kalitesi
-MIN_LIQ_USD = 8_000.0
-MAX_LIQ_USD = 5_000_000.0
-MIN_VOL_H1_USD = 1_500.0
+# Likidite şartı YOK (yeni açılan her havuz)
+MIN_LIQ_USD = 0.0
+MAX_LIQ_USD = 50_000_000.0
+MIN_VOL_H1_USD = 0.0
 ALLOWED_DEX = {
     "raydium",
     "raydium-clmm",
@@ -70,18 +70,19 @@ ALLOWED_DEX = {
     "pumpswap",
     "meteora",
     "orca",
+    "pumpfun",
 }
-MAX_PAIR_AGE_MIN = 3 * 24 * 60
-MIN_PAIR_AGE_SEC = 20
+MAX_PAIR_AGE_MIN = 5.0              # sadece son 5 dk açılan
+MIN_PAIR_AGE_SEC = 0                # açıldığı an gir
 REQUIRE_JUPITER_SELL_ROUTE = True
 SKIP_IF_MINT_AUTHORITY = False
-SKIP_IF_FREEZE_AUTHORITY = True
+SKIP_IF_FREEZE_AUTHORITY = False
 REQUIRE_SOL_QUOTE = True
 
-POLL_SEC = 6.0                      # satış kontrolü sık
-SCAN_SEC = 12.0
-MAX_HOLD_MIN = 25                   # 25 dk'da mutlaka gözden geçir/çık
-RPC_MIN_GAP_SEC = 0.25
+POLL_SEC = 3.0                      # 10 sn satış için sık kontrol
+SCAN_SEC = 5.0                      # yeni havuz avı sık
+MAX_HOLD_MIN = 2.0                  # en fazla ~2 dk tut
+RPC_MIN_GAP_SEC = 0.2
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 JUP_BASE = "https://lite-api.jup.ag/swap/v1"
@@ -457,36 +458,42 @@ def dexscreener_pair(pool: str) -> Optional[dict]:
 def enrich(row: dict) -> tuple[Optional[dict], str]:
     """(aday, skip_nedeni)."""
     pool = row["pool"]
-    # Public RPC'yi her pool'da yorma — DexScreener yeterli
     ds = dexscreener_pair(pool)
     base_mint = row.get("base_mint") or ""
     symbol = (row.get("name") or "?").split("/")[0].strip()
     liq = float(row.get("reserve_usd") or 0)
     price_usd = 0.0
     created_ms = None
-    vol_h1 = float(row.get("vol_h1") or 0)
-    dex = ""
-    if not ds:
-        return None, "dexscreener_yok"
-    liq = float(((ds.get("liquidity") or {}).get("usd")) or liq or 0)
-    base_mint = (ds.get("baseToken") or {}).get("address") or base_mint
-    symbol = (ds.get("baseToken") or {}).get("symbol") or symbol
-    price_usd = float(ds.get("priceUsd") or 0)
-    created_ms = ds.get("pairCreatedAt")
-    vol_h1 = float(((ds.get("volume") or {}).get("h1")) or vol_h1 or 0)
-    dex = str(ds.get("dexId") or "").lower()
-    quote = ((ds.get("quoteToken") or {}).get("address") or "").strip()
-    if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
-        return None, "quote_sol_degil"
-    if ALLOWED_DEX and dex not in ALLOWED_DEX:
-        return None, f"dex={dex}"
-    if not base_mint or base_mint == SOL_MINT:
+    vol_h1 = float(row.get("vol_h1") or row.get("vol_m5") or 0)
+    dex = "unknown"
+
+    if ds:
+        liq = float(((ds.get("liquidity") or {}).get("usd")) or liq or 0)
+        base_mint = (ds.get("baseToken") or {}).get("address") or base_mint
+        symbol = (ds.get("baseToken") or {}).get("symbol") or symbol
+        price_usd = float(ds.get("priceUsd") or 0)
+        created_ms = ds.get("pairCreatedAt")
+        vol_h1 = float(((ds.get("volume") or {}).get("h1")) or vol_h1 or 0)
+        dex = str(ds.get("dexId") or "").lower() or dex
+        quote = ((ds.get("quoteToken") or {}).get("address") or "").strip()
+        if REQUIRE_SOL_QUOTE and quote and quote != SOL_MINT:
+            return None, "quote_sol_degil"
+        if ALLOWED_DEX and dex not in ALLOWED_DEX and dex != "unknown":
+            return None, f"dex={dex}"
+    else:
+        # Çok yeni havuz — DexScreener yoksa GT mint ile devam
+        name = (row.get("name") or "").upper()
+        if REQUIRE_SOL_QUOTE and "/ SOL" not in name and not name.endswith("/SOL"):
+            return None, "dexscreener_yok"
+        dex = "new"
+
+    if not base_mint or base_mint == SOL_MINT or len(base_mint) < 32:
         return None, "mint_yok"
     if liq < MIN_LIQ_USD:
         return None, f"liq=${liq:.0f}<{MIN_LIQ_USD:.0f}"
     if liq > MAX_LIQ_USD:
         return None, "liq_cok_buyuk"
-    if vol_h1 < MIN_VOL_H1_USD:
+    if MIN_VOL_H1_USD > 0 and vol_h1 < MIN_VOL_H1_USD:
         return None, f"vol1h=${vol_h1:.0f}<{MIN_VOL_H1_USD:.0f}"
 
     age_min = None
@@ -503,6 +510,9 @@ def enrich(row: dict) -> tuple[Optional[dict], str]:
             return None, "cok_taze"
         if age_min > MAX_PAIR_AGE_MIN:
             return None, "cok_eski"
+    elif "new_pools" not in str(row.get("source") or ""):
+        # yaşı yok ve new değilse atla
+        return None, "yas_yok"
 
     return {
         **row,
@@ -512,7 +522,7 @@ def enrich(row: dict) -> tuple[Optional[dict], str]:
         "vol_h1": vol_h1,
         "dex": dex,
         "price_usd": price_usd,
-        "age_min": age_min,
+        "age_min": age_min if age_min is not None else 0.0,
     }, "ok"
 
 
@@ -706,13 +716,16 @@ def manage_positions(kp: Keypair, st: State) -> None:
             st.save()
             continue
         held = (time.time() - pos.entry_ts) / 60.0
+        held_sec = time.time() - pos.entry_ts
         log(
             f"POS {pos.symbol} ≈${value_usd:.2f} (AL ${BUY_USD:.2f} → SAT ${SELL_USD:.2f} / SL ${STOP_LOSS_USD:.2f}) "
-            f"hold={held:.1f}m"
+            f"hold={held_sec:.0f}s"
         )
         reason = None
         if value_usd >= SELL_USD:
-            reason = f"KAR ${value_usd:.2f}"
+            reason = f"KAR +${value_usd - BUY_USD:.2f}"
+        elif held_sec >= QUICK_TAKE_SEC and value_usd >= QUICK_TAKE_USD:
+            reason = f"10s_KAR ${value_usd:.2f}"
         elif value_usd > 0 and value_usd <= STOP_LOSS_USD:
             reason = f"SL ${value_usd:.2f}"
         elif held >= MAX_HOLD_MIN:
